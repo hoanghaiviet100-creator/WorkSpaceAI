@@ -1,7 +1,7 @@
 import csv
 import io
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from rank_bm25 import BM25Okapi
 from backend.core.schemas import DocumentChunk
 
@@ -94,6 +94,39 @@ class WorkspaceRepository:
             key = (c.doc_id, c.page_number)
             lookup[key] = (lookup.get(key, "") + " " + c.text).strip()
         return lookup
+
+    def get_document_chunks(self, doc_id: str) -> List[DocumentChunk]:
+        """Returns all chunks belonging to a document by doc_id or doc_name."""
+        target = doc_id.lower().strip()
+        return [
+            c for c in self.chunks
+            if c.doc_id.lower().strip() == target or c.doc_name.lower().strip() == target
+        ]
+
+    def list_documents(self) -> List[Dict[str, Any]]:
+        """Returns metadata for all documents ingested in the workspace."""
+        doc_map: Dict[str, Dict[str, Any]] = {}
+        for c in self.chunks:
+            d_id = c.doc_id
+            if d_id not in doc_map:
+                doc_map[d_id] = {
+                    "doc_id": c.doc_id,
+                    "doc_name": c.doc_name,
+                    "chunk_count": 0,
+                    "pages": set(),
+                }
+            doc_map[d_id]["chunk_count"] += 1
+            doc_map[d_id]["pages"].add(c.page_number)
+
+        result: List[Dict[str, Any]] = []
+        for d in doc_map.values():
+            result.append({
+                "doc_id": d["doc_id"],
+                "doc_name": d["doc_name"],
+                "chunk_count": d["chunk_count"],
+                "page_count": len(d["pages"]),
+            })
+        return result
 
     def seed_demo_workspace(self) -> None:
         """Seeds default CSC10014 project brief and workspace data for local evaluation."""

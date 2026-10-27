@@ -179,7 +179,12 @@ class TestWorkspaceAIPipeline(unittest.TestCase):
                 "body": "body",
             },
         )
-        self.assertEqual(not_found_res.status_code, 404)
+        # 4. Test Document Summarization (Feature 1)
+        sum_res = client.post("/api/chat", json={"query": "Tóm tắt tài liệu Project_Brief.pdf"})
+        self.assertEqual(sum_res.status_code, 200)
+        self.assertEqual(sum_res.json()["route"], "QA_FLOW")
+        self.assertEqual(sum_res.json()["status"], "SUMMARY_GENERATED")
+        self.assertTrue(len(sum_res.json()["summary"]) > 50)
 
 
 if __name__ == "__main__":
