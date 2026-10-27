@@ -1,10 +1,18 @@
 import csv
 import io
 import json
+from pathlib import Path
 import re
-from typing import Dict, List, Tuple
+import sys
+from typing import Dict, List, Optional, Tuple
+
+# Ensure project root directory is in sys.path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from rank_bm25 import BM25Okapi
-from backend.schemas import DocumentChunk
+from backend.core.schemas import DocumentChunk
 
 
 class HybridWorkspaceIndex:
@@ -16,7 +24,7 @@ class HybridWorkspaceIndex:
 
     def __init__(self) -> None:
         self.chunks: List[DocumentChunk] = []
-        self._bm25: BM25Okapi | None = None
+        self._bm25: Optional[BM25Okapi] = None
 
     def ingest_text_document(self, doc_id: str, doc_name: str, pages: List[Tuple[int, str]]) -> int:
         added = 0
@@ -33,7 +41,7 @@ class HybridWorkspaceIndex:
                 )
                 self.chunks.append(chunk)
                 added += 1
-        self._rebuild_index()
+            self._rebuild_index()
         return added
 
     def ingest_csv_tasks(self, doc_id: str, doc_name: str, csv_content: str) -> int:
@@ -91,3 +99,34 @@ class HybridWorkspaceIndex:
             key = (c.doc_id, c.page_number)
             lookup[key] = (lookup.get(key, "") + " " + c.text).strip()
         return lookup
+
+    def seed_demo_workspace(self) -> None:
+        """Seeds default CSC10014 project brief and workspace data for local evaluation."""
+        self.ingest_text_document(
+            doc_id="Project_Brief.pdf",
+            doc_name="Project_Brief.pdf",
+            pages=[
+                (
+                    3,
+                    "Minimum System Requirements: R1 Problem boundary, R2 Deterministic capability, "
+                    "R3 Data retrieval capability, R4 AI-enabled capability, R5 Routing orchestration.",
+                ),
+                (
+                    6,
+                    "Submission Package: 01 Engineering Report (12-18 pages recommended), "
+                    "02 Source Repository and Demo, 03 Architecture Pack, 04 Evaluation Pack.",
+                ),
+            ],
+        )
+
+
+# Backward compatibility aliases
+WorkspaceRepository = HybridWorkspaceIndex
+workspace_repository = HybridWorkspaceIndex()
+
+__all__ = [
+    "HybridWorkspaceIndex",
+    "WorkspaceRepository",
+    "workspace_repository",
+]
+

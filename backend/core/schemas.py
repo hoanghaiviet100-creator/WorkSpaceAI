@@ -102,6 +102,13 @@ class EmailDraftPayload(BaseModel):
     payload_hash: str = ""
 
 
+class EmailApproveRequest(BaseModel):
+    recipient_email: str
+    subject: str
+    body: str
+    user_confirmed: bool = True
+
+
 class UserRequest(BaseModel):
     query: str
     selected_doc_ids: List[str] = Field(default_factory=list)

@@ -1,13 +1,13 @@
 from datetime import date
 import unittest
-from backend.Algorithms_R2 import (
+from backend.algorithms.citation_verifier import verify_citations
+from backend.algorithms.email_state_machine import (
     SecurityError,
     approve_and_verify_email_send,
     prepare_draft_for_approval,
-    reconcile_requirements_and_tasks,
-    verify_citations,
 )
-from backend.schemas import (
+from backend.algorithms.reconciliation import reconcile_requirements_and_tasks
+from backend.core.schemas import (
     EmailDraftPayload,
     GeneratedClaim,
     RequirementItem,
@@ -15,7 +15,7 @@ from backend.schemas import (
     TaskRecord,
     UserRequest,
 )
-from backend.Understanding_Guardrails import route_user_request
+from backend.services.router_service import route_user_request
 
 
 class TestWorkspaceAIPipeline(unittest.TestCase):
@@ -122,6 +122,66 @@ class TestWorkspaceAIPipeline(unittest.TestCase):
         route_inj, _ = route_user_request(injected_req)
         self.assertEqual(route_inj, RouteType.REJECTED_SAFEGUARD)
 
+    def test_api_endpoints_and_services(self):
+        from fastapi.testclient import TestClient
+        from backend.main import app
+        from backend.repositories.workspace_repository import workspace_repository
+        from backend.core.config import settings
+
+        settings.email_dispatch_mode = "local_mock"
+        workspace_repository.seed_demo_workspace()
+        client = TestClient(app)
+
+
+        # 1. Test QA endpoint
+        qa_res = client.post("/api/chat", json={"query": "Submission Package"})
+        self.assertEqual(qa_res.status_code, 200)
+        self.assertEqual(qa_res.json()["route"], "QA_FLOW")
+        self.assertEqual(qa_res.json()["status"], "ANSWER_VERIFIED")
+
+        # 2. Test Reconcile endpoint
+        rec_res = client.post("/api/chat", json={"query": "reconcile requirements and tasks"})
+        self.assertEqual(rec_res.status_code, 200)
+        self.assertEqual(rec_res.json()["route"], "RECONCILE_FLOW")
+        self.assertEqual(rec_res.json()["status"], "RECONCILIATION_COMPLETE")
+
+        # 3. Test Email flow & approval endpoint
+        email_res = client.post(
+            "/api/chat",
+            json={
+                "query": "draft an email to lecturer@hcmus.edu.vn about progress update",
+                "recipient_email": "lecturer@hcmus.edu.vn",
+            },
+        )
+        self.assertEqual(email_res.status_code, 200)
+        draft = email_res.json()["draft"]
+        self.assertEqual(draft["state"], "PENDING_APPROVAL")
+
+        # Approve valid draft
+        approve_res = client.post(
+            f"/api/email/approve/{draft['draft_id']}",
+            params={
+                "recipient_email": draft["recipient_email"],
+                "subject": draft["subject"],
+                "body": draft["body"],
+                "user_confirmed": True,
+            },
+        )
+        self.assertEqual(approve_res.status_code, 200)
+        self.assertEqual(approve_res.json()["status"], "SENT")
+
+        # Approve non-existent draft
+        not_found_res = client.post(
+            "/api/email/approve/non_existent_id",
+            params={
+                "recipient_email": "test@hcmus.edu.vn",
+                "subject": "sub",
+                "body": "body",
+            },
+        )
+        self.assertEqual(not_found_res.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()
+
