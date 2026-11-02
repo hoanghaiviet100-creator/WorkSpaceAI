@@ -18,12 +18,16 @@ htmlcov/
 .vscode/
 .idea/
 
-# Temporary files
+# Temporary files & Logs
 *.log
 *.tmp
+
+# Workspace data and generated reports
+report/
+reports/
+.workspace_data/
 
 # Deployment / Environment variables
 .env
 .env.*.local
 .DS_Store
-.env.example

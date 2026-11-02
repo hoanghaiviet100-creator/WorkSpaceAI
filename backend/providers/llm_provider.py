@@ -1,17 +1,66 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
+
 from backend.core.config import settings
-from backend.core.guardrails import wrap_untrusted_chunk
 from backend.core.schemas import DocumentChunk, GeneratedClaim
+from backend.providers.prompts import (
+    build_email_prompt,
+    build_qa_prompt,
+    build_summary_prompt,
+)
+
+
+def _safe_parse_json(text: str) -> Optional[dict]:
+    """
+    Safely extracts and parses JSON object from LLM response,
+    stripping markdown fences or trailing conversational text.
+    """
+    if not text or not text.strip():
+        return None
+
+    cleaned = text.strip()
+
+    # Strip markdown code blocks
+    if "```json" in cleaned:
+        match = re.search(r"```json\s*(.*?)\s*```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+    elif "```" in cleaned:
+        match = re.search(r"```\s*(.*?)\s*```", cleaned, re.DOTALL)
+        if match:
+            cleaned = match.group(1).strip()
+
+    # Try direct parse
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    # Find leftmost { and rightmost }
+    start = cleaned.find("{")
+    end = cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        candidate = cleaned[start : end + 1]
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+
+    return None
 
 
 class LLMProvider:
     """
     R4 AI Capability with Local-First Strategy Pattern:
-    Supports 100% local Ollama, Gemini API, or deterministic Mock mode for automated testing.
+    Supports 100% local Ollama (qwen2.5:7b), Gemini API, or deterministic Mock mode.
     """
 
     def is_ollama_online(self) -> bool:
@@ -19,7 +68,7 @@ class LLMProvider:
         try:
             resp = httpx.get(
                 f"{settings.ollama_base_url}/api/tags",
-                timeout=httpx.Timeout(0.8, connect=0.5),
+                timeout=httpx.Timeout(1.0, connect=0.5),
             )
             return resp.status_code == 200
         except Exception:
@@ -30,27 +79,27 @@ class LLMProvider:
         key = (settings.gemini_api_key or "").strip()
         return bool(key and key != "your_gemini_api_key_here" and len(key) > 10)
 
-    def call_gemini(self, prompt: str) -> Optional[str]:
-        """Calls Google Gemini REST API with explicit timeout and safety wrappers."""
+    def call_gemini(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
+        """Calls Google Gemini REST API with explicit timeout and safety parameters."""
         if not self.is_gemini_configured():
             return None
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}"
         )
+        gen_config: Dict[str, Any] = {
+            "temperature": 0.1,
+            "maxOutputTokens": 2048,
+        }
+        if enforce_json:
+            gen_config["responseMimeType"] = "application/json"
+
         payload = {
-            "contents": [
-                {
-                    "parts": [{"text": prompt}]
-                }
-            ],
-            "generationConfig": {
-                "temperature": 0.2,
-                "maxOutputTokens": 1024,
-            },
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": gen_config,
         }
         try:
-            resp = httpx.post(url, json=payload, timeout=httpx.Timeout(20.0, connect=3.0))
+            resp = httpx.post(url, json=payload, timeout=httpx.Timeout(30.0, connect=3.0))
             if resp.status_code == 200:
                 data = resp.json()
                 candidates = data.get("candidates", [])
@@ -62,15 +111,37 @@ class LLMProvider:
             pass
         return None
 
-    def call_ollama(self, prompt: str) -> Optional[str]:
-        """Calls local Ollama instance if online."""
+    def call_ollama(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
+        """
+        Calls local Ollama instance with qwen2.5:7b optimization options:
+        - num_ctx: 8192 (prevents context truncation)
+        - temperature: 0.1 (strict factual grounding)
+        - top_p: 0.85
+        - repeat_penalty: 1.1
+        - format: json (when requested)
+        - timeout: 60.0s
+        """
         if not self.is_ollama_online():
             return None
+        payload: Dict[str, Any] = {
+            "model": settings.ollama_model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {
+                "num_ctx": 8192,
+                "temperature": 0.1,
+                "top_p": 0.85,
+                "repeat_penalty": 1.1,
+            },
+        }
+        if enforce_json:
+            payload["format"] = "json"
+
         try:
             resp = httpx.post(
                 f"{settings.ollama_base_url}/api/generate",
-                json={"model": settings.ollama_model, "prompt": prompt, "stream": False},
-                timeout=httpx.Timeout(20.0, connect=1.0),
+                json=payload,
+                timeout=httpx.Timeout(60.0, connect=2.0),
             )
             if resp.status_code == 200:
                 return resp.json().get("response", "").strip()
@@ -148,12 +219,17 @@ class LLMProvider:
         chunks: List[DocumentChunk],
         conversation_history: Optional[List[Dict[str, str]]] = None,
     ) -> List[GeneratedClaim]:
+        """
+        Generates grounded claims with exact citations and line locators.
+        Uses structured JSON prompting for Ollama qwen2.5:7b / Gemini.
+        Falls back cleanly to deterministic synthesis in offline or mock mode.
+        """
         if not chunks:
             return []
 
         top = chunks[0]
 
-        # 1. If mock mode explicitly set
+        # 1. Deterministic Mock mode for automated tests
         if settings.llm_provider == "mock":
             synth_text = self.synthesize_smart_answer(query, chunks)
             return [
@@ -169,56 +245,54 @@ class LLMProvider:
                 )
             ]
 
-        context_block = "\n\n".join(
-            wrap_untrusted_chunk(c.doc_name, c.page_number, c.text, c.start_line, c.end_line)
-            for c in chunks
-        )
+        prompt = build_qa_prompt(query, chunks, conversation_history)
+        raw_response: Optional[str] = None
 
-        history_block = ""
-        if conversation_history:
-            recent_turns = conversation_history[-4:]
-            formatted_turns = [
-                f"{'Người dùng' if t.get('role') == 'user' else 'Trợ lý'}: {t.get('content', '')}"
-                for t in recent_turns if t.get("content")
-            ]
-            if formatted_turns:
-                history_block = "Lịch sử hội thoại gần đây:\n" + "\n".join(formatted_turns) + "\n\n"
-
-        prompt = (
-            "Bạn là trợ lý học thuật WorkspaceAI (môn học CSC10014). "
-            "Hãy trả lời câu hỏi của người dùng một cách chính xác, lịch sự, rõ ràng bằng tiếng Việt. "
-            "CHỈ sử dụng thông tin trong dữ liệu tài liệu bên dưới. "
-            "Mỗi luận điểm phải có trích dẫn rõ nguồn [Tên tài liệu, Trang X, Dòng Y-Z]. "
-            "Nếu trong tài liệu không có thông tin, hãy nói rõ là tài liệu không đề cập.\n\n"
-            f"{context_block}\n\n"
-            f"{history_block}"
-            f"Câu hỏi: {query}"
-        )
-
-        # 2. Try Gemini API if configured
-        if settings.llm_provider == "gemini" or self.is_gemini_configured():
-            gemini_ans = self.call_gemini(prompt)
-            if gemini_ans:
-                return [
-                    GeneratedClaim(
-                        claim_text=gemini_ans,
-                        cited_doc_id=top.doc_id,
-                        cited_page=top.page_number,
-                        cited_start_line=top.start_line,
-                        cited_end_line=top.end_line,
-                        doc_version=top.doc_version,
-                        doc_hash=top.doc_hash,
-                        evidence_quote=top.text[:120],
-                    )
-                ]
-
-        # 3. Try Local Ollama if configured
+        # 2. Try Local Ollama if configured
         if settings.llm_provider == "ollama" and self.is_ollama_online():
-            ollama_ans = self.call_ollama(prompt)
-            if ollama_ans:
+            raw_response = self.call_ollama(prompt, enforce_json=True)
+
+        # 3. Try Gemini API if configured
+        if not raw_response and (settings.llm_provider == "gemini" or self.is_gemini_configured()):
+            raw_response = self.call_gemini(prompt, enforce_json=True)
+
+        # 4. Parse Structured JSON response if available
+        if raw_response:
+            parsed = _safe_parse_json(raw_response)
+            if parsed and isinstance(parsed, dict) and "answer" in parsed:
+                answer_text = str(parsed.get("answer", "")).strip()
+                raw_cits = parsed.get("citations", [])
+
+                claims: List[GeneratedClaim] = []
+                if isinstance(raw_cits, list) and raw_cits:
+                    for cit in raw_cits:
+                        if isinstance(cit, dict):
+                            doc_id = str(cit.get("doc_id", top.doc_id)).strip()
+                            page = int(cit.get("page", top.page_number))
+                            start_l = int(cit.get("line_start", top.start_line or 1))
+                            end_l = int(cit.get("line_end", top.end_line or start_l))
+                            excerpt = str(cit.get("excerpt", "")).strip()
+
+                            claims.append(
+                                GeneratedClaim(
+                                    claim_text=answer_text,
+                                    cited_doc_id=doc_id,
+                                    cited_page=page,
+                                    cited_start_line=start_l,
+                                    cited_end_line=end_l,
+                                    doc_version=top.doc_version,
+                                    doc_hash=top.doc_hash,
+                                    evidence_quote=excerpt or top.text[:120],
+                                )
+                            )
+
+                if claims:
+                    return claims
+
+                # If no citations in list, create claim from answer and top chunk
                 return [
                     GeneratedClaim(
-                        claim_text=ollama_ans,
+                        claim_text=answer_text,
                         cited_doc_id=top.doc_id,
                         cited_page=top.page_number,
                         cited_start_line=top.start_line,
@@ -229,7 +303,22 @@ class LLMProvider:
                     )
                 ]
 
-        # 4. Smart Offline Synthesis Fallback
+            # If raw response wasn't JSON, use raw text directly
+            if raw_response.strip():
+                return [
+                    GeneratedClaim(
+                        claim_text=raw_response.strip(),
+                        cited_doc_id=top.doc_id,
+                        cited_page=top.page_number,
+                        cited_start_line=top.start_line,
+                        cited_end_line=top.end_line,
+                        doc_version=top.doc_version,
+                        doc_hash=top.doc_hash,
+                        evidence_quote=top.text[:120],
+                    )
+                ]
+
+        # 5. Smart Offline Synthesis Fallback
         smart_text = self.synthesize_smart_answer(query, chunks)
         return [
             GeneratedClaim(
@@ -246,31 +335,12 @@ class LLMProvider:
 
     def generate_summary(self, doc_name: str, chunks: List[DocumentChunk]) -> str:
         """
-        Generates a comprehensive, highly-structured executive summary of a document
-        using the active LLM or deterministic fallback synthesis.
+        Generates a comprehensive executive summary using active LLM or deterministic fallback.
         """
         if not chunks:
             return f"Tài liệu `{doc_name}` hiện chưa có nội dung văn bản nào để tóm tắt."
 
-        combined_text = "\n\n".join(f"[Trang {c.page_number}]: {c.text}" for c in chunks)
-
-        # 1. Prompt for LLM if available
-        prompt = (
-            f"Bạn là chuyên gia phân tích tài liệu học thuật WorkspaceAI.\n"
-            f"Dưới đây là toàn bộ nội dung trích xuất từ tài liệu '{doc_name}'.\n"
-            f"Hãy tạo bản tóm tắt tài liệu súc tích, chuyên nghiệp bằng tiếng Việt theo định dạng Markdown:\n\n"
-            f"### 📄 Tóm tắt Tài liệu: {doc_name}\n"
-            f"#### 1. 🎯 Mục tiêu & Tổng quan\n"
-            f"(Mô tả tóm tắt mục tiêu chính của tài liệu)\n\n"
-            f"#### 2. 📌 Các Yêu cầu & Nội dung Cốt lõi\n"
-            f"(Danh sách các yêu cầu kỹ thuật, mốc công việc chính)\n\n"
-            f"#### 3. ⏱️ Mốc Thời hạn & Quy định Nộp bài\n"
-            f"(Các thông tin về deadline, thành phần hồ sơ nếu có)\n\n"
-            f"#### 4. 💡 Lưu ý Quan trọng cho Nhóm Thực hiện\n"
-            f"(Lời khuyên hoặc lưu ý quan trọng trích từ tài liệu)\n\n"
-            f"Nội dung tài liệu:\n"
-            f"<untrusted_document_data>\n{combined_text}\n</untrusted_document_data>"
-        )
+        prompt = build_summary_prompt(doc_name, chunks)
 
         if settings.llm_provider == "gemini" or self.is_gemini_configured():
             ans = self.call_gemini(prompt)
@@ -320,18 +390,14 @@ class LLMProvider:
                 f"- Hãy sử dụng tính năng **'Đối soát Đề bài vs Taskboard'** để phát hiện ngay các nhiệm vụ trễ hạn hoặc xung đột ngày bàn giao!"
             )
         else:
-            # Dynamic extractive summary for arbitrary user-uploaded documents
             pages = sorted({c.page_number for c in chunks})
             page_summary = f"{len(pages)} trang" if len(pages) > 1 else f"1 trang (Trang {pages[0] if pages else 1})"
-            
-            # Extract key introductory and body excerpts
             first_chunk_text = chunks[0].text.strip()
             intro_lines = [l.strip() for l in first_chunk_text.splitlines() if l.strip()]
             intro = "\n".join(intro_lines[:3]) if intro_lines else first_chunk_text[:200]
 
-            # Key excerpts across chunks
             excerpts = []
-            for i, c in enumerate(chunks[:5], start=1):
+            for c in chunks[:5]:
                 clean_lines = [l.strip() for l in c.text.splitlines() if l.strip()]
                 lead = clean_lines[0] if clean_lines else c.text[:120]
                 loc = f"Trang {c.page_number}"
@@ -360,46 +426,26 @@ class LLMProvider:
         recipient_email: Optional[str] = None,
     ) -> Tuple[str, str]:
         """
-        Generates context-aware email subject and body for any free-form topic,
-        leveraging workspace retrieved documents and LLM (Ollama/Gemini/Smart Context Generator).
+        Generates context-aware email subject and body leveraging workspace context.
         """
-        context_str = "\n".join(f"- [{c.doc_name} p.{c.page_number}]: {c.text}" for c in chunks)
+        prompt = build_email_prompt(query, chunks, recipient_email)
 
         # 1. Ollama Provider
-        if settings.llm_provider == "ollama":
+        if settings.llm_provider == "ollama" and self.is_ollama_online():
             try:
-                prompt = (
-                    "Bạn là trợ lý ảo hỗ trợ soạn thảo email học thuật cho đồ án môn học CSC10014 (WorkspaceAI).\n"
-                    f"Yêu cầu của người dùng: \"{query}\"\n"
-                    f"Người nhận dự kiến: {recipient_email or 'Giảng viên'}\n"
-                    f"Dữ liệu liên quan từ workspace:\n{context_str}\n\n"
-                    "Hãy tạo 1 Tiêu đề (Subject) và Nội dung email (Body) bằng tiếng Việt thật trang trọng, lịch sự và rõ ràng.\n"
-                    "Định dạng kết quả trả về CHÍNH XÁC theo cấu trúc sau:\n"
-                    "SUBJECT: <tiêu đề bắt đầu bằng [CSC10014]>\n"
-                    "BODY:\n"
-                    "<nội dung email có lời chào, nội dung chi tiết, lời cảm ơn và chữ ký Nhóm sinh viên CSC10014>"
-                )
-                resp = httpx.post(
-                    f"{settings.ollama_base_url}/api/generate",
-                    json={"model": settings.ollama_model, "prompt": prompt, "stream": False},
-                    timeout=httpx.Timeout(15.0, connect=1.5),
-                )
-
-                if resp.status_code == 200:
-                    text = resp.json().get("response", "").strip()
-                    if "SUBJECT:" in text and "BODY:" in text:
-                        parts = text.split("BODY:", 1)
-                        subj = parts[0].replace("SUBJECT:", "").strip()
-                        body = parts[1].strip()
-                        if subj and body:
-                            return subj, body
+                resp_text = self.call_ollama(prompt)
+                if resp_text and "SUBJECT:" in resp_text and "BODY:" in resp_text:
+                    parts = resp_text.split("BODY:", 1)
+                    subj = parts[0].replace("SUBJECT:", "").strip()
+                    body = parts[1].strip()
+                    if subj and body:
+                        return subj, body
             except Exception:
-                pass  # Fallback to smart contextual generator
+                pass
 
-        # 2. Smart Contextual Generator (Deterministic & Context-Aware across all free topics)
+        # 2. Smart Contextual Generator fallback
         q_lower = query.lower()
 
-        # Topic A: Dời deadline / Xin gia hạn / Hoãn nộp bài
         if any(w in q_lower for w in ["deadline", "gia hạn", "dời", "hoãn", "lùi", "thời hạn", "trễ"]):
             subject = "[CSC10014] Đơn xin gia hạn thời hạn nộp bài tập / đồ án"
             body = (
@@ -418,7 +464,6 @@ class LLMProvider:
             )
             return subject, body
 
-        # Topic B: Hỏi điểm / Phúc khảo / Đánh giá môn học
         if any(w in q_lower for w in ["điểm", "kết quả", "phúc khảo", "grade", "score", "nhận xét", "feedback"]):
             subject = "[CSC10014] Thắc mắc & Xin phản hồi đánh giá đồ án môn học"
             body = (
@@ -435,7 +480,6 @@ class LLMProvider:
             )
             return subject, body
 
-        # Topic C: Báo cáo liên quan đến Task cụ thể (ví dụ: T-01, T-02, v.v.)
         task_match = re.search(r"t-0[1-9]", q_lower)
         if task_match:
             task_id = task_match.group(0).upper()
@@ -453,7 +497,6 @@ class LLMProvider:
             )
             return subject, body
 
-        # Topic D: Báo cáo tiến độ chung
         if any(w in q_lower for w in ["tiến độ", "báo cáo", "progress", "update", "deliverable"]):
             subject = "[CSC10014] Báo cáo tiến độ đồ án WorkspaceAI"
             body = (
@@ -469,7 +512,6 @@ class LLMProvider:
             )
             return subject, body
 
-        # Topic E: Chủ đề tự do bất kỳ (Free-form topic)
         clean_topic = re.sub(
             r"^(soạn mail|soạn thư|viết mail|viết thư|gửi mail|draft email|draft an email|gửi thư|nháp mail|hãy soạn email|hãy soạn mail)\s*",
             "",
@@ -496,4 +538,3 @@ class LLMProvider:
 
 # Singleton instance for application access
 llm_provider = LLMProvider()
-

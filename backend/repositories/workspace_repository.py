@@ -8,6 +8,22 @@ from rank_bm25 import BM25Okapi
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 
 
+def tokenize_vietnamese_english(text: str) -> List[str]:
+    """
+    Enhanced tokenizer for Vietnamese and English technical text.
+    Extracts unigrams and adjacent bigrams (e.g. 'hạn nộp' -> 'hạn_nộp', 'báo cáo' -> 'báo_cáo')
+    to greatly improve BM25 lexical retrieval accuracy for multi-word technical terminology.
+    """
+    words = re.findall(r"\w+", text.lower())
+    if not words:
+        return []
+    tokens = list(words)
+    # Extract adjacent bi-grams
+    for i in range(len(words) - 1):
+        tokens.append(f"{words[i]}_{words[i+1]}")
+    return tokens
+
+
 class WorkspaceRepository:
     """
     R3 Data / Retrieval Capability:
@@ -150,8 +166,8 @@ class WorkspaceRepository:
         doc_hash: str = "",
     ) -> int:
         """
-        Ingests multi-page text documents (PDF/TXT) broken down into paragraph-level chunks
-        with start_line and end_line tracking.
+        Ingests multi-page text documents (PDF/TXT) broken down into sliding window chunks
+        with start_line and end_line tracking and 2-line overlap.
         """
         if not doc_hash:
             raw_text = "\n\n".join(text for _, text in pages)
@@ -165,55 +181,79 @@ class WorkspaceRepository:
             page_total_lines = len(lines) if lines else 1
             total_lines_doc += page_total_lines
 
-            # Line-aware paragraph extraction
-            para_lines: List[str] = []
-            start_line = 1
-            line_idx = 1
-            chunk_idx = 0
-
-            for line in lines:
-                if not line.strip():
-                    if para_lines:
-                        chunk_text = "\n".join(para_lines).strip()
-                        if chunk_text:
-                            chunk = DocumentChunk(
-                                chunk_id=f"{doc_id}_p{page_num}_c{chunk_idx}",
-                                doc_id=doc_id,
-                                doc_name=doc_name,
-                                page_number=page_num,
-                                start_line=start_line,
-                                end_line=line_idx - 1,
-                                section_header=f"Page {page_num}, Lines {start_line}-{line_idx - 1}",
-                                text=chunk_text,
-                                doc_version=doc_version,
-                                doc_hash=doc_hash,
-                            )
-                            added_chunks.append(chunk)
-                            chunk_idx += 1
-                        para_lines = []
-                    start_line = line_idx + 1
-                else:
-                    if not para_lines:
-                        start_line = line_idx
-                    para_lines.append(line)
-                line_idx += 1
-
-            if para_lines:
-                chunk_text = "\n".join(para_lines).strip()
+            # If page is compact, create a single chunk
+            total_chars = sum(len(l) for l in lines)
+            if total_chars <= 900 and len(lines) <= 16:
+                chunk_text = "\n".join(lines).strip()
                 if chunk_text:
-                    chunk = DocumentChunk(
-                        chunk_id=f"{doc_id}_p{page_num}_c{chunk_idx}",
-                        doc_id=doc_id,
-                        doc_name=doc_name,
-                        page_number=page_num,
-                        start_line=start_line,
-                        end_line=line_idx - 1,
-                        section_header=f"Page {page_num}, Lines {start_line}-{line_idx - 1}",
-                        text=chunk_text,
-                        doc_version=doc_version,
-                        doc_hash=doc_hash,
+                    added_chunks.append(
+                        DocumentChunk(
+                            chunk_id=f"{doc_id}_p{page_num}_c0",
+                            doc_id=doc_id,
+                            doc_name=doc_name,
+                            page_number=page_num,
+                            start_line=1,
+                            end_line=page_total_lines,
+                            section_header=f"Page {page_num}, Lines 1-{page_total_lines}",
+                            text=chunk_text,
+                            doc_version=doc_version,
+                            doc_hash=doc_hash,
+                        )
                     )
-                    added_chunks.append(chunk)
+            else:
+                # Sliding window with overlap
+                curr_idx = 0
+                chunk_idx = 0
+                n_lines = len(lines)
+                while curr_idx < n_lines:
+                    while curr_idx < n_lines and not lines[curr_idx].strip():
+                        curr_idx += 1
+                    if curr_idx >= n_lines:
+                        break
+
+                    start_l = curr_idx + 1
+                    window = []
+                    char_count = 0
+                    end_idx = curr_idx
+
+                    while end_idx < n_lines:
+                        l_str = lines[end_idx]
+                        window.append(l_str)
+                        char_count += len(l_str) + 1
+                        end_idx += 1
+                        if char_count >= 400 and ((not l_str.strip()) or (len(window) >= 8 and l_str.strip().endswith("."))):
+                            break
+                        if char_count >= 950 or len(window) >= 18:
+                            break
+
+                    while window and not window[-1].strip():
+                        window.pop()
+                        end_idx -= 1
+
+                    if window:
+                        end_l = start_l + len(window) - 1
+                        c_text = "\n".join(window).strip()
+                        if c_text:
+                            added_chunks.append(
+                                DocumentChunk(
+                                    chunk_id=f"{doc_id}_p{page_num}_c{chunk_idx}",
+                                    doc_id=doc_id,
+                                    doc_name=doc_name,
+                                    page_number=page_num,
+                                    start_line=start_l,
+                                    end_line=end_l,
+                                    section_header=f"Page {page_num}, Lines {start_l}-{end_l}",
+                                    text=c_text,
+                                    doc_version=doc_version,
+                                    doc_hash=doc_hash,
+                                )
+                            )
+                            chunk_idx += 1
+
+                    next_idx = max(curr_idx + 1, end_idx - 2)
+                    if next_idx <= curr_idx:
+                        next_idx = curr_idx + 1
+                    curr_idx = next_idx
 
         metadata = DocumentMetadata(
             doc_id=doc_id,
@@ -274,11 +314,11 @@ class WorkspaceRepository:
         return len(added_chunks)
 
     def _rebuild_index(self) -> None:
-        """Rebuilds the BM25 lexical index over all indexed chunks."""
+        """Rebuilds the BM25 lexical index over all indexed chunks with Vietnamese-English tokenizer."""
         if not self.chunks:
             self._bm25 = None
             return
-        tokenized = [re.findall(r"\w+", c.text.lower()) for c in self.chunks]
+        tokenized = [tokenize_vietnamese_english(c.text) for c in self.chunks]
         self._bm25 = BM25Okapi(tokenized)
 
     def search(
@@ -321,26 +361,24 @@ class WorkspaceRepository:
         if not eligible:
             return []
 
-        # 2. Tokenize and compute BM25 scores
-        q_tokens = re.findall(r"\w+", query.lower())
+        # 2. Tokenize with enhanced Vietnamese-English tokenizer
+        q_tokens = tokenize_vietnamese_english(query)
         if not q_tokens:
             return []
 
         # If eligible is all chunks, use cached _bm25; otherwise create ad-hoc BM25 over eligible
         if len(eligible) == len(self.chunks) and self._bm25:
             bm25_model = self._bm25
-            bm25_chunks = self.chunks
         else:
-            tokenized_eligible = [re.findall(r"\w+", c.text.lower()) for c in eligible]
+            tokenized_eligible = [tokenize_vietnamese_english(c.text) for c in eligible]
             bm25_model = BM25Okapi(tokenized_eligible)
-            bm25_chunks = eligible
 
-        bm25_scores = bm25_model.get_scores(q_tokens)
+        bm25_scores = list(bm25_model.get_scores(q_tokens))
         max_bm25 = max(bm25_scores) if len(bm25_scores) > 0 and max(bm25_scores) > 0 else 1.0
 
         q_set = set(q_tokens)
 
-        # 1. Lexical ranking (BM25 with token-overlap tie-breaker)
+        # Lexical ranking (BM25 with token-overlap tie-breaker)
         STOP_WORDS = {
             "và", "hoặc", "của", "cho", "là", "ở", "tại", "có", "các", "những", "một", "trong",
             "được", "với", "này", "đó", "nào", "mấy", "gồm", "như", "gì", "thế_nào", "sao",
@@ -350,10 +388,11 @@ class WorkspaceRepository:
         content_q_set = {t for t in q_set if t not in STOP_WORDS}
         effective_q_set = content_q_set if content_q_set else q_set
 
-        overlap_map = {
-            eligible[i].chunk_id: len(effective_q_set & set(re.findall(r"\w+", eligible[i].text.lower()))) / max(1, len(effective_q_set))
-            for i in range(len(eligible))
-        }
+        overlap_map = {}
+        for i, c in enumerate(eligible):
+            c_toks = set(tokenize_vietnamese_english(c.text))
+            overlap_map[c.chunk_id] = len(effective_q_set & c_toks) / max(1, len(effective_q_set))
+
         lexical_scores = [
             0.6 * (float(bm25_scores[i]) / float(max_bm25)) + 0.4 * overlap_map[eligible[i].chunk_id]
             for i in range(len(eligible))
@@ -385,7 +424,7 @@ class WorkspaceRepository:
         rank_bm25 = {eligible[idx].chunk_id: r for r, idx in enumerate(bm25_sorted_indices, start=1)}
         norm_bm25_map = {eligible[i].chunk_id: float(bm25_scores[i]) / float(max_bm25) for i in range(len(eligible))}
 
-        # 2. Dense Vector Search (if embed_fn is available)
+        # 3. Dense Vector Search (if embed_fn is available)
         dense_scores_map: Dict[str, float] = {}
         rank_dense: Dict[str, int] = {}
 
@@ -410,7 +449,7 @@ class WorkspaceRepository:
                 dense_scores_map = {}
                 rank_dense = {}
 
-        # 3. Reciprocal Rank Fusion (RRF) & Absolute Relevance Score
+        # 4. Reciprocal Rank Fusion (RRF) & Absolute Relevance Score Calibration
         scored_chunks: List[DocumentChunk] = []
 
         for chunk in eligible:
@@ -418,6 +457,7 @@ class WorkspaceRepository:
             r_bm25 = rank_bm25[cid]
             b_norm = norm_bm25_map[cid]
             overlap = overlap_map[cid]
+            lex_score = 0.6 * b_norm + 0.4 * overlap
 
             c_copy = chunk.model_copy()
             c_copy.bm25_score = round(b_norm, 4)
@@ -426,20 +466,54 @@ class WorkspaceRepository:
                 r_d = rank_dense[cid]
                 d_sim = dense_scores_map[cid]
                 c_copy.dense_score = round(d_sim, 4)
+                # Standard RRF formula
                 rrf = 1.0 / (60.0 + r_bm25) + 1.0 / (60.0 + r_d)
-                # Absolute score for abstain gate is cosine similarity of dense branch
-                c_copy.score = round(d_sim, 4)
+                # Calibrated absolute score in [0.0, 1.0]
+                calibrated_score = max(d_sim, lex_score)
+                c_copy.score = round(min(1.0, max(0.0, calibrated_score)), 4)
             else:
                 c_copy.dense_score = 0.0
                 rrf = 1.0 / (60.0 + r_bm25)
-                # Fallback absolute score for abstain gate is normalized BM25 + overlap
-                c_copy.score = round(0.6 * b_norm + 0.4 * overlap, 4)
+                c_copy.score = round(min(1.0, max(0.0, lex_score)), 4)
 
             c_copy.rrf_score = round(rrf, 6)
             scored_chunks.append(c_copy)
 
-        # Sort strictly by RRF score descending
-        scored_chunks.sort(key=lambda x: x.rrf_score, reverse=True)
+        # 5. Pinpoint Reranker: Detect specific entities, numbers, dates, or exact phrases
+        q_lower = query.lower()
+        is_temporal_q = any(w in q_lower for w in ["khi nào", "hạn chót", "hạn nộp", "thời hạn", "deadline", "ngày", "tuần", "tháng", "when", "due"])
+        is_numeric_q = any(w in q_lower for w in ["bao nhiêu", "mấy", "tỷ lệ", "phần trăm", "điểm", "trang", "pages", "how many", "count"])
+        clean_q_phrase = re.sub(r"[^\w\s]", "", q_lower).strip()
+
+        for c_copy in scored_chunks:
+            c_text_lower = c_copy.text.lower()
+            pinpoint_bonus = 0.0
+
+            # Signal A: Exact query phrase substring match (clean without punctuation)
+            if len(clean_q_phrase) >= 6 and clean_q_phrase in c_text_lower:
+                pinpoint_bonus += 0.15
+
+            # Signal B: Temporal entities (explicit dates like DD/MM/YYYY or 'ngày X')
+            if is_temporal_q:
+                has_date = bool(re.search(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2}|ngày\s*\d{1,2}|tháng\s*\d{1,2})\b", c_copy.text))
+                has_deadline_kw = any(w in c_text_lower for w in ["deadline", "hạn nộp", "thời hạn", "hạn chót", "submission", "due"])
+                if has_date or has_deadline_kw:
+                    pinpoint_bonus += 0.12
+
+            # Signal C: Numeric / Page entities (ranges like '12-18 trang', percentages '%')
+            if is_numeric_q:
+                has_number_unit = bool(re.search(r"\b\d+([–-]\d+)?\s*(trang|pages|%|điểm|ngày|days|tuần)\b", c_copy.text))
+                has_number = bool(re.search(r"\b\d+([–-]\d+)?\b", c_copy.text))
+                if has_number_unit:
+                    pinpoint_bonus += 0.15
+                elif has_number:
+                    pinpoint_bonus += 0.08
+
+            c_copy.pinpoint_score = round(pinpoint_bonus, 4)
+            c_copy.score = round(min(1.0, c_copy.score + pinpoint_bonus), 4)
+
+        # Sort by Pinpoint bonus first, then by pure RRF score descending
+        scored_chunks.sort(key=lambda x: (x.pinpoint_score, x.rrf_score), reverse=True)
         return scored_chunks[:top_k]
 
     def build_page_lookup(self) -> Dict[Tuple[str, int], Dict[str, Any]]:
@@ -453,13 +527,16 @@ class WorkspaceRepository:
             if key not in lookup:
                 lookup[key] = {
                     "text": c.text,
+                    "full_page_text": c.text,
                     "total_lines": c.end_line,
                     "doc_version": c.doc_version,
+                    "version_id": c.doc_version,
                     "doc_hash": c.doc_hash,
                     "lines": (c.start_line, c.end_line),
                 }
             else:
-                lookup[key]["text"] = (lookup[key]["text"] + " " + c.text).strip()
+                lookup[key]["text"] = (lookup[key]["text"] + "\n" + c.text).strip()
+                lookup[key]["full_page_text"] = lookup[key]["text"]
                 lookup[key]["total_lines"] = max(lookup[key]["total_lines"], c.end_line)
         return lookup
 
@@ -494,4 +571,5 @@ __all__ = [
     "HybridWorkspaceIndex",
     "WorkspaceRepository",
     "workspace_repository",
+    "tokenize_vietnamese_english",
 ]

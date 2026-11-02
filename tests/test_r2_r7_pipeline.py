@@ -187,6 +187,59 @@ class TestWorkspaceAIPipeline(unittest.TestCase):
         self.assertEqual(sum_res.json()["status"], "SUMMARY_GENERATED")
         self.assertTrue(len(sum_res.json()["summary"]) > 50)
 
+    def test_dynamic_requirement_extraction_and_reconciliation(self):
+        from backend.repositories.workspace_repository import workspace_repository
+        from backend.services.reconciliation_service import (
+            extract_requirements_from_workspace,
+            reconciliation_service,
+        )
+        from backend.core.schemas import DocumentChunk, DocumentMetadata
+
+        # Seed custom chunks containing real assignment requirements and deliverables
+        doc_id = "Assignment_Brief_Dynamic.pdf"
+        meta = DocumentMetadata(
+            doc_id=doc_id,
+            doc_name=doc_id,
+            file_type="pdf",
+            page_count=1,
+            chunk_count=1,
+        )
+        sample_chunk = DocumentChunk(
+            chunk_id="chk_dynamic_req_01",
+            doc_id=doc_id,
+            doc_name=doc_id,
+            page_number=1,
+            start_line=1,
+            end_line=6,
+            text=(
+                "R1: Problem Boundary Definition (Deadline: 20/10/2026)\n"
+                "R2: Deterministic Citation Algorithm (Deadline: 24/10/2026)\n"
+                "01 Engineering Report (12-18 pages recommended)\n"
+                "02 Source Code Repository"
+            ),
+        )
+        workspace_repository.add_document(meta, [sample_chunk])
+
+        extracted = extract_requirements_from_workspace([doc_id])
+        self.assertTrue(len(extracted) >= 3)
+        req_ids = [r.req_id for r in extracted]
+        self.assertIn("R1", req_ids)
+        self.assertIn("R2", req_ids)
+        self.assertIn("DELIV-01", req_ids)
+
+        # Check deadline parsed for R1
+        r1 = next(r for r in extracted if r.req_id == "R1")
+        self.assertEqual(r1.official_deadline, date(2026, 10, 20))
+
+        # Reconcile using dynamically extracted requirements
+        res = reconciliation_service.reconcile(
+            reference_date=date(2026, 10, 26),
+            requirements=extracted,
+        )
+        self.assertEqual(res["status"], "RECONCILIATION_COMPLETE")
+        report = res["reconciliation_report"]
+        self.assertTrue(report.total_requirements >= 3)
+
 
 if __name__ == "__main__":
     unittest.main()

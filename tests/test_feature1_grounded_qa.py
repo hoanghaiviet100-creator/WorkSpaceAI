@@ -285,6 +285,27 @@ class TestFeature1GroundedQA(unittest.TestCase):
         del_404 = self.client.delete("/api/documents/non_existent_file.pdf")
         self.assertEqual(del_404.status_code, 404)
 
+    def test_09_pinpoint_reranker_numeric_and_temporal(self):
+        """Verifies that Pinpoint Reranker boosts chunks containing exact numeric/temporal entities."""
+        # Query asking for page limits (numeric entity)
+        results = workspace_repository.search("Báo cáo kỹ thuật có mấy trang?", top_k=2)
+        self.assertGreater(len(results), 0)
+        top = results[0]
+        self.assertGreater(top.pinpoint_score, 0.0)
+        self.assertIn("12-18", top.text)
+
+        # Ingest document with explicit deadline and date
+        workspace_repository.ingest_text_document(
+            doc_id="Schedule.pdf",
+            doc_name="Schedule.pdf",
+            pages=[(1, "Hạn nộp bài cuối kỳ: 24/10/2026 trên hệ thống LMS. Nộp trễ sẽ bị trừ điểm.")],
+        )
+
+        # Query asking for deadline (temporal entity)
+        results_date = workspace_repository.search("Hạn nộp bài là khi nào?", top_k=2)
+        self.assertGreater(len(results_date), 0)
+        self.assertGreater(results_date[0].pinpoint_score, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

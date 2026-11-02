@@ -17,3 +17,6 @@ Thumbs.db
 Computational Thinking Report/
 WorkspaceAI_Report_LaTeX_Package.zip
 .env
+report/
+reports/
+.workspace_data/

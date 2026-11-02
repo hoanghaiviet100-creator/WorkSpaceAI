@@ -1,3 +1,4 @@
+import re
 from typing import Any, Dict, List, Optional
 from backend.algorithms.citation_verifier import (
     CitationClaim,
@@ -5,7 +6,7 @@ from backend.algorithms.citation_verifier import (
     verify_citations,
 )
 from backend.core.config import settings
-from backend.core.schemas import CitationVerificationResult, GeneratedClaim, RouteType
+from backend.core.schemas import CitationVerificationResult, DocumentChunk, GeneratedClaim, RouteType
 from backend.providers.embedding_provider import embedding_provider
 from backend.providers.llm_provider import LLMProvider, llm_provider
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
@@ -72,7 +73,8 @@ def verification_result_to_schema(
 
 REFERENCE_PRONOUNS = {
     "nó", "đó", "này", "trên", "ở trên", "cái này", "điều này",
-    "thứ này", "it", "this", "that", "these", "those", "they", "them",
+    "thứ này", "vậy còn", "chi tiết hơn", "ở đâu", "khi nào",
+    "it", "this", "that", "these", "those", "they", "them",
     "above", "mentioned",
 }
 
@@ -80,18 +82,18 @@ REFERENCE_PRONOUNS = {
 def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]]) -> str:
     """
     R1/R5 Deterministic Contextual Query Expansion.
-    When current query is short (<= 4 words) or contains reference pronouns ('nó', 'đó', 'it', etc.),
-    appends the most recent user turn to supply semantic context for retrieval.
+    Does NOT blindly dump entire chat history into search query.
+    Only expands with the immediate previous user query IF the current question is short (< 8 words)
+    or contains reference pronouns ('nó', 'đó', 'vậy còn', etc.).
     Zero LLM calls required.
     """
     if not history:
         return query
 
-    import re
-    tokens = set(re.findall(r"\w+", query.lower()))
-    is_short = len(tokens) <= 4 or len(query.strip()) <= 20
-    has_pronoun = bool(tokens & REFERENCE_PRONOUNS) or any(
-        phrase in query.lower() for phrase in ["ở trên", "cái này", "điều này"]
+    tokens = re.findall(r"\w+", query.lower())
+    is_short = len(tokens) < 8 or len(query.strip()) <= 25
+    has_pronoun = bool(set(tokens) & REFERENCE_PRONOUNS) or any(
+        phrase in query.lower() for phrase in ["ở trên", "cái này", "điều này", "vậy còn", "chi tiết hơn", "ở đâu", "khi nào"]
     )
 
     if not (is_short or has_pronoun):
@@ -101,10 +103,52 @@ def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]])
     for turn in reversed(history):
         if turn.get("role") == "user" and turn.get("content"):
             last_user_query = turn["content"].strip()
-            if last_user_query.lower() != query.lower():
-                return f"{last_user_query} {query}".strip()
+            if last_user_query.lower() != query.lower().strip():
+                return f"{last_user_query} {query.strip()}".strip()
 
     return query
+
+
+def align_claim_to_chunks(claim: GeneratedClaim, chunks: List[DocumentChunk]) -> GeneratedClaim:
+    """
+    Step 2.5: Normalizes and aligns citation coordinates.
+    If the LLM extracted a quote that exists in a candidate chunk but had a 1-2 line offset,
+    this helper snaps the line numbers, doc_id, doc_version, and doc_hash to the exact physical
+    coordinates of the chunk.
+    If the quote does NOT exist in any chunk (hallucination), it is left untouched so that
+    verify_citations() can catch and flag it as UNGROUNDED_QUOTE.
+    """
+    quote_clean = claim.evidence_quote.strip().lower()
+    if not quote_clean:
+        return claim
+
+    # Try to find the excerpt in retrieved candidate chunks
+    for chunk in chunks:
+        chunk_text_lower = chunk.text.lower()
+        if quote_clean in chunk_text_lower:
+            preceding_text = chunk_text_lower.split(quote_clean, 1)[0]
+            start_offset = preceding_text.count("\n")
+            quote_lines = quote_clean.count("\n")
+
+            base_line = chunk.start_line if chunk.start_line is not None else 1
+            actual_start_line = base_line + start_offset
+            actual_end_line = actual_start_line + quote_lines
+
+            return GeneratedClaim(
+                claim_text=claim.claim_text,
+                cited_doc_id=chunk.doc_id,
+                cited_page=chunk.page_number,
+                cited_start_line=actual_start_line,
+                cited_end_line=actual_end_line,
+                doc_version=chunk.doc_version,
+                doc_hash=chunk.doc_hash,
+                evidence_quote=claim.evidence_quote,
+                verification_status=claim.verification_status,
+                match_score=claim.match_score,
+                matched_span=claim.matched_span,
+            )
+
+    return claim
 
 
 class QAService:
@@ -212,9 +256,11 @@ class QAService:
 
         # 2. Deterministic Contextual Query Expansion
         retrieval_query = expand_contextual_query(query, conversation_history)
+        # Prioritize current query keywords 3x over conversation history
+        weighted_query = f"{query} {query} {query} {retrieval_query}" if retrieval_query != query else query
 
         # 3. Hybrid RRF Retrieval
-        retrieved = self.repository.search(retrieval_query, top_k=top_k, selected_doc_ids=selected_doc_ids)
+        retrieved = self.repository.search(weighted_query, top_k=top_k, selected_doc_ids=selected_doc_ids)
         if not retrieved or retrieved[0].score < min_score:
             return {
                 "route": RouteType.QA_FLOW,
@@ -227,15 +273,18 @@ class QAService:
                 "grounding_score": 0.0,
             }
 
-        # 4. Grounded Reasoning with Conversation History
+        # 4. Grounded Reasoning with Conversation History & Structured Qwen Prompting
         raw_claims = self.provider.generate_grounded_qa(
             query,
             retrieved,
             conversation_history=conversation_history,
         )
 
-        # 5. Deterministic Citation Verification (pure Python stdlib)
-        algo_claims = [claim_schema_to_algorithm(c) for c in raw_claims]
+        # 5. Snap claims to exact chunk coordinates (Step 2.5) while preserving hallucination detection
+        aligned_claims = [align_claim_to_chunks(c, retrieved) for c in raw_claims]
+
+        # 6. Deterministic Citation Verification (pure Python stdlib)
+        algo_claims = [claim_schema_to_algorithm(c) for c in aligned_claims]
         algo_verification = verify_citations(
             algo_claims,
             self.repository.build_page_lookup(),
@@ -243,7 +292,7 @@ class QAService:
         )
         verification = verification_result_to_schema(algo_verification)
 
-        # 6. Rule: If every claim fails citation verification -> Abstain
+        # 7. Rule: If every claim fails citation verification -> Abstain
         if not verification.validated_claims:
             return {
                 "route": RouteType.QA_FLOW,

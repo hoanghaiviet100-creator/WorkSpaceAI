@@ -25,6 +25,7 @@ class DocumentChunk(BaseModel):
     bm25_score: float = 0.0
     dense_score: float = 0.0
     rrf_score: float = 0.0
+    pinpoint_score: float = 0.0
     doc_version: str = "v1"
     doc_hash: str = ""
 
@@ -49,6 +50,10 @@ class RequirementItem(BaseModel):
     official_deadline: Optional[date] = None
     mandatory_flag: bool = True
     source_ref: str
+
+
+# Alias for backward and forward compatibility
+RequirementRecord = RequirementItem
 
 
 class TaskRecord(BaseModel):
