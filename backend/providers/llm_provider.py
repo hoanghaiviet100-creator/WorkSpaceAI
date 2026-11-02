@@ -1,5 +1,7 @@
-from typing import List, Optional, Tuple
+from __future__ import annotations
+
 import re
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from backend.core.config import settings
 from backend.core.guardrails import wrap_untrusted_chunk

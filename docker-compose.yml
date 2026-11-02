@@ -1,0 +1,62 @@
+services:
+  # ============================================================================
+  # WorkspaceAI Application Service (FastAPI Backend + Streamlit Frontend)
+  # ============================================================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: workspaceai-app
+    ports:
+      - "8501:8501"   # Streamlit Interactive Web UI (http://localhost:8501)
+      - "8000:8000"   # FastAPI REST API & Swagger UI (http://localhost:8000/docs)
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      # Inside Docker network, use the internal service hostname "ollama".
+      # If you wish to connect to Ollama running on your host machine instead,
+      # set OLLAMA_DOCKER_URL=http://host.docker.internal:11434 in .env.
+      - OLLAMA_BASE_URL=${OLLAMA_DOCKER_URL:-http://ollama:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
+      - RETRIEVAL_MIN_SCORE=${RETRIEVAL_MIN_SCORE:-0.35}
+      - CITATION_VERIFY_THRESHOLD=${CITATION_VERIFY_THRESHOLD:-0.75}
+      - EMAIL_DISPATCH_MODE=${EMAIL_DISPATCH_MODE:-gmail_real}
+      - GMAIL_SENDER_EMAIL=${GMAIL_SENDER_EMAIL:-}
+      - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - ollama
+    restart: unless-stopped
+    networks:
+      - workspaceai-net
+
+  # ============================================================================
+  # Local Ollama LLM Service (Runs Qwen2.5 / Llama models locally)
+  # ============================================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: workspaceai-ollama
+    ports:
+      - "11434:11434" # Ollama API endpoint (http://localhost:11434)
+    volumes:
+      - ollama_models:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - workspaceai-net
+
+volumes:
+  ollama_models:
+    name: workspaceai_ollama_models
+
+networks:
+  workspaceai-net:
+    name: workspaceai_network
+    driver: bridge

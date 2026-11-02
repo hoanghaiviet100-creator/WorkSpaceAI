@@ -1,0 +1,19 @@
+.git
+.gitignore
+.venv
+venv
+env
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.coverage
+htmlcov
+*.log
+.DS_Store
+Thumbs.db
+*.zip
+Computational Thinking Report/
+WorkspaceAI_Report_LaTeX_Package.zip
+.env
