@@ -33,7 +33,11 @@ def handle_user_request(req: UserRequest):
         }
 
     if route == RouteType.QA_FLOW:
-        return qa_service.answer_question(query=req.query)
+        return qa_service.answer_question(
+            query=req.query,
+            selected_doc_ids=req.selected_doc_ids,
+            conversation_history=req.conversation_history,
+        )
 
     if route == RouteType.RECONCILE_FLOW:
         return reconciliation_service.reconcile(reference_date=req.reference_date)

@@ -1,0 +1,108 @@
+% !TeX program = xelatex
+\documentclass[a4paper,12pt]{report}
+
+\usepackage{hcmus-csc10014-template}
+
+% Tables, lists and figures used in Chapters 1 and 2.
+\usepackage{array,longtable,colortbl}
+\usepackage{enumitem}
+\usepackage{needspace}
+\usepackage{placeins}
+\definecolor{tablehead}{RGB}{232,240,247}
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+\setlength{\LTpre}{4pt}
+\setlength{\LTpost}{4pt}
+\emergencystretch=3em
+
+% Compact headings and float spacing without shrinking body text.
+\usepackage{titlesec}
+\titlespacing*{\section}{0pt}{12pt plus 2pt minus 2pt}{6pt}
+\titlespacing*{\subsection}{0pt}{9pt plus 2pt minus 2pt}{4pt}
+\titlespacing*{\subsubsection}{0pt}{7pt plus 1pt minus 1pt}{3pt}
+\titleformat{\paragraph}[block]{\normalfont\normalsize\bfseries}{}{0pt}{}
+\titlespacing*{\paragraph}{0pt}{6pt}{3pt}
+\setlist{topsep=3pt,itemsep=2pt,parsep=0pt,partopsep=0pt}
+\setlength{\textfloatsep}{9pt plus 2pt minus 2pt}
+\setlength{\floatsep}{8pt plus 2pt minus 2pt}
+\setlength{\intextsep}{8pt plus 2pt minus 2pt}
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.9}
+\renewcommand{\textfraction}{0.08}
+\renewcommand{\floatpagefraction}{0.75}
+\setcounter{topnumber}{2}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{3}
+\raggedbottom
+
+
+
+% Disable indentation on new paragraphs
+% \setlength{\parindent}{0pt}
+
+% Line spacing within the template requirements.
+\renewcommand{\baselinestretch}{1.15}
+
+% Optional: graphic path
+% \graphicspath{PATH_TO_GRAPHIC_FOLDER}
+
+% Legacy Times fonts are only needed with pdfLaTeX.
+% XeLaTeX/LuaLaTeX use the Unicode fonts configured in the template.
+\ifPDFTeX
+  \usepackage{mathptmx}
+\fi
+
+% To use roman section / subsection, uncomment these rows
+% \renewcommand{\thesection}{\Roman{section}}
+% \renewcommand{\thesubsection}{\thesection.\Roman{subsection}}
+
+% Define course name, report name and report title.
+\newcommand{\coursename}{Computational Thinking (CSC10014)}
+\newcommand{\reporttitle}{\textit{Midterm} Report}
+\newcommand{\reportname}{\textit{WorkspaceAI}}
+
+\newcommand{\studentname}{Hoàng Hải Việt (25127550) \\ Phạm Gia Khiêm (25127378) \\ Đặng Quang Minh (2512417) \\ Hà Lê Bảo Hưng (2512342) \\ Nguyễn Hoàng Minh Duy (25127311) \\ Nguyễn Quang Trường (25127166) \\ Phạm Lâm Viên (25127171)}
+\newcommand{\teachername}{Prof. Châu Thành Đức, PhD \\ Assoc. TA. Đỗ Đức Hào, Dr \\ Assoc. TA. Trần Hoàng Quân, M.Sc}
+
+\newcommand{\leftfooter}{\LaTeX\ by \href{https://github.com/trhgquan}{Quan, Tran Hoang}}
+
+% ============ DOCUMENT ============
+\begin{document}
+	
+% Table of Content, List of Figures and List of Tables.
+% DO NOT modify this section, unless something is broken.
+% \frontmatter
+\input{content/title}
+
+\pagenumbering{roman}
+\setcounter{page}{1}
+
+\input{content/guide}
+
+\tableofcontents
+\listoffigures
+\listoftables
+\pagebreak
+
+
+% \mainmatter
+\pagenumbering{arabic}
+\setcounter{page}{1}
+
+
+% Add contents here
+% Keep the course Project Brief as reference [1].
+\nocite{fit2026projectbrief}
+\input{content/introduction}
+\input{content/system-overview}
+
+% References cited in the synchronized Introduction.
+\input{ref/ref.tex}
+
+% Appendix
+% \appendix
+% Add \cleardoublepage to move appendices to next page.
+% \cleardoublepage
+% \input{appendix/appendix.tex}
+% \backmatter
+\end{document}

@@ -1,3 +1,4 @@
+from backend.services.document_service import DocumentService, document_service
 from backend.services.email_service import (
     EmailService,
     email_service,
@@ -14,6 +15,8 @@ from backend.services.router_service import route_user_request
 
 __all__ = [
     "route_user_request",
+    "DocumentService",
+    "document_service",
     "QAService",
     "qa_service",
     "handle_qa_request",

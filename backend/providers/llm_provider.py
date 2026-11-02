@@ -87,43 +87,65 @@ class LLMProvider:
         top = chunks[0]
         q_lower = query.lower()
 
-        # Topic 1: Submission package / nộp bài
-        if any(w in q_lower for w in ["submission", "package", "nộp bài", "bàn giao", "deliverable"]):
-            return (
-                f"Theo tài liệu **{top.doc_name}** (Trang {top.page_number}), **Gói nộp bài (Submission Package)** bao gồm các thành phần bắt buộc:\n\n"
-                f"- 📄 **01 Báo cáo kỹ thuật (Engineering Report):** Khuyến nghị từ 12–18 trang trình bày kiến trúc phân tầng CSC10014.\n"
-                f"- 💻 **02 Kho mã nguồn & Demo:** Mã nguồn dự án và kịch bản thực thi trực tiếp.\n"
-                f"- 🏛️ **03 Hồ sơ kiến trúc (Architecture Pack):** Sơ đồ luồng xử lý và đặc tả thuật toán R2.\n"
-                f"- 📊 **04 Bộ kiểm thử đánh giá (Evaluation Pack):** Kết quả đối soát và kiểm chứng trích lục tự động."
-            )
+        # Demo project brief topics (only active when querying Project_Brief.pdf)
+        if "project_brief" in top.doc_name.lower():
+            # Topic 1: Submission package / nộp bài
+            if any(w in q_lower for w in ["submission", "package", "nộp bài", "bàn giao", "deliverable"]):
+                return (
+                    f"Theo tài liệu **{top.doc_name}** (Trang {top.page_number}), **Gói nộp bài (Submission Package)** bao gồm các thành phần bắt buộc:\n\n"
+                    f"- 📄 **01 Báo cáo kỹ thuật (Engineering Report):** Khuyến nghị từ 12–18 trang trình bày kiến trúc phân tầng CSC10014.\n"
+                    f"- 💻 **02 Kho mã nguồn & Demo:** Mã nguồn dự án và kịch bản thực thi trực tiếp.\n"
+                    f"- 🏛️ **03 Hồ sơ kiến trúc (Architecture Pack):** Sơ đồ luồng xử lý và đặc tả thuật toán R2.\n"
+                    f"- 📊 **04 Bộ kiểm thử đánh giá (Evaluation Pack):** Kết quả đối soát và kiểm chứng trích lục tự động."
+                )
 
-        # Topic 2: System requirements / R1 - R5
-        if any(w in q_lower for w in ["requirement", "yêu cầu", "tiêu chí", "r1", "r2", "r3", "r4", "r5"]):
-            return (
-                f"Dựa trên tài liệu **{top.doc_name}** (Trang {top.page_number}), hệ thống quy định 5 tiêu chuẩn kỹ thuật cốt lõi:\n\n"
-                f"- **R1 — Problem Boundary:** Giới hạn bài toán và 10 kịch bản ca sử dụng (Use Cases).\n"
-                f"- **R2 — Deterministic Capability:** Thuật toán đối soát tất định 100% Python thuần (Reconciliation & Citation Verifier).\n"
-                f"- **R3 — Data Retrieval:** Khả năng truy xuất dữ liệu lai (BM25 + Token Overlap) từ PDF, CSV, TXT.\n"
-                f"- **R4 — AI Synthesis:** Mô hình ngôn ngữ sinh câu trả lời theo ngữ cảnh có trích dẫn.\n"
-                f"- **R5 — Routing Orchestration:** Bộ định tuyến luồng xử lý phân tầng và cổng an toàn Safeguard."
-            )
+            # Topic 2: System requirements / R1 - R5
+            if any(w in q_lower for w in ["requirement", "yêu cầu", "tiêu chí", "r1", "r2", "r3", "r4", "r5"]):
+                return (
+                    f"Dựa trên tài liệu **{top.doc_name}** (Trang {top.page_number}), hệ thống quy định 5 tiêu chuẩn kỹ thuật cốt lõi:\n\n"
+                    f"- **R1 — Problem Boundary:** Giới hạn bài toán và 10 kịch bản ca sử dụng (Use Cases).\n"
+                    f"- **R2 — Deterministic Capability:** Thuật toán đối soát tất định 100% Python thuần (Reconciliation & Citation Verifier).\n"
+                    f"- **R3 — Data Retrieval:** Khả năng truy xuất dữ liệu lai (BM25 + Token Overlap) từ PDF, CSV, TXT.\n"
+                    f"- **R4 — AI Synthesis:** Mô hình ngôn ngữ sinh câu trả lời theo ngữ cảnh có trích dẫn.\n"
+                    f"- **R5 — Routing Orchestration:** Bộ định tuyến luồng xử lý phân tầng và cổng an toàn Safeguard."
+                )
 
-        # Topic 3: Deadline / Hạn chót
-        if any(w in q_lower for w in ["deadline", "hạn chót", "thời hạn", "ngày"]):
-            return (
-                f"Thông tin trích lục từ **{top.doc_name}** (Trang {top.page_number}):\n\n"
-                f"Nội dung ghi nhận: *\"{top.text}\"*\n\n"
-                f"Vui lòng tham khảo bảng Taskboard ở cột bên phải để theo dõi các mốc ngày cụ thể của từng công việc."
-            )
+            # Topic 3: Deadline / Hạn chót
+            if any(w in q_lower for w in ["deadline", "hạn chót", "thời hạn", "ngày"]):
+                return (
+                    f"Thông tin trích lục từ **{top.doc_name}** (Trang {top.page_number}):\n\n"
+                    f"Nội dung ghi nhận: *\"{top.text}\"*\n\n"
+                    f"Vui lòng tham khảo bảng Taskboard ở cột bên phải để theo dõi các mốc ngày cụ thể của từng công việc."
+                )
 
-        # General structured synthesis
-        clean_excerpt = top.text.strip()
+        # General structured synthesis from top retrieved chunks
+        loc_str = f"Trang {top.page_number}"
+        if top.start_line and top.end_line:
+            loc_str += f", Dòng {top.start_line}-{top.end_line}"
+
+        # Present clean paragraphs from top retrieved evidence chunks
+        evidence_sections = []
+        for c in chunks[:2]:
+            c_text = c.text.strip()
+            if c_text:
+                c_loc = f"Trang {c.page_number}"
+                if c.start_line and c.end_line:
+                    c_loc += f", Dòng {c.start_line}-{c.end_line}"
+                evidence_sections.append(f"**[{c_loc}]**:\n{c_text}")
+
+        content_body = "\n\n".join(evidence_sections) if evidence_sections else top.text.strip()
+
         return (
-            f"Theo tài liệu **{top.doc_name}** (Trang {top.page_number}):\n\n"
-            f"{clean_excerpt}"
+            f"Theo tài liệu **{top.doc_name}** ({loc_str}):\n\n"
+            f"{content_body}"
         )
 
-    def generate_grounded_qa(self, query: str, chunks: List[DocumentChunk]) -> List[GeneratedClaim]:
+    def generate_grounded_qa(
+        self,
+        query: str,
+        chunks: List[DocumentChunk],
+        conversation_history: Optional[List[Dict[str, str]]] = None,
+    ) -> List[GeneratedClaim]:
         if not chunks:
             return []
 
@@ -137,19 +159,38 @@ class LLMProvider:
                     claim_text=synth_text,
                     cited_doc_id=top.doc_id,
                     cited_page=top.page_number,
+                    cited_start_line=top.start_line,
+                    cited_end_line=top.end_line,
+                    doc_version=top.doc_version,
+                    doc_hash=top.doc_hash,
                     evidence_quote=top.text[:120],
                 )
             ]
 
         context_block = "\n\n".join(
-            wrap_untrusted_chunk(c.doc_name, c.page_number, c.text) for c in chunks
+            wrap_untrusted_chunk(c.doc_name, c.page_number, c.text, c.start_line, c.end_line)
+            for c in chunks
         )
+
+        history_block = ""
+        if conversation_history:
+            recent_turns = conversation_history[-4:]
+            formatted_turns = [
+                f"{'Người dùng' if t.get('role') == 'user' else 'Trợ lý'}: {t.get('content', '')}"
+                for t in recent_turns if t.get("content")
+            ]
+            if formatted_turns:
+                history_block = "Lịch sử hội thoại gần đây:\n" + "\n".join(formatted_turns) + "\n\n"
+
         prompt = (
             "Bạn là trợ lý học thuật WorkspaceAI (môn học CSC10014). "
             "Hãy trả lời câu hỏi của người dùng một cách chính xác, lịch sự, rõ ràng bằng tiếng Việt. "
             "CHỈ sử dụng thông tin trong dữ liệu tài liệu bên dưới. "
+            "Mỗi luận điểm phải có trích dẫn rõ nguồn [Tên tài liệu, Trang X, Dòng Y-Z]. "
             "Nếu trong tài liệu không có thông tin, hãy nói rõ là tài liệu không đề cập.\n\n"
-            f"{context_block}\n\nCâu hỏi: {query}"
+            f"{context_block}\n\n"
+            f"{history_block}"
+            f"Câu hỏi: {query}"
         )
 
         # 2. Try Gemini API if configured
@@ -161,6 +202,10 @@ class LLMProvider:
                         claim_text=gemini_ans,
                         cited_doc_id=top.doc_id,
                         cited_page=top.page_number,
+                        cited_start_line=top.start_line,
+                        cited_end_line=top.end_line,
+                        doc_version=top.doc_version,
+                        doc_hash=top.doc_hash,
                         evidence_quote=top.text[:120],
                     )
                 ]
@@ -174,6 +219,10 @@ class LLMProvider:
                         claim_text=ollama_ans,
                         cited_doc_id=top.doc_id,
                         cited_page=top.page_number,
+                        cited_start_line=top.start_line,
+                        cited_end_line=top.end_line,
+                        doc_version=top.doc_version,
+                        doc_hash=top.doc_hash,
                         evidence_quote=top.text[:120],
                     )
                 ]
@@ -185,6 +234,10 @@ class LLMProvider:
                 claim_text=smart_text,
                 cited_doc_id=top.doc_id,
                 cited_page=top.page_number,
+                cited_start_line=top.start_line,
+                cited_end_line=top.end_line,
+                doc_version=top.doc_version,
+                doc_hash=top.doc_hash,
                 evidence_quote=top.text[:120],
             )
         ]
@@ -228,8 +281,8 @@ class LLMProvider:
                 return ans
 
         # Fallback offline structured summary generator
-        is_brief = "brief" in doc_name.lower() or "pdf" in doc_name.lower()
-        is_tasks = "csv" in doc_name.lower() or "task" in doc_name.lower()
+        is_brief = "project_brief" in doc_name.lower() or ("brief" in doc_name.lower() and "csc10014" in doc_name.lower())
+        is_tasks = "team_tasks" in doc_name.lower()
 
         if is_brief:
             return (
@@ -265,15 +318,37 @@ class LLMProvider:
                 f"- Hãy sử dụng tính năng **'Đối soát Đề bài vs Taskboard'** để phát hiện ngay các nhiệm vụ trễ hạn hoặc xung đột ngày bàn giao!"
             )
         else:
-            sample_text = "\n".join(f"- {c.text[:150]}..." for c in chunks[:4])
+            # Dynamic extractive summary for arbitrary user-uploaded documents
+            pages = sorted({c.page_number for c in chunks})
+            page_summary = f"{len(pages)} trang" if len(pages) > 1 else f"1 trang (Trang {pages[0] if pages else 1})"
+            
+            # Extract key introductory and body excerpts
+            first_chunk_text = chunks[0].text.strip()
+            intro_lines = [l.strip() for l in first_chunk_text.splitlines() if l.strip()]
+            intro = "\n".join(intro_lines[:3]) if intro_lines else first_chunk_text[:200]
+
+            # Key excerpts across chunks
+            excerpts = []
+            for i, c in enumerate(chunks[:5], start=1):
+                clean_lines = [l.strip() for l in c.text.splitlines() if l.strip()]
+                lead = clean_lines[0] if clean_lines else c.text[:120]
+                loc = f"Trang {c.page_number}"
+                if c.start_line and c.end_line:
+                    loc += f", Dòng {c.start_line}-{c.end_line}"
+                excerpts.append(f"- **[{loc}]**: {lead}")
+
+            excerpts_str = "\n".join(excerpts) if excerpts else "- Không có nội dung trích xuất."
+
             return (
-                f"### 📄 Tóm tắt Tài liệu: **{doc_name}**\n\n"
-                f"#### 1. 🎯 Tổng quan Tài liệu\n"
-                f"Tài liệu **{doc_name}** bao gồm tổng cộng **{len(chunks)} đoạn văn bản** trích xuất.\n\n"
-                f"#### 2. 📌 Các Nội dung Trích lược Chính\n"
-                f"{sample_text}\n\n"
-                f"#### 3. 💡 Hướng dẫn Tra cứu\n"
-                f"Bạn có thể đặt bất kỳ câu hỏi nào về nội dung chi tiết của tài liệu này trong khung Chat để được hỗ trợ trích dẫn chính xác."
+                f"### 📄 Tóm tắt Nội dung Tài liệu: **{doc_name}**\n\n"
+                f"#### 1. 🎯 Tổng quan & Quy mô\n"
+                f"Tài liệu **{doc_name}** có quy mô **{page_summary}** với **{len(chunks)} phân đoạn văn bản** đã được đánh chỉ mục.\n\n"
+                f"**Đoạn mở đầu trích xuất:**\n"
+                f"> *\"{intro}\"*\n\n"
+                f"#### 2. 📌 Các Điểm Nhấn Nội dung Chính\n"
+                f"{excerpts_str}\n\n"
+                f"#### 3. 🔍 Hướng dẫn Đặt câu hỏi\n"
+                f"Bạn có thể tick chọn tài liệu **{doc_name}** ở cột Thư viện bên trái và nhập câu hỏi chi tiết vào khung Chat để trích xuất các luận cứ chính xác kèm toạ độ dòng/trang."
             )
 
     def generate_email_draft(

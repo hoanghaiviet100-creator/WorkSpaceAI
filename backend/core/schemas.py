@@ -1,6 +1,6 @@
 from datetime import date
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -17,9 +17,29 @@ class DocumentChunk(BaseModel):
     doc_id: str
     doc_name: str
     page_number: int = 1
+    start_line: int = 1
+    end_line: int = 1
     section_header: str = "General"
     text: str
     score: float = 0.0
+    bm25_score: float = 0.0
+    dense_score: float = 0.0
+    rrf_score: float = 0.0
+    doc_version: str = "v1"
+    doc_hash: str = ""
+
+
+class DocumentMetadata(BaseModel):
+    doc_id: str
+    doc_name: str
+    file_type: str = "pdf"
+    page_count: int = 1
+    chunk_count: int = 0
+    total_lines: int = 0
+    file_hash: str = ""
+    version_id: str = "v1"
+    uploaded_at: str = ""
+    is_selected: bool = True
 
 
 class RequirementItem(BaseModel):
@@ -74,6 +94,13 @@ class GeneratedClaim(BaseModel):
     cited_page: int
     evidence_quote: str
     verification_status: str = "UNVERIFIED"
+    cited_start_line: Optional[int] = None
+    cited_end_line: Optional[int] = None
+    doc_version: Optional[str] = None
+    doc_hash: Optional[str] = None
+    match_score: float = 0.0
+    matched_span: Optional[str] = None
+    evidence_span: Optional[Dict[str, Any]] = None
 
 
 class CitationVerificationResult(BaseModel):
@@ -111,6 +138,11 @@ class EmailApproveRequest(BaseModel):
 
 class UserRequest(BaseModel):
     query: str
-    selected_doc_ids: List[str] = Field(default_factory=list)
+    selected_doc_ids: Optional[List[str]] = None
     recipient_email: Optional[str] = None
     reference_date: date = Field(default_factory=lambda: date(2026, 10, 26))
+    conversation_history: List[Dict[str, str]] = Field(default_factory=list)
+
+
+class DocumentSelectRequest(BaseModel):
+    selected_doc_ids: List[str]

@@ -20,11 +20,17 @@ def detect_prompt_injection(text: str) -> Tuple[bool, Optional[str]]:
     return False, None
 
 
-def wrap_untrusted_chunk(doc_name: str, page: int, raw_text: str) -> str:
-    """R7 Data-Instruction Separation: Encapsulates document text in passive XML tags."""
+def wrap_untrusted_chunk(
+    doc_name: str,
+    page: int,
+    raw_text: str,
+    start_line: int = 1,
+    end_line: int = 1,
+) -> str:
+    """R7 Data-Instruction Separation: Encapsulates document text in passive XML tags with line locators."""
     sanitized = raw_text.replace("</untrusted_document_data>", "")
     return (
-        f'<untrusted_document_data source="{doc_name}" page="{page}">\n'
+        f'<untrusted_document_data source="{doc_name}" page="{page}" lines="{start_line}-{end_line}">\n'
         f"{sanitized}\n"
         f"</untrusted_document_data>"
     )

@@ -1,0 +1,134 @@
+% Synchronized from the Brief Overview tab on 2026-10-29.
+% Revised on 2026-10-30 to align with local Ollama architecture and 3-algorithm baseline.
+
+\chapter{Introduction}
+\label{chap:introduction}
+
+\begin{quote}\itshape WorkspaceAI \end{quote}
+
+WorkspaceAI is a smart virtual workspace that connects document-based question answering, project-progress reconciliation, and human-approved email reporting. It combines a local large language model (LLM via Ollama) for natural language understanding with explicit Python algorithms for hybrid retrieval, citation verification, progress reconciliation, snapshot hashing, and SMTP email delivery. The following brief outlines the foundational context, objectives, target users, bounded scope, and positioning of the project.
+
+\section{Problem Statement}
+
+Students and project teams often distribute critical information across disparate specifications, spreadsheets, and email drafts. Manually reconciling these fragmented sources to verify requirement completion and prepare progress reports is repetitive, error-prone, and time-consuming. Prior research confirms that individuals frequently struggle to locate and filter relevant source evidence \cite{head2011everyday}, face academic delays from unorganized planning and procrastination \cite{shatz2026procrastination, aeon2021timemanagement}, and incur substantial cognitive overhead managing email updates \cite{mark2016email}. WorkspaceAI addresses this friction through a unified workflow that combines verifiable source-grounded Q\&A, deterministic requirement-task reconciliation, and human-approved email reporting.
+
+\section{Project Objectives}
+
+\Needspace{5\baselineskip}\subsection*{General Objective}
+
+The general objective is to develop a web-based assistant that converts a bounded collection of local project files into verifiable answers, reproducible progress findings, and human-approved academic communication. The application demonstrates a complete computational workflow while keeping language interpretation, deterministic computation, verification, and external action as separate responsibilities.
+
+\Needspace{5\baselineskip}\subsection*{Core Technical Objectives}
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{|>{\raggedright\arraybackslash}p{\dimexpr 0.23\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|>{\raggedright\arraybackslash}p{\dimexpr 0.43\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|>{\raggedright\arraybackslash}p{\dimexpr 0.34\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|}
+\caption{Core technical objectives and empirical verification.}\label{tab:intro-1}\\
+\hline
+\rowcolor{tablehead}
+\textbf{Objective} & \textbf{Implementation target} & \textbf{Evaluation evidence} \\ \hline
+\endfirsthead
+\multicolumn{3}{l}{\small\itshape Table \thetable\ (continued)}\\
+\hline
+\rowcolor{tablehead}
+\textbf{Objective} & \textbf{Implementation target} & \textbf{Evaluation evidence} \\ \hline
+\endhead
+\multicolumn{3}{r}{\footnotesize\itshape Continued on next page}\\
+\endfoot
+\endlastfoot
+\textbf{Hybrid retrieval \& citation verification} & Combine BM25Okapi and dense vector embeddings using Reciprocal Rank Fusion (RRF); resolve citations to source locators and check quoted text using exact matching or token-LCS similarity rule. & Measure and report Recall@5 of BM25, vector, and fused retrieval across a defined 30-query test set; reject 100\% of seeded fabricated citations; abstain on unanswerable queries. \\ \hline
+\textbf{Deterministic reconciliation engine} & Use pure Python algorithms to compare reviewed requirements $ against task records $; identify uncovered requirements, overdue tasks, and conflicting deadline values against a reference date. & Automated deterministic unit tests for matching rules, missing attributes, date boundaries, and known expected discrepancy findings. \\ \hline
+\textbf{Email FSM, SHA-256 digest, \& SMTP gate} & Enforce state transitions \texttt{DRAFT} $\rightarrow$ \texttt{PENDING\_APPROVAL} $\rightarrow$ \texttt{APPROVED}, followed by a separate Send action. Bind approval to canonical SHA-256 payload hash (recipients, subject, body); modifications immediately revoke approval. Submit approved dispatches via Gmail SMTP (STARTTLS, port 587). & Unit tests for payload modification rejection, recipient validation, duplicate dispatch prevention, and logging SENT, FAILED, or DELIVERY\_UNKNOWN outcomes without blind retries. \\ \hline
+\end{longtable}
+\endgroup
+
+\begin{itemize}[leftmargin=*,itemsep=2pt]
+\item \textbf{Grounding limits:} Retrieval evaluation defines explicit evidence units and relevance judgments; unanswerable queries require verified abstention rather than hallucinated answers. Text matching verifies source provenance and locator validity, not absolute semantic entailment.
+\item \textbf{Reconciliation semantics:} Stable identifiers and reviewed mappings link requirements to task items. Missing owners, dates, and completion evidence remain explicitly unspecified until resolved by users. Date discrepancies are flagged for human review rather than silently overwritten.
+\item \textbf{Controlled external action:} Prompt delimiters mark document text as untrusted data. Email dispatch is strictly decoupled from draft generation: the backend permits at most one transmission per approved SHA-256 digest, and unresolved SMTP delivery outcomes require manual verification.
+\end{itemize}
+
+\section{Target End-Users}
+
+\textbf{Individual Students:} Students working independently on coursework or research need to understand assignment specifications, locate evidence across uploaded materials, and organize personal tasks and deadlines. They can ask questions with clickable citations, check personal progress against documented requirements, and review generated status emails before authorizing transmission.
+
+\textbf{Student Project Teams (5–7 Members):} Academic teams need to interpret shared project rubrics, allocate deliverables, assign task ownership, and maintain a synchronized overview of progress. They can compare task boards with source specifications to surface missing deliverables, overdue work, and conflicting deadlines, and prepare human-approved progress reports for team members and advisors.
+
+\textbf{Secondary Users (Instructors and Teaching Assistants):} Teaching staff may inspect student progress records against course milestones and review source-linked evidence. The system facilitates transparency and review; it does not perform automated grading or evaluation.
+
+\section{Project Scope}
+
+\textbf{In scope:} Local PDF (with extractable text layer) and TXT document ingestion, with a maximum limit of 10 active files per workspace and 50 pages per PDF. Document processing preserves file identity, versions, and locators (page numbers for PDF, line ranges for TXT). Tabular CSV/JSON ingestion is treated as an optional stretch goal for task importing.
+
+\textbf{Feature 1 — Evidence-grounded Q\&A:} Users select active sources, ask contextual questions, and inspect supporting passages. The system performs hybrid retrieval (BM25 + vector + RRF), validates citations and quoted text, and abstains when the provided corpus is insufficient.
+
+\textbf{Feature 2 — Document-driven progress management:} Users review proposed requirements and tasks extracted by the local LLM, manage an interactive Kanban board (To Do, In Progress, Done), and execute deterministic Python reconciliation against source requirements to expose missing work, overdue tasks, and conflicting dates.
+
+\textbf{Feature 3 — Context-aware email reporting:} The system drafts progress reports grounded in verified reconciliation findings. Users inspect, edit, and approve an exact snapshot. The backend verifies SHA-256 payload integrity and permits a single dispatch via Gmail SMTP with STARTTLS.
+
+\textbf{Out of scope:} OCR for scanned images or handwriting; autonomous or background email dispatch; runtime web research or Internet scraping; real-time multi-user collaborative editing; automatic grading; and custom LLM model training or fine-tuning. Exploratory artifacts such as mind maps, flashcards, and quizzes are outside this baseline. Google OAuth 2.0 consent, fine-grained role-based access control (RBAC), and email attachments are also excluded.
+
+\textbf{Architectural assumptions:} LLM inference runs locally via Ollama; only outgoing email submission requires network connectivity via authenticated SMTP. Ambiguous requirements and scheduling conflicts require human resolution. Application credentials (SMTP app passwords) reside strictly in backend environment variables and are excluded from prompts, stored documents, and logs.
+
+\section{Related Solutions and Technologies}
+
+\Needspace{5\baselineskip}\subsection*{Qualitative Comparison with Related Solutions}
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{|>{\raggedright\arraybackslash}p{\dimexpr 0.25\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|>{\raggedright\arraybackslash}p{\dimexpr 0.36\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|>{\raggedright\arraybackslash}p{\dimexpr 0.39\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|}
+\caption{Qualitative positioning against documented related solutions.}\label{tab:intro-2}\\
+\hline
+\rowcolor{tablehead}
+\textbf{Solution / category} & \textbf{Documented strengths} & \textbf{WorkspaceAI positioning} \\ \hline
+\endfirsthead
+\multicolumn{3}{l}{\small\itshape Table \thetable\ (continued)}\\
+\hline
+\rowcolor{tablehead}
+\textbf{Solution / category} & \textbf{Documented strengths} & \textbf{WorkspaceAI positioning} \\ \hline
+\endhead
+\multicolumn{3}{r}{\footnotesize\itshape Continued on next page}\\
+\endfoot
+\endlastfoot
+\textbf{NotebookLM \cite{googleNotebook}} & Source-grounded Q\&A and citation navigation. & Integrates document Q\&A with deterministic progress reconciliation and human-approved SMTP reporting. \\ \hline
+\textbf{Notion AI \cite{notionEnterpriseSearch}} & Workspace search across connected documents. & Applies explicit, inspectable requirement schemas and deterministic Python reconciliation rules. \\ \hline
+\textbf{Trello AI Boards \cite{trelloAIBoards}} & Visual Kanban task tracking and automated board creation. & Directly links tasks to source requirement evidence and audits deadline consistency. \\ \hline
+\textbf{WorkspaceAI (proposed)} & Local Ollama execution, hybrid RRF retrieval, deterministic reconciliation, and SHA-256 FSM email gating. & Demonstrates an integrated, verifiable academic project workflow with strict human-in-the-loop safeguards. \\ \hline
+\end{longtable}
+\endgroup
+
+\Needspace{5\baselineskip}\subsection*{Core Technical Foundations}
+
+\begingroup
+\small
+\renewcommand{\arraystretch}{1.15}
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{|>{\raggedright\arraybackslash}p{\dimexpr 0.27\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|>{\raggedright\arraybackslash}p{\dimexpr 0.36\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|>{\raggedright\arraybackslash}p{\dimexpr 0.37\textwidth-2\tabcolsep-1.5\arrayrulewidth\relax}|}
+\caption{Core technical foundations and verification boundaries.}\label{tab:intro-3}\\
+\hline
+\rowcolor{tablehead}
+\textbf{Technology / technique} & \textbf{Proposed role} & \textbf{Verification boundary / limitation} \\ \hline
+\endfirsthead
+\multicolumn{3}{l}{\small\itshape Table \thetable\ (continued)}\\
+\hline
+\rowcolor{tablehead}
+\textbf{Technology / technique} & \textbf{Proposed role} & \textbf{Verification boundary / limitation} \\ \hline
+\endhead
+\multicolumn{3}{r}{\footnotesize\itshape Continued on next page}\\
+\endfoot
+\endlastfoot
+\textbf{RAG and source provenance \cite{gao2023citations}} & Grounds LLM responses in retrieved evidence passages. & String and locator matching verifies provenance, not full semantic validity. \\ \hline
+\textbf{BM25Okapi + dense embeddings + RRF \cite{cormack2009rrf,brownRankBM25}} & Combines lexical keyword precision with semantic embeddings via Reciprocal Rank Fusion. & RRF scores reflect relative ranking rather than calibrated probabilities; evaluated on frozen test corpora. \\ \hline
+\textbf{Deterministic Python reconciliation logic} & Joins requirement and task IDs, computes coverage gaps, and audits deadline discrepancies. & Requires reviewed source mappings and valid date formats; flags ambiguities for user review. \\ \hline
+\textbf{Email FSM, SHA-256 digest, \& SMTP \cite{nist2015sha,gmailSMTP}} & State-driven approval workflow, cryptographic payload binding, and authenticated TLS dispatch. & Server acceptance indicates handoff to relay, not guaranteed inbox delivery; requires explicit user initiation. \\ \hline
+\end{longtable}
+\endgroup
+
+\Needspace{5\baselineskip}\subsection*{Intended Contribution and Project Positioning}
+
+WorkspaceAI integrates established language understanding and software engineering techniques into an inspectable, bounded academic workflow. The fundamental architecture follows a consistent cross-cutting pattern: \textbf{`AI proposes, Python verifies, human decides.''} 
+The local LLM assists in understanding unstructured documents and drafting text; deterministic Python algorithms enforce business rules, citation validity, progress reconciliation, and cryptographic snapshot integrity; and human users retain complete decision-making authority over project state and external communication.

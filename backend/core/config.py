@@ -17,6 +17,8 @@ class Settings:
     # Retrieval relevance threshold (tau_rel)
     retrieval_min_score: float = float(os.getenv("RETRIEVAL_MIN_SCORE", "0.35"))
     tau_rel: float = float(os.getenv("TAU_REL", os.getenv("RETRIEVAL_MIN_SCORE", "0.35")))
+    dense_tau_rel: float = float(os.getenv("DENSE_TAU_REL", "0.35"))
+    bm25_tau_rel: float = float(os.getenv("BM25_TAU_REL", "0.35"))
     
     # Citation verification threshold (theta_match)
     citation_verify_threshold: float = float(os.getenv("CITATION_VERIFY_THRESHOLD", "0.75"))
