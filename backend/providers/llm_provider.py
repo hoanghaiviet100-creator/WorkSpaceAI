@@ -80,13 +80,19 @@ class LLMProvider:
         return bool(key and key != "your_gemini_api_key_here" and len(key) > 10)
 
     def call_gemini(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
-        """Calls Google Gemini REST API with explicit timeout and safety parameters."""
+        """
+        Calls Google Gemini REST API with explicit timeout and safety parameters.
+        Includes automatic fallback across available Flash endpoints (e.g. gemini-flash-lite-latest).
+        """
         if not self.is_gemini_configured():
             return None
-        url = (
-            f"https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{settings.gemini_model}:generateContent?key={settings.gemini_api_key}"
-        )
+
+        # Try configured model first, then auto-fallback to active lite/latest variants
+        models_to_try = [settings.gemini_model]
+        for fallback_m in ["gemini-flash-lite-latest", "gemini-flash-latest"]:
+            if fallback_m not in models_to_try:
+                models_to_try.append(fallback_m)
+
         gen_config: Dict[str, Any] = {
             "temperature": 0.1,
             "maxOutputTokens": 2048,
@@ -98,22 +104,55 @@ class LLMProvider:
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": gen_config,
         }
+
+        for model_name in models_to_try:
+            url = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{model_name}:generateContent?key={settings.gemini_api_key}"
+            )
+            try:
+                resp = httpx.post(url, json=payload, timeout=httpx.Timeout(25.0, connect=3.0))
+                if resp.status_code == 200:
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts:
+                            return parts[0].get("text", "").strip()
+            except Exception:
+                continue
+        return None
+
+    def get_effective_ollama_model(self) -> str:
+        """Resolves the best available local Ollama model if configured one is missing."""
         try:
-            resp = httpx.post(url, json=payload, timeout=httpx.Timeout(30.0, connect=3.0))
+            resp = httpx.get(
+                f"{settings.ollama_base_url}/api/tags",
+                timeout=httpx.Timeout(1.0, connect=0.5),
+            )
             if resp.status_code == 200:
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts:
-                        return parts[0].get("text", "").strip()
+                tags = resp.json().get("models", [])
+                names = [m.get("name", "") for m in tags]
+                # 1. Exact match
+                if settings.ollama_model in names:
+                    return settings.ollama_model
+                # 2. Check any local qwen2.5 variant (e.g. qwen2.5:3b, qwen2.5:7b, qwen2.5:14b)
+                for n in names:
+                    if "qwen2.5" in n.lower():
+                        return n
+                # 3. Fallback to any qwen model
+                for n in names:
+                    if "qwen" in n.lower():
+                        return n
+                if names:
+                    return names[0]
         except Exception:
             pass
-        return None
+        return settings.ollama_model
 
     def call_ollama(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
         """
-        Calls local Ollama instance with qwen2.5:7b optimization options:
+        Calls local Ollama instance with qwen2.5 optimization options:
         - num_ctx: 8192 (prevents context truncation)
         - temperature: 0.1 (strict factual grounding)
         - top_p: 0.85
@@ -123,8 +162,9 @@ class LLMProvider:
         """
         if not self.is_ollama_online():
             return None
+        active_model = self.get_effective_ollama_model()
         payload: Dict[str, Any] = {
-            "model": settings.ollama_model,
+            "model": active_model,
             "prompt": prompt,
             "stream": False,
             "options": {
@@ -273,9 +313,10 @@ class LLMProvider:
                             end_l = int(cit.get("line_end", top.end_line or start_l))
                             excerpt = str(cit.get("excerpt", "")).strip()
 
+                            claim_stmt = str(cit.get("claim") or cit.get("statement") or answer_text).strip()
                             claims.append(
                                 GeneratedClaim(
-                                    claim_text=answer_text,
+                                    claim_text=claim_stmt,
                                     cited_doc_id=doc_id,
                                     cited_page=page,
                                     cited_start_line=start_l,
@@ -396,27 +437,54 @@ class LLMProvider:
             intro_lines = [l.strip() for l in first_chunk_text.splitlines() if l.strip()]
             intro = "\n".join(intro_lines[:3]) if intro_lines else first_chunk_text[:200]
 
+            # 1. Extract Key Themes across pages with precise locators
             excerpts = []
-            for c in chunks[:5]:
-                clean_lines = [l.strip() for l in c.text.splitlines() if l.strip()]
-                lead = clean_lines[0] if clean_lines else c.text[:120]
-                loc = f"Trang {c.page_number}"
-                if c.start_line and c.end_line:
-                    loc += f", Dòng {c.start_line}-{c.end_line}"
-                excerpts.append(f"- **[{loc}]**: {lead}")
+            seen_locs = set()
+            for c in chunks:
+                if c.page_number not in seen_locs and len(excerpts) < 6:
+                    seen_locs.add(c.page_number)
+                    clean_lines = [l.strip() for l in c.text.splitlines() if len(l.strip()) >= 15]
+                    lead = clean_lines[0] if clean_lines else c.text.strip()[:140]
+                    loc = f"Trang {c.page_number}"
+                    if c.start_line and c.end_line:
+                        loc += f", Dòng {c.start_line}-{c.end_line}"
+                    excerpts.append(f"- **[{loc}]**: {lead}")
 
-            excerpts_str = "\n".join(excerpts) if excerpts else "- Không có nội dung trích xuất."
+            if not excerpts and chunks:
+                top_c = chunks[0]
+                excerpts.append(f"- **[Trang {top_c.page_number}]**: {top_c.text[:140]}")
+
+            excerpts_str = "\n".join(excerpts)
+
+            # 2. Extract Quantitative Metrics, Dates & Requirements via regex
+            full_corpus = " ".join(c.text for c in chunks)
+            dates_found = re.findall(r"\b(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{2}-\d{2})\b", full_corpus)
+            numbers_found = re.findall(r"\b\d+(?:[–-]\d+)?\s*(?:trang|pages|%|điểm|ngày|tuần)\b", full_corpus, re.IGNORECASE)
+            req_codes = re.findall(r"\b(R[1-9]\d?|REQ-[0-9]+|DELIV-0[1-9])\b", full_corpus, re.IGNORECASE)
+
+            metrics_list = []
+            if dates_found:
+                metrics_list.append(f"- ⏱️ **Mốc thời hạn ghi nhận:** `{', '.join(sorted(set(dates_found))[:5])}`")
+            if numbers_found:
+                metrics_list.append(f"- 📊 **Chỉ số & Định lượng:** `{', '.join(sorted(set(numbers_found), key=len)[:6])}`")
+            if req_codes:
+                metrics_list.append(f"- 📌 **Các mã tiêu chuẩn / Deliverables:** `{', '.join(sorted(set(req_codes))[:8])}`")
+
+            metrics_str = "\n".join(metrics_list) if metrics_list else "- *Tài liệu không chứa các mốc thời hạn hoặc chỉ số định lượng rõ rệt.*"
 
             return (
-                f"### 📄 Tóm tắt Nội dung Tài liệu: **{doc_name}**\n\n"
-                f"#### 1. 🎯 Tổng quan & Quy mô\n"
-                f"Tài liệu **{doc_name}** có quy mô **{page_summary}** với **{len(chunks)} phân đoạn văn bản** đã được đánh chỉ mục.\n\n"
-                f"**Đoạn mở đầu trích xuất:**\n"
+                f"### 📄 Tóm tắt Toàn diện Tài liệu: **{doc_name}**\n\n"
+                f"#### 1. 🎯 Tổng quan Điều hành & Quy mô (Executive Briefing)\n"
+                f"Tài liệu **{doc_name}** có quy mô **{page_summary}** với **{len(chunks)} phân đoạn văn bản** đã được nạp và đối soát toàn vẹn.\n\n"
+                f"**Nội dung mở đầu trích xuất:**\n"
                 f"> *\"{intro}\"*\n\n"
-                f"#### 2. 📌 Các Điểm Nhấn Nội dung Chính\n"
+                f"#### 2. 📌 Các Trọng tâm Kỹ thuật & Điểm Nhấn Nội dung (Core Themes)\n"
                 f"{excerpts_str}\n\n"
-                f"#### 3. 🔍 Hướng dẫn Đặt câu hỏi\n"
-                f"Bạn có thể tick chọn tài liệu **{doc_name}** ở cột Thư viện bên trái và nhập câu hỏi chi tiết vào khung Chat để trích xuất các luận cứ chính xác kèm toạ độ dòng/trang."
+                f"#### 3. ⏱️ Dữ liệu Định lượng & Mốc Thời hạn (Metrics & Deadlines)\n"
+                f"{metrics_str}\n\n"
+                f"#### 4. 💡 Khuyến nghị Thực thi & Hướng dẫn Tra cứu (Actionable Takeaways)\n"
+                f"- Bấm vào các nút trích dẫn trong câu trả lời ở khung chat để soi chiếu trực tiếp văn bản gốc trong **Evidence Viewer**.\n"
+                f"- Nếu tài liệu có chứa yêu cầu đề bài, bạn có thể chuyển sang tab **'Taskboard & Đối soát'** và bấm *'Trích xuất Yêu cầu từ Tài liệu'* để tự động đối chiếu với bảng công việc nhóm."
             )
 
     def generate_email_draft(

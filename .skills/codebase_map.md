@@ -89,6 +89,7 @@
   - `ingest_file(filename: str, content_bytes: bytes) -> Dict[str, Any]`
   - `format_chunk_with_lines(chunk: DocumentChunk) -> str`
 - `qa_service.QAService`:
+  - `resolve_summary_target(query: str, repository: WorkspaceRepository, selected_doc_ids: Optional[List[str]] = None) -> Optional[str]`
   - `expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]]) -> str`
   - `align_claim_to_chunks(claim: GeneratedClaim, chunks: List[DocumentChunk]) -> GeneratedClaim`
   - `summarize_document(doc_id: str) -> Dict[str, Any]`

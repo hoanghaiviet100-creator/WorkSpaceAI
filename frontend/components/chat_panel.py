@@ -294,19 +294,23 @@ def render_chat_panel(recipient_email: str, ref_date: date) -> None:
 
     suggestions = [
         (
-            "Gói nộp bài gồm gì?",
-            "Submission Package gồm những thành phần bắt buộc nào? Nó có mấy trang?",
+            "📄 Tóm tắt tài liệu",
+            "Tóm tắt toàn diện tài liệu Project_Brief.pdf theo phong cách NotebookLM",
         ),
         (
-            "Đối soát tiến độ",
-            "Đối chiếu Project_Brief.pdf với team_tasks.csv và kiểm tra công việc trễ hạn",
+            "⏱️ Báo cáo kỹ thuật có mấy trang?",
+            "Báo cáo kỹ thuật (Engineering Report) trong Submission Package có mấy trang và nộp những gì?",
         ),
         (
-            "Tiêu chuẩn kỹ thuật",
+            "📌 Tiêu chuẩn kỹ thuật R1 – R5",
             "Hệ thống quy định các tiêu chuẩn kỹ thuật R1 đến R5 như thế nào?",
         ),
         (
-            "Soạn email báo cáo",
+            "📊 Đối soát tiến độ",
+            "Đối chiếu Project_Brief.pdf với bảng công việc và kiểm tra công việc trễ hạn",
+        ),
+        (
+            "✉️ Soạn email báo cáo",
             "Soạn email báo cáo tiến độ đồ án WorkspaceAI cho giảng viên",
         ),
     ]

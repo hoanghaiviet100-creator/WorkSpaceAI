@@ -306,6 +306,126 @@ class TestFeature1GroundedQA(unittest.TestCase):
         self.assertGreater(len(results_date), 0)
         self.assertGreater(results_date[0].pinpoint_score, 0.0)
 
+    def test_10_multiline_evidence_highlighting(self):
+        """Verifies multi-line evidence highlight renders valid marks across line boundaries."""
+        from frontend.state import highlight_evidence_in_page
+
+        page_text = (
+            "Line 1: Submission Package\n"
+            "Line 2: 01 Engineering Report (12-18 pages recommended)\n"
+            "Line 3: 02 Source Repository and Demo\n"
+            "Line 4: End of package"
+        )
+        quote = (
+            "01 Engineering Report (12-18 pages recommended)\n"
+            "Line 3: 02 Source Repository and Demo"
+        )
+        html = highlight_evidence_in_page(page_text, quote)
+        self.assertIn('<mark class="cite-mark">', html)
+        self.assertIn("</mark>", html)
+        # Ensure marks appear on both Line 2 and Line 3
+        self.assertIn("Line 2:", html)
+        self.assertIn("Line 3:", html)
+        self.assertEqual(html.count('<mark class="cite-mark">'), html.count("</mark>"))
+
+    def test_11_notebooklm_comprehensive_document_summary(self):
+        """Verifies NotebookLM-level comprehensive briefing with multi-page citations."""
+        res = qa_service.summarize_document("Project_Brief.pdf")
+        self.assertEqual(res["status"], "SUMMARY_GENERATED")
+        summary = res["summary"]
+        self.assertTrue("Tổng quan" in summary or "Executive Briefing" in summary)
+        self.assertTrue("Yêu cầu" in summary or "Themes" in summary)
+        self.assertTrue("Hạn chót" in summary or "Deadlines" in summary or "Mốc Thời hạn" in summary)
+        self.assertTrue("Khuyến nghị" in summary or "Lưu ý" in summary or "Takeaways" in summary)
+        # Verified citations provided across pages
+        self.assertGreaterEqual(len(res["validated_claims"]), 2)
+        pages_cited = {c.cited_page for c in res["validated_claims"]}
+        self.assertIn(3, pages_cited)
+        self.assertIn(6, pages_cited)
+
+    def test_12_flexible_doc_id_matching(self):
+        """Verifies citation verifier tolerates case differences and missing .pdf extension."""
+        lookup = workspace_repository.build_page_lookup()
+        # Case A: Missing .pdf extension
+        c_no_ext = CitationClaim(
+            claim_text="Report limit",
+            cited_doc_id="Project_Brief",  # without .pdf
+            cited_page=6,
+            evidence_quote="01 Engineering Report (12-18 pages recommended)",
+        )
+        res_no_ext = verify_citations([c_no_ext], lookup)
+        self.assertEqual(len(res_no_ext.validated_claims), 1)
+        self.assertEqual(res_no_ext.validated_claims[0].verification_status, "VERIFIED_EXACT")
+
+        # Case B: Lowercase filename
+        c_lower = CitationClaim(
+            claim_text="Report limit",
+            cited_doc_id="project_brief.pdf",
+            cited_page=6,
+            evidence_quote="01 Engineering Report (12-18 pages recommended)",
+        )
+        res_lower = verify_citations([c_lower], lookup)
+        self.assertEqual(len(res_lower.validated_claims), 1)
+        self.assertEqual(res_lower.validated_claims[0].verification_status, "VERIFIED_EXACT")
+
+    def test_13_resolve_summary_target_stem_and_selection(self):
+        """Verifies resolve_summary_target handles natural language stems, missing extensions, and selected_doc_ids."""
+        from backend.services.qa_service import resolve_summary_target
+        from backend.core.schemas import DocumentMetadata, DocumentChunk
+
+        # Add a simulated Team_8_Proposal.pdf document
+        meta = DocumentMetadata(
+            doc_id="Team_8_Proposal.pdf",
+            doc_name="Team_8_Proposal.pdf",
+            total_pages=15,
+            file_hash="team8proposalhash123",
+            ingested_at="2026-11-03",
+        )
+        chunks = [
+            DocumentChunk(
+                chunk_id="t8_c1",
+                doc_id="Team_8_Proposal.pdf",
+                doc_name="Team_8_Proposal.pdf",
+                page_number=1,
+                start_line=1,
+                end_line=10,
+                text="Team 8 Proposal architecture and project outline.",
+                doc_version="v1",
+                doc_hash="team8proposalhash123",
+            )
+        ]
+        workspace_repository.add_document(meta, chunks)
+
+        # Case 1: User types query with stem, no .pdf extension ("Tóm tắt file Team_8_proposal ấy")
+        target = resolve_summary_target("Tóm tắt file Team_8_proposal ấy", workspace_repository)
+        self.assertEqual(target, "Team_8_Proposal.pdf")
+
+        # Case 2: User types query with space ("tóm tắt team 8 proposal")
+        target_spaces = resolve_summary_target("tóm tắt team 8 proposal", workspace_repository)
+        self.assertEqual(target_spaces, "Team_8_Proposal.pdf")
+
+        # Case 3: Generic summary query with selected_doc_ids priority
+        target_selected = resolve_summary_target(
+            "Tóm tắt tài liệu đã chọn",
+            workspace_repository,
+            selected_doc_ids=["Team_8_Proposal.pdf"],
+        )
+        self.assertEqual(target_selected, "Team_8_Proposal.pdf")
+
+    def test_14_frontend_state_initialization(self):
+        """Verifies frontend state initialization does not fail with NameError or import errors."""
+        import streamlit as st
+        import frontend.state as f_state
+
+        st.session_state = {}
+        f_state.init_state()
+        self.assertIn("active_ai_mode", st.session_state)
+        self.assertIn(st.session_state["active_ai_mode"], ["offline", "ollama", "gemini"])
+        self.assertIn("chat_messages", st.session_state)
+        self.assertGreater(len(st.session_state["chat_messages"]), 0)
+
+
+
 
 if __name__ == "__main__":
     unittest.main()

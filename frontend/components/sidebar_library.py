@@ -227,13 +227,27 @@ def render_sidebar_settings() -> Tuple[date, str]:
                 "Gemini API key",
                 value="" if key_value == "your_gemini_api_key_here" else key_value,
                 type="password",
-                placeholder="Dán API key vào đây",
+                placeholder="Dán API key (AIzaSy...) vào đây",
             )
             if key_in.strip():
                 settings.gemini_api_key = key_in.strip()
                 st.success("Đã nhận API key.")
             else:
-                st.info("Nhập API key để dùng Gemini.")
+                st.info("Nhập API key để dùng Gemini (lấy tại aistudio.google.com).")
+
+            gemini_models = ["gemini-flash-lite-latest", "gemini-flash-latest", "gemini-pro-latest"]
+            curr_model_idx = (
+                gemini_models.index(settings.gemini_model)
+                if settings.gemini_model in gemini_models
+                else 0
+            )
+            sel_model = st.selectbox(
+                "Phiên bản Gemini",
+                gemini_models,
+                index=curr_model_idx,
+                key="sel_gemini_model",
+            )
+            settings.gemini_model = sel_model
 
         st.divider()
         with st.expander("Thông tin kiến trúc CSC10014"):

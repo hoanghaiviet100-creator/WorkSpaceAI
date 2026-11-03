@@ -21,7 +21,18 @@ Lệnh này tự động kiểm tra:
 
 ---
 
-## 3. Ranh giới Kiến trúc Phân tầng (Layered Architecture Rules)
+## 3. Quy tắc Bắt buộc Sau Khi Code/Nâng Cấp Xong (Post-Upgrade Protocol)
+Ngay sau khi hoàn thành đợt code hoặc nâng cấp tính năng, AI Agent **BẮT BUỘC THỰC HIỆN 3 VIỆC**:
+1. **Cập nhật `CHANGELOG.md`**: Ghi nhận chi tiết những thay đổi vừa thực hiện (Added, Changed, Fixed, Removed) theo phiên bản và ngày tương ứng.
+2. **Đồng bộ `.skills/codebase_map.md`**: Cập nhật lại các Pydantic models, trường dữ liệu mới hoặc chữ ký hàm public vừa thêm/sửa để bản đồ luôn phản ánh 100% sự thật mã nguồn.
+3. **Tóm tắt Hiện trạng Hệ thống (Current State Snapshot)**: Ở phản hồi gửi người dùng, luôn đưa ra tóm tắt cô đọng:
+   - Các tính năng/hợp phần đang hoạt động ổn định.
+   - Trạng thái kiểm định hiện tại (kết quả `python verify.py`, số lượng bài test pass).
+   - Danh sách gợi ý các việc cần làm tiếp theo (Next Steps / Roadmap) để phiên làm việc kế tiếp có thể bắt nhịp làm tiếp ngay mà không cần rà soát lại từ đầu.
+
+---
+
+## 4. Ranh giới Kiến trúc Phân tầng (Layered Architecture Rules)
 - **`backend/core/`**: Pydantic schemas (`schemas.py`), cấu hình môi trường (`config.py`), và cổng lọc an toàn Safeguard XML (`guardrails.py`).
 - **`backend/algorithms/`**: **100% PURE PYTHON STANDARD LIBRARY BẤT BIẾN**. Tuyệt đối KHÔNG import thư viện ngoài (`pydantic`, `fastapi`, `numpy`, `httpx`, `rank_bm25`). Không thực hiện network/file I/O.
 - **`backend/repositories/`**: Lập chỉ mục cục bộ, Hybrid BM25 + Dense RRF Search và Pinpoint Reranker (`workspace_repository.py`).
@@ -32,7 +43,7 @@ Lệnh này tự động kiểm tra:
 
 ---
 
-## 4. CSC10014 Pipeline Chuẩn
+## 5. CSC10014 Pipeline Chuẩn
 Mọi luồng xử lý đều tuân thủ 7 bước:
 `REQUEST -> UNDERSTAND -> ROUTE -> RETRIEVE/COMPUTE -> REASON -> VERIFY -> RESPOND/ACT`
 

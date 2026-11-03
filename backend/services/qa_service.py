@@ -73,33 +73,41 @@ def verification_result_to_schema(
 
 REFERENCE_PRONOUNS = {
     "nó", "đó", "này", "trên", "ở trên", "cái này", "điều này",
-    "thứ này", "vậy còn", "chi tiết hơn", "ở đâu", "khi nào",
+    "thứ này", "vậy còn", "thế còn", "còn", "chi tiết hơn", "rõ hơn", "nói thêm",
     "it", "this", "that", "these", "those", "they", "them",
-    "above", "mentioned",
+    "above", "mentioned", "tell me more",
 }
 
 
 def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]]) -> str:
     """
     R1/R5 Deterministic Contextual Query Expansion.
-    Does NOT blindly dump entire chat history into search query.
-    Only expands with the immediate previous user query IF the current question is short (< 8 words)
-    or contains reference pronouns ('nó', 'đó', 'vậy còn', etc.).
-    Zero LLM calls required.
+    Expands with previous context ONLY IF:
+    1. Query contains genuine anaphoric reference pronouns/phrases ('nó', 'đó', 'ở trên', 'còn...', 'thế còn...').
+    2. OR query is an incomplete fragment (< 4 words) lacking standalone subject and question word.
+    Independent standalone questions are preserved 100% intact to prevent topic drift.
     """
     if not history:
         return query
 
     tokens = re.findall(r"\w+", query.lower())
-    is_short = len(tokens) < 8 or len(query.strip()) <= 25
+    q_clean = query.strip().lower()
+
+    # Check for explicit anaphoric pronouns or follow-up phrases
     has_pronoun = bool(set(tokens) & REFERENCE_PRONOUNS) or any(
-        phrase in query.lower() for phrase in ["ở trên", "cái này", "điều này", "vậy còn", "chi tiết hơn", "ở đâu", "khi nào"]
+        phrase in q_clean for phrase in ["ở trên", "cái này", "điều này", "vậy còn", "thế còn", "chi tiết hơn", "nói thêm", "rõ hơn"]
     )
 
-    if not (is_short or has_pronoun):
+    # Check if query starts with a follow-up conjunction (e.g., "Còn deadline?", "Thế báo cáo?")
+    is_follow_up = q_clean.startswith(("còn ", "thế còn ", "vậy còn ", "thế ", "vậy "))
+
+    # A short fragment (< 4 words) lacking a complete standalone question structure
+    is_short_fragment = len(tokens) <= 3 and not any(w in q_clean for w in ["ai", "gì", "nào", "sao", "đâu", "khi"])
+
+    if not (has_pronoun or is_follow_up or is_short_fragment):
         return query
 
-    # Find the most recent user question
+    # Find the most recent substantive user question
     for turn in reversed(history):
         if turn.get("role") == "user" and turn.get("content"):
             last_user_query = turn["content"].strip()
@@ -151,6 +159,72 @@ def align_claim_to_chunks(claim: GeneratedClaim, chunks: List[DocumentChunk]) ->
     return claim
 
 
+def resolve_summary_target(
+    query: str,
+    repository: WorkspaceRepository,
+    selected_doc_ids: Optional[List[str]] = None,
+) -> Optional[str]:
+    """
+    Intelligently identifies which document the user wants to summarize.
+    Handles:
+    - User types filename with or without extension ('Team_8_Proposal' or 'team_8_proposal.pdf').
+    - User types with spaces, hyphens, or underscores ('team 8 proposal' vs 'Team_8_Proposal').
+    - User refers to currently selected document ('tóm tắt file này', 'tóm tắt tài liệu đã chọn').
+    - Prioritizes selected documents, then most recently uploaded documents.
+    """
+    q_lower = query.lower().strip()
+    q_norm = re.sub(r"[\W_]+", " ", q_lower).strip()
+
+    all_docs = repository.list_documents()
+    if not all_docs:
+        if repository.chunks:
+            seen_ids = set()
+            docs_from_chunks = []
+            for c in repository.chunks:
+                if c.doc_id not in seen_ids:
+                    seen_ids.add(c.doc_id)
+                    docs_from_chunks.append({"doc_id": c.doc_id, "doc_name": c.doc_name})
+            all_docs = docs_from_chunks
+        else:
+            return None
+
+    # Step 1: Check for explicit mention of document name or stem in query
+    for d in all_docs:
+        d_name = d.get("doc_name") or d.get("doc_id") or ""
+        d_id = d.get("doc_id") or ""
+        d_stem = d_name.rsplit(".", 1)[0].lower() if "." in d_name else d_name.lower()
+        d_id_stem = d_id.rsplit(".", 1)[0].lower() if "." in d_id else d_id.lower()
+        d_norm = re.sub(r"[\W_]+", " ", d_stem).strip()
+
+        # Check full filename
+        if d_name.lower() in q_lower or d_id.lower() in q_lower:
+            return d_name
+
+        # Check stem without extension (e.g. "team_8_proposal" in "tóm tắt file team_8_proposal ấy")
+        if len(d_stem) >= 3 and d_stem in q_lower:
+            return d_name
+        if len(d_id_stem) >= 3 and d_id_stem in q_lower:
+            return d_name
+
+        # Check normalized form with spaces (e.g. "team 8 proposal" vs "team_8_proposal")
+        if len(d_norm) >= 3 and (d_norm in q_norm or d_norm.replace(" ", "") in q_norm.replace(" ", "")):
+            return d_name
+
+    # Step 2: If query contains generic summary request, prioritize currently selected document in the sidebar
+    if selected_doc_ids:
+        for sel_id in selected_doc_ids:
+            for d in all_docs:
+                if d.get("doc_id") == sel_id or d.get("doc_name") == sel_id:
+                    return d.get("doc_name", sel_id)
+        return selected_doc_ids[0]
+
+    # Step 3: If no specific doc mentioned and nothing selected, pick the most recently uploaded doc (last added)
+    if all_docs:
+        return all_docs[-1].get("doc_name") or all_docs[-1].get("doc_id")
+
+    return None
+
+
 class QAService:
     """Nghiệp vụ Q&A có đối soát trích dẫn (Grounded Q&A with Citation Verification)."""
 
@@ -172,8 +246,15 @@ class QAService:
         """Summarizes a specific document in the workspace using the active LLM or deterministic engine."""
         chunks = self.repository.get_document_chunks(doc_id)
         if not chunks:
-            # If not found by exact id, try matching substring
-            matching = [c for c in self.repository.chunks if doc_id.lower() in c.doc_id.lower() or doc_id.lower() in c.doc_name.lower()]
+            # If not found by exact id, try matching substring or stem without extension
+            clean_id = doc_id.lower().replace(".pdf", "").replace(".txt", "").replace(".csv", "").strip()
+            matching = [
+                c for c in self.repository.chunks
+                if doc_id.lower() in c.doc_id.lower()
+                or doc_id.lower() in c.doc_name.lower()
+                or clean_id in c.doc_id.lower()
+                or clean_id in c.doc_name.lower()
+            ]
             chunks = matching
             if not chunks:
                 return {
@@ -188,25 +269,50 @@ class QAService:
 
         doc_name = chunks[0].doc_name
         summary_text = self.provider.generate_summary(doc_name, chunks)
-        top = chunks[0]
-        claim = GeneratedClaim(
-            claim_text=summary_text,
-            cited_doc_id=top.doc_id,
-            cited_page=top.page_number,
-            cited_start_line=top.start_line,
-            cited_end_line=top.end_line,
-            doc_version=top.doc_version,
-            doc_hash=top.doc_hash,
-            evidence_quote=top.text[:120],
-            verification_status="VERIFIED_EXACT",
-        )
+
+        # Collect top representative chunk from each unique page for multi-page evidence inspection
+        seen_pages = set()
+        multi_claims: List[GeneratedClaim] = []
+        for c in chunks:
+            if c.page_number not in seen_pages:
+                seen_pages.add(c.page_number)
+                multi_claims.append(
+                    GeneratedClaim(
+                        claim_text=summary_text,
+                        cited_doc_id=c.doc_id,
+                        cited_page=c.page_number,
+                        cited_start_line=c.start_line,
+                        cited_end_line=c.end_line,
+                        doc_version=c.doc_version,
+                        doc_hash=c.doc_hash,
+                        evidence_quote=c.text[:120],
+                        verification_status="VERIFIED_EXACT",
+                    )
+                )
+
+        if not multi_claims and chunks:
+            top = chunks[0]
+            multi_claims = [
+                GeneratedClaim(
+                    claim_text=summary_text,
+                    cited_doc_id=top.doc_id,
+                    cited_page=top.page_number,
+                    cited_start_line=top.start_line,
+                    cited_end_line=top.end_line,
+                    doc_version=top.doc_version,
+                    doc_hash=top.doc_hash,
+                    evidence_quote=top.text[:120],
+                    verification_status="VERIFIED_EXACT",
+                )
+            ]
+
         return {
             "route": RouteType.QA_FLOW,
             "status": "SUMMARY_GENERATED",
             "doc_name": doc_name,
             "summary": summary_text,
             "grounding_score": 1.0,
-            "validated_claims": [claim],
+            "validated_claims": multi_claims,
             "hallucination_flags": [],
         }
 
@@ -235,17 +341,9 @@ class QAService:
         q_lower = query.lower()
 
         # Check if query is explicitly asking to summarize a document
-        summary_keywords = ["tóm tắt", "summarize", "tổng quan tài liệu", "tóm lược", "summary"]
+        summary_keywords = ["tóm tắt", "summarize", "tổng quan tài liệu", "tóm lược", "summary", "review file", "overview file"]
         if any(w in q_lower for w in summary_keywords):
-            target_doc: Optional[str] = None
-            for c in self.repository.chunks:
-                if c.doc_name.lower() in q_lower or c.doc_id.lower() in q_lower:
-                    target_doc = c.doc_name
-                    break
-            
-            if not target_doc and self.repository.chunks:
-                target_doc = self.repository.chunks[0].doc_name
-
+            target_doc = resolve_summary_target(query, self.repository, selected_doc_ids)
             if target_doc:
                 return self.summarize_document(target_doc)
 
@@ -259,8 +357,14 @@ class QAService:
         # Prioritize current query keywords 3x over conversation history
         weighted_query = f"{query} {query} {query} {retrieval_query}" if retrieval_query != query else query
 
-        # 3. Hybrid RRF Retrieval
-        retrieved = self.repository.search(weighted_query, top_k=top_k, selected_doc_ids=selected_doc_ids)
+        # 3. Adaptive Top-K & Page Diversity based on query breadth
+        is_broad_query = any(
+            w in q_lower for w in ["tất cả", "toàn bộ", "danh sách", "gồm những gì", "các yêu cầu", "các tiêu chuẩn", "tổng hợp", "overview", "all", "list", "chi tiết"]
+        )
+        effective_top_k = max(top_k, 5) if is_broad_query else top_k
+
+        # 4. Hybrid RRF Retrieval
+        retrieved = self.repository.search(weighted_query, top_k=effective_top_k, selected_doc_ids=selected_doc_ids)
         if not retrieved or retrieved[0].score < min_score:
             return {
                 "route": RouteType.QA_FLOW,

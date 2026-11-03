@@ -168,24 +168,43 @@ def verify_citations(
     flagged: List[CitationClaim] = []
     verified_count = 0
 
-    # Index known docs for doc_id existence checks
+    # Index known docs for doc_id existence checks (supports case-insensitive & extension-tolerant matching)
     known_doc_ids = set()
+    known_doc_ids_lower = {}
     for k in chunk_lookup.keys():
         if isinstance(k, tuple) and len(k) >= 1:
-            known_doc_ids.add(str(k[0]))
+            doc_str = str(k[0])
+            known_doc_ids.add(doc_str)
+            known_doc_ids_lower[doc_str.lower()] = doc_str
         elif isinstance(k, str):
             known_doc_ids.add(k)
+            known_doc_ids_lower[k.lower()] = k
 
     for raw_c in claims:
         c = _to_claim_dataclass(raw_c)
-        key = (c.cited_doc_id, c.cited_page)
 
-        # 1. Document Existence Check
-        if c.cited_doc_id not in known_doc_ids:
+        # 1. Document Existence Check with flexible case & extension resolution
+        resolved_doc_id = None
+        if c.cited_doc_id in known_doc_ids:
+            resolved_doc_id = c.cited_doc_id
+        elif c.cited_doc_id.lower() in known_doc_ids_lower:
+            resolved_doc_id = known_doc_ids_lower[c.cited_doc_id.lower()]
+        elif (c.cited_doc_id.lower() + ".pdf") in known_doc_ids_lower:
+            resolved_doc_id = known_doc_ids_lower[c.cited_doc_id.lower() + ".pdf"]
+        elif "." in c.cited_doc_id and c.cited_doc_id.rsplit(".", 1)[0].lower() in known_doc_ids_lower:
+            resolved_doc_id = known_doc_ids_lower[c.cited_doc_id.rsplit(".", 1)[0].lower()]
+
+        if not resolved_doc_id:
             c.verification_status = "INVALID_DOC_ID"
             c.match_score = 0.0
             flagged.append(c)
             continue
+
+        key = (c.cited_doc_id, c.cited_page)
+        if key not in chunk_lookup:
+            key = (resolved_doc_id, c.cited_page)
+        if key not in chunk_lookup:
+            key = (c.cited_doc_id.lower(), c.cited_page)
 
         # 2. Page Existence Check
         if key not in chunk_lookup:

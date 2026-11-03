@@ -509,35 +509,94 @@ class WorkspaceRepository:
                 elif has_number:
                     pinpoint_bonus += 0.08
 
+            # Relevance Gate: Pinpoint bonus applies strongly to relevant candidates,
+            # while scaling down on completely ungrounded candidates (score < 0.10) to prevent noise takeover
+            if c_copy.score < 0.10:
+                pinpoint_bonus *= 0.2
+
             c_copy.pinpoint_score = round(pinpoint_bonus, 4)
             c_copy.score = round(min(1.0, c_copy.score + pinpoint_bonus), 4)
 
-        # Sort by Pinpoint bonus first, then by pure RRF score descending
-        scored_chunks.sort(key=lambda x: (x.pinpoint_score, x.rrf_score), reverse=True)
+        # Sort by calibrated score (which cleanly merges RRF lexical/dense relevance and pinpoint boost),
+        # using pinpoint_score and rrf_score as deterministic tie-breakers
+        scored_chunks.sort(key=lambda x: (x.score, x.pinpoint_score, x.rrf_score), reverse=True)
         return scored_chunks[:top_k]
 
     def build_page_lookup(self) -> Dict[Tuple[str, int], Dict[str, Any]]:
         """
-        Constructs page-level concatenated text map with line locators,
+        Constructs page-level deduplicated text map with line locators,
         hash, and version metadata for deterministic citation verification.
+        Eliminates duplicate boundary lines caused by 2-line sliding window overlap.
+        Registers case-insensitive and extension-tolerant doc_id aliases.
         """
-        lookup: Dict[Tuple[str, int], Dict[str, Any]] = {}
+        # Step 1: Collect ordered lines per (doc_id, page_number)
+        page_lines_map: Dict[Tuple[str, int], Dict[int, str]] = {}
+        page_meta_map: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
         for c in self.chunks:
-            key = (c.doc_id, c.page_number)
-            if key not in lookup:
-                lookup[key] = {
-                    "text": c.text,
-                    "full_page_text": c.text,
-                    "total_lines": c.end_line,
+            p_key = (c.doc_id, c.page_number)
+            if p_key not in page_lines_map:
+                page_lines_map[p_key] = {}
+                page_meta_map[p_key] = {
                     "doc_version": c.doc_version,
                     "version_id": c.doc_version,
                     "doc_hash": c.doc_hash,
-                    "lines": (c.start_line, c.end_line),
+                    "doc_name": c.doc_name,
+                    "doc_id": c.doc_id,
                 }
+
+            lines = c.text.splitlines()
+            start_l = c.start_line if c.start_line is not None else 1
+            for idx, line in enumerate(lines):
+                line_no = start_l + idx
+                # Store or update line content (deduplicating overlapping lines seamlessly)
+                page_lines_map[p_key][line_no] = line
+
+        # Step 2: Assemble clean, non-duplicated full page texts
+        lookup: Dict[Tuple[str, int], Dict[str, Any]] = {}
+
+        for (doc_id, page_num), lines_dict in page_lines_map.items():
+            sorted_line_nos = sorted(lines_dict.keys())
+            if sorted_line_nos:
+                clean_page_text = "\n".join(lines_dict[ln] for ln in sorted_line_nos)
+                min_line = sorted_line_nos[0]
+                max_line = sorted_line_nos[-1]
             else:
-                lookup[key]["text"] = (lookup[key]["text"] + "\n" + c.text).strip()
-                lookup[key]["full_page_text"] = lookup[key]["text"]
-                lookup[key]["total_lines"] = max(lookup[key]["total_lines"], c.end_line)
+                clean_page_text = ""
+                min_line, max_line = 1, 1
+
+            meta = page_meta_map.get((doc_id, page_num), {})
+            entry = {
+                "text": clean_page_text,
+                "full_page_text": clean_page_text,
+                "total_lines": max_line,
+                "doc_version": meta.get("doc_version", "v1"),
+                "version_id": meta.get("doc_version", "v1"),
+                "doc_hash": meta.get("doc_hash", ""),
+                "lines": (min_line, max_line),
+            }
+
+            # Register standard key
+            lookup[(doc_id, page_num)] = entry
+
+            # Register alias keys: doc_name, case-insensitive, and without extension
+            doc_name = meta.get("doc_name", doc_id)
+            alias_keys = [
+                (doc_name, page_num),
+                (doc_id.lower(), page_num),
+                (doc_name.lower(), page_num),
+            ]
+            if "." in doc_id:
+                no_ext = doc_id.rsplit(".", 1)[0]
+                alias_keys.extend([(no_ext, page_num), (no_ext.lower(), page_num)])
+            if "." in doc_name:
+                no_ext_name = doc_name.rsplit(".", 1)[0]
+                alias_keys.extend([(no_ext_name, page_num), (no_ext_name.lower(), page_num)])
+
+            for ak in alias_keys:
+                if ak not in lookup:
+                    lookup[ak] = entry
+
         return lookup
 
     def seed_demo_workspace(self) -> None:

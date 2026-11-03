@@ -10,6 +10,7 @@ from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import streamlit as st
+from backend.core.config import settings
 from backend.core.schemas import RouteType, TaskRecord
 from backend.providers.llm_provider import llm_provider
 from backend.repositories.workspace_repository import workspace_repository
@@ -168,7 +169,7 @@ def next_task_id(tasks: List[TaskRecord]) -> str:
 
 
 @st.cache_data(ttl=15, show_spinner=False)
-def ollama_online(base_url: str) -> bool:
+def ollama_online(base_url: str = "") -> bool:
     return bool(llm_provider.is_ollama_online())
 
 
@@ -234,10 +235,12 @@ def clear_sent_email() -> None:
 
 
 def highlight_evidence_in_page(page_text: str, quote: str, matched_span: Optional[str] = None) -> str:
-    """Highlights verified citation span inside the full page text with line formatting."""
+    """
+    Highlights verified citation span inside full page text with physical line formatting.
+    Seamlessly handles both single-line and multi-line quotation spans without broken HTML.
+    """
     target = matched_span if (matched_span and matched_span in page_text) else quote
     if not target or not target.strip():
-        # Render lines
         lines = page_text.splitlines()
         rendered_lines = []
         for i, l in enumerate(lines, start=1):
@@ -246,30 +249,91 @@ def highlight_evidence_in_page(page_text: str, quote: str, matched_span: Optiona
             )
         return "".join(rendered_lines)
 
-    lines = page_text.splitlines()
     target_clean = target.strip()
+    marked_text: Optional[str] = None
+
+    # Step A: Direct exact substring replacement
+    if target_clean in page_text:
+        marked_text = page_text.replace(target_clean, f"@@START_CITE@@{target_clean}@@END_CITE@@", 1)
+    else:
+        # Step B: Case-insensitive regex replacement
+        pattern = re.escape(target_clean)
+        if re.search(pattern, page_text, re.IGNORECASE):
+            marked_text = re.sub(
+                pattern,
+                lambda m: f"@@START_CITE@@{m.group(0)}@@END_CITE@@",
+                page_text,
+                count=1,
+                flags=re.IGNORECASE,
+            )
+
     rendered_lines = []
 
-    for i, line in enumerate(lines, start=1):
-        if target_clean in line:
-            parts = line.split(target_clean, 1)
-            line_html = (
-                esc(parts[0])
-                + f'<mark class="cite-mark">{esc(target_clean)}</mark>'
-                + esc(parts[1])
+    if marked_text is not None:
+        raw_lines = marked_text.splitlines()
+        in_highlight = False
+
+        for i, line in enumerate(raw_lines, start=1):
+            line_html_parts = []
+            curr_pos = 0
+
+            # Scan tokens @@START_CITE@@ and @@END_CITE@@ in this line
+            line_content = line
+            if in_highlight:
+                line_html_parts.append('<mark class="cite-mark">')
+
+            while True:
+                idx_start = line_content.find("@@START_CITE@@", curr_pos)
+                idx_end = line_content.find("@@END_CITE@@", curr_pos)
+
+                if idx_start == -1 and idx_end == -1:
+                    line_html_parts.append(esc(line_content[curr_pos:]))
+                    break
+
+                # Determine next marker
+                if idx_start != -1 and (idx_end == -1 or idx_start < idx_end):
+                    line_html_parts.append(esc(line_content[curr_pos:idx_start]))
+                    line_html_parts.append('<mark class="cite-mark">')
+                    in_highlight = True
+                    curr_pos = idx_start + len("@@START_CITE@@")
+                else:
+                    line_html_parts.append(esc(line_content[curr_pos:idx_end]))
+                    line_html_parts.append("</mark>")
+                    in_highlight = False
+                    curr_pos = idx_end + len("@@END_CITE@@")
+
+            if in_highlight:
+                line_html_parts.append("</mark>")
+
+            rendered_lines.append(
+                f'<div class="evidence-line"><span class="line-no">{i}</span><span class="line-content">{"".join(line_html_parts)}</span></div>'
             )
-        else:
-            # Case insensitive match
-            pattern = re.escape(target_clean)
-            if re.search(pattern, line, re.IGNORECASE):
+        return "".join(rendered_lines)
+
+    # Step C: Fallback to line-by-line sub-phrase matching for multi-line quotes
+    sub_targets = [tl.strip() for tl in target_clean.splitlines() if len(tl.strip()) >= 5]
+    if not sub_targets:
+        sub_targets = [target_clean]
+
+    lines = page_text.splitlines()
+    for i, line in enumerate(lines, start=1):
+        line_matched = False
+        line_html = esc(line)
+        for st_part in sub_targets:
+            if st_part in line:
+                parts = line.split(st_part, 1)
+                line_html = esc(parts[0]) + f'<mark class="cite-mark">{esc(st_part)}</mark>' + esc(parts[1])
+                line_matched = True
+                break
+            elif re.search(re.escape(st_part), line, re.IGNORECASE):
                 line_html = re.sub(
-                    pattern,
+                    re.escape(st_part),
                     lambda m: f'<mark class="cite-mark">{esc(m.group(0))}</mark>',
                     esc(line),
                     flags=re.IGNORECASE,
                 )
-            else:
-                line_html = esc(line)
+                line_matched = True
+                break
 
         rendered_lines.append(
             f'<div class="evidence-line"><span class="line-no">{i}</span><span class="line-content">{line_html}</span></div>'
@@ -298,7 +362,17 @@ def init_state() -> None:
     )
     ss.setdefault("current_draft", None)
     ss.setdefault("email_sent_result", None)
-    ss.setdefault("active_ai_mode", "offline")
+
+    # Auto-detect best active AI mode: Gemini if key configured, or Ollama if online
+    initial_ai_mode = "offline"
+    if settings.gemini_api_key and settings.gemini_api_key != "your_gemini_api_key_here" and len(settings.gemini_api_key) > 10:
+        initial_ai_mode = "gemini"
+    elif settings.llm_provider == "gemini":
+        initial_ai_mode = "gemini"
+    elif settings.llm_provider == "ollama" or ollama_online():
+        initial_ai_mode = "ollama"
+
+    ss.setdefault("active_ai_mode", initial_ai_mode)
     ss.setdefault("upload_log", [])
     ss.setdefault("uploader_nonce", 0)
     ss.setdefault("active_evidence", None)
