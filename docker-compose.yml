@@ -1,6 +1,19 @@
 services:
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "127.0.0.1:8501:80"
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - workspaceai-net
+
   # ============================================================================
-  # WorkspaceAI Application Service (FastAPI Backend + Streamlit Frontend)
+  # WorkspaceAI Application Service (FastAPI backend; React served by frontend service)
   # ============================================================================
   app:
     build:
@@ -8,14 +21,15 @@ services:
       dockerfile: Dockerfile
     container_name: workspaceai-app
     ports:
-      - "8501:8501"   # Streamlit Interactive Web UI (http://localhost:8501)
-      - "8000:8000"   # FastAPI REST API & Swagger UI (http://localhost:8000/docs)
+
+      - "127.0.0.1:8001:8000"   # FastAPI REST API & Swagger UI (http://localhost:8000/docs)
     env_file:
       - path: .env
         required: false
     environment:
       - PYTHONUNBUFFERED=1
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
+      - WORKSPACE_OFFLINE_ONLY=${WORKSPACE_OFFLINE_ONLY:-false}
       # Inside Docker network, use the internal service hostname "ollama".
       # If you wish to connect to Ollama running on your host machine instead,
       # set OLLAMA_DOCKER_URL=http://host.docker.internal:11434 in .env.
@@ -30,6 +44,8 @@ services:
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
       - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
       - SMTP_PORT=${SMTP_PORT:-587}
+    volumes:
+      - ./.workspace_data:/app/.workspace_data
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -44,8 +60,18 @@ services:
   ollama:
     image: ollama/ollama:latest
     container_name: workspaceai-ollama
+    gpus: all
+    cpus: 4.0
+    mem_limit: 10g
+    environment:
+      - OLLAMA_NUM_PARALLEL=1
+      - OLLAMA_MAX_LOADED_MODELS=1
+      - OLLAMA_MAX_QUEUE=4
+      - OLLAMA_KEEP_ALIVE=60s
+      - OLLAMA_CONTEXT_LENGTH=4096
+
     ports:
-      - "11434:11434" # Ollama API endpoint (http://localhost:11434)
+      - "127.0.0.1:11434:11434" # Ollama API endpoint (http://localhost:11434)
     volumes:
       - ollama_models:/root/.ollama
     restart: unless-stopped
@@ -60,3 +86,5 @@ networks:
   workspaceai-net:
     name: workspaceai_network
     driver: bridge
+
+

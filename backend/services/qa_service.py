@@ -79,6 +79,18 @@ REFERENCE_PRONOUNS = {
 }
 
 
+def is_detail_followup(query: str) -> bool:
+    """Recognize subject-free elaboration requests, not new named topics."""
+    clean = re.sub(r"[.!?]+$", "", query.strip().lower()).strip()
+    clean = re.sub(r"^(?:hãy|vui lòng|bạn có thể)\s+", "", clean)
+    return bool(re.fullmatch(
+        r"(?:(?:mô tả|giải thích|trình bày|phân tích|nói|viết|làm rõ|explain|describe|elaborate)\s+)?"
+        r"(?:(?:lại|thêm)\s+)?(?:(?:một cách|cụ thể|kỹ|rõ)\s+)?"
+        r"(?:chi tiết|cụ thể|rõ|kỹ|detailed|in detail|more detail|more)"
+        r"(?:\s+(?:hơn|nữa|đi|giúp tôi|cho tôi|về nó|về phần trên))*", clean
+    ))
+
+
 def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]]) -> str:
     """
     R1/R5 Deterministic Contextual Query Expansion.
@@ -104,7 +116,7 @@ def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]])
     # A short fragment (< 4 words) lacking a complete standalone question structure
     is_short_fragment = len(tokens) <= 3 and not any(w in q_clean for w in ["ai", "gì", "nào", "sao", "đâu", "khi"])
 
-    if not (has_pronoun or is_follow_up or is_short_fragment):
+    if not (has_pronoun or is_follow_up or is_short_fragment or is_detail_followup(query)):
         return query
 
     # Find the most recent substantive user question
@@ -112,6 +124,8 @@ def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]])
         if turn.get("role") == "user" and turn.get("content"):
             last_user_query = turn["content"].strip()
             if last_user_query.lower() != query.lower().strip():
+                if is_detail_followup(last_user_query):
+                    continue
                 return f"{last_user_query} {query.strip()}".strip()
 
     return query
@@ -268,6 +282,29 @@ class QAService:
                 }
 
         doc_name = chunks[0].doc_name
+        if settings.llm_provider in {"gemini", "ollama"} and not settings.offline_only:
+            # One bounded request with page-spread evidence, then the same verifier as Q&A.
+            sampled = chunks if len(chunks) <= 12 else [chunks[round(i * (len(chunks) - 1) / 11)] for i in range(12)]
+            raw = self.provider.generate_grounded_qa(
+                f"Tóm tắt các đoạn trích được cung cấp từ {doc_name}: mục đích, chủ đề chính và thông tin quan trọng. "
+                "Mỗi ý tóm tắt phải có claim và trích dẫn nguyên văn. Chỉ kết luận trong phạm vi các đoạn đại diện này; không suy diễn về nội dung không được cung cấp.",
+                sampled,
+            )
+            verification = verification_result_to_schema(verify_citations(
+                [claim_schema_to_algorithm(align_claim_to_chunks(c, sampled)) for c in raw],
+                self.repository.build_page_lookup(), theta_match=settings.theta_match,
+            ))
+            return {
+                "route": RouteType.QA_FLOW,
+                "status": "SUMMARY_GENERATED" if verification.validated_claims else "ABSTAINED_INSUFFICIENT_EVIDENCE",
+                "doc_name": doc_name,
+                "summary": "\n\n".join(c.claim_text for c in verification.validated_claims),
+                "message": "Tóm tắt dựa trên các đoạn trích đại diện đã chọn." if verification.validated_claims else "Model chưa cung cấp đủ trích dẫn hợp lệ để tóm tắt tài liệu này.",
+                "summary_scope": "representative_excerpts" if len(chunks) > 12 else "all_indexed_passages",
+                "grounding_score": verification.grounding_score,
+                "validated_claims": verification.validated_claims,
+                "hallucination_flags": verification.hallucination_flags,
+            }
         summary_text = self.provider.generate_summary(doc_name, chunks)
 
         # Collect top representative chunk from each unique page for multi-page evidence inspection
@@ -324,6 +361,7 @@ class QAService:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         tau_rel: Optional[float] = None,
         theta_match: Optional[float] = None,
+        force_offline: bool = False,
     ) -> Dict[str, Any]:
         # 1. Rule: Explicit empty document selection must abstain immediately
         if selected_doc_ids is not None and len(selected_doc_ids) == 0:
@@ -342,7 +380,7 @@ class QAService:
 
         # Check if query is explicitly asking to summarize a document
         summary_keywords = ["tóm tắt", "summarize", "tổng quan tài liệu", "tóm lược", "summary", "review file", "overview file"]
-        if any(w in q_lower for w in summary_keywords):
+        if not force_offline and any(w in q_lower for w in summary_keywords):
             target_doc = resolve_summary_target(query, self.repository, selected_doc_ids)
             if target_doc:
                 return self.summarize_document(target_doc)
@@ -355,7 +393,7 @@ class QAService:
         # 2. Deterministic Contextual Query Expansion
         retrieval_query = expand_contextual_query(query, conversation_history)
         # Prioritize current query keywords 3x over conversation history
-        weighted_query = f"{query} {query} {query} {retrieval_query}" if retrieval_query != query else query
+        weighted_query = retrieval_query
 
         # 3. Adaptive Top-K & Page Diversity based on query breadth
         is_broad_query = any(
@@ -377,11 +415,23 @@ class QAService:
                 "grounding_score": 0.0,
             }
 
+        # A short document can be read in full for elaboration instead of returning
+        # the same top snippets. Keep strict scope and a bounded character budget.
+        if is_detail_followup(query):
+            doc_ids = {chunk.doc_id for chunk in retrieved}
+            expanded = sorted(
+                [chunk for doc_id in doc_ids for chunk in self.repository.get_document_chunks(doc_id)],
+                key=lambda chunk: (chunk.doc_id, chunk.page_number, chunk.start_line),
+            ) if hasattr(self.repository, "get_document_chunks") else []
+            if expanded and len(expanded) <= 10 and sum(len(chunk.text) for chunk in expanded) <= 4500:
+                retrieved = expanded
+
         # 4. Grounded Reasoning with Conversation History & Structured Qwen Prompting
         raw_claims = self.provider.generate_grounded_qa(
-            query,
+            retrieval_query,
             retrieved,
             conversation_history=conversation_history,
+            **({"force_offline": True} if force_offline else {}),
         )
 
         # 5. Snap claims to exact chunk coordinates (Step 2.5) while preserving hallucination detection

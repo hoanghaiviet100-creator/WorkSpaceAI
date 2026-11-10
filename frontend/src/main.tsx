@@ -8,6 +8,13 @@ import "./styles.css";
 import "./interface.css";
 import "./workspace-panels.css";
 import "./auth.css";
+import "./schema.css";
+import "./home.css";
+import "./home-dashboard.css";
+import "./landing.css";
+import "./notebook.css";
+import "./light-theme.css";
+import "./kanban.css";
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <App />

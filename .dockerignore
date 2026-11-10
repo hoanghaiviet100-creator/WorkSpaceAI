@@ -20,3 +20,9 @@ WorkspaceAI_Report_LaTeX_Package.zip
 report/
 reports/
 .workspace_data/
+
+**/node_modules
+**/dist
+**/.taste-skill
+**/.env*
+!.env.example

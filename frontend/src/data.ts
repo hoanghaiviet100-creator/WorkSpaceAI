@@ -1,4 +1,15 @@
 import type { TaskStatus } from "./task-status";
+import type {
+  DocumentPageRow,
+  EmailAuditRow,
+  EmailState,
+  EngineMode,
+  RequirementRow,
+  ReconciliationRunRow,
+  ReconciledItemRow,
+  VerificationStatus,
+  RouteType,
+} from "./schema";
 export type Mode = "Ask" | "Tasks" | "Email";
 export type View = "chat" | "tasks" | "email";
 export type Source = {
@@ -9,6 +20,18 @@ export type Source = {
   status: string;
   selected: boolean;
   limitation?: string;
+  fileHash?: string;
+  fileSizeBytes?: number;
+  versionId?: string;
+  totalPages?: number;
+  totalLines?: number;
+  totalChunks?: number;
+  mimeType?: string;
+  uploadedAt?: string;
+  updatedAt?: string;
+  pages?: DocumentPageRow[];
+  origin?: "sample" | "local" | "server";
+  sourceUrl?: string;
 };
 export type EvidenceKey = string;
 export type Evidence = {
@@ -19,6 +42,18 @@ export type Evidence = {
   context: string;
   id: string;
   finding: string;
+  claimId?: string;
+  messageId?: string;
+  page?: number;
+  startLine?: number;
+  endLine?: number;
+  verificationStatus?: VerificationStatus;
+  matchScore?: number;
+  matchedSpan?: string;
+  docVersion?: string;
+  docHash?: string;
+  verifiedAt?: string;
+  origin?: "sample" | "server";
 };
 export type Task = {
   id: string;
@@ -31,6 +66,13 @@ export type Task = {
   flag?: string;
   source?: string;
   secondarySource?: string;
+  mappedReqId?: string;
+  completionPct?: number;
+  sourceRef?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  localLabel?: string;
+  archived?: boolean;
 };
 export type Suggestion = {
   id: string;
@@ -42,8 +84,11 @@ export type Suggestion = {
   selected: boolean;
   source?: string;
   threadId?: string;
+  mappedReqId?: string;
+  completionPct?: number;
 };
 export type Draft = {
+  serverCitations?: string[];
   to: string;
   cc: string;
   subject: string;
@@ -52,6 +97,23 @@ export type Draft = {
   tone: string;
   evidenceIds: string[];
   context?: string;
+  id?: string;
+  sessionId?: string;
+  attachmentIds?: string[];
+  currentState?: EmailState;
+  payloadHash?: string;
+  hmacSignature?: string;
+  auditLogs?: EmailAuditRow[];
+  createdAt?: string;
+  updatedAt?: string;
+  sentAt?: string;
+  origin?: "local" | "server";
+  serverSnapshot?: {
+    to: string;
+    subject: string;
+    body: string;
+    attachmentIds: string[];
+  };
 };
 export type Message = {
   id: string;
@@ -62,6 +124,17 @@ export type Message = {
   evidenceIds: string[];
   at: string;
   saved?: boolean;
+  answerText?: string;
+  responseId?: string;
+  groundingScore?: number;
+  routeType?: RouteType;
+  rejectedClaims?: string[];
+  errorText?: string;
+  origin?: "sample" | "server";
+  studioResultId?: string;
+  kanbanEvent?: { boardId: string; count: number; initial: boolean };
+  feedback?: "helpful" | "unhelpful";
+  legacyThreadId?: string;
 };
 export type Handoff = {
   question: string;
@@ -78,9 +151,14 @@ export type Thread = {
   messages: Message[];
   draft?: Draft;
   handoff?: Handoff;
+  engineMode?: EngineMode;
+  createdAt?: string;
+  /** An unsent question staged by the Home workbench; never an assistant response. */
+  composerDraft?: string;
 };
 export type Workspace = {
   id: string;
+  color?: import("./home-model").WorkspaceColor;
   name: string;
   description: string;
   updated: string;
@@ -91,6 +169,20 @@ export type Workspace = {
   draft: Draft;
   threads: Thread[];
   members: string[];
+  requirements?: RequirementRow[];
+  reconciliationRuns?: (ReconciliationRunRow & {
+    origin: "preview" | "server";
+    inputSignature?: string;
+  })[];
+  reconciledItems?: (ReconciledItemRow & {
+    title?: string;
+    serverState?: string;
+  })[];
+  schemaVersion?: number;
+  notebookVersion?: 1;
+  legacyThreads?: Thread[];
+  studioResults?: import("./notebook-model").StudioResult[];
+  kanban?: import("./kanban-model").KanbanBoard;
 };
 export const team = [
   "Phạm Gia Khiêm",
@@ -109,6 +201,9 @@ export const blankDraft = (): Draft => ({
   purpose: "Clarification request",
   tone: "Formal and respectful",
   evidenceIds: [],
+  attachmentIds: [],
+  currentState: "IDLE",
+  origin: "local",
 });
 export const evidence: Record<string, Evidence> = {
   deadline: {
@@ -246,7 +341,7 @@ export const initialTasks: Task[] = [
     owner: team[0],
     initials: "GK",
     due: "2026-11-05",
-    status: "To do",
+    status: "TODO",
     flag: "Conflicting dates",
     source: "conflict",
     secondarySource: "deadline",
@@ -259,7 +354,7 @@ export const initialTasks: Task[] = [
     owner: team[2],
     initials: "QM",
     due: "2026-11-03",
-    status: "In progress",
+    status: "IN_PROGRESS",
     flag: "Overdue",
     source: "rubric",
   },
@@ -271,7 +366,7 @@ export const initialTasks: Task[] = [
     owner: team[1],
     initials: "HV",
     due: "2026-11-05",
-    status: "In progress",
+    status: "IN_PROGRESS",
     source: "deadline",
   },
   {
@@ -281,7 +376,7 @@ export const initialTasks: Task[] = [
     owner: team[3],
     initials: "BH",
     due: "2026-11-02",
-    status: "Done",
+    status: "DONE",
     source: "rubric",
   },
   {
@@ -291,7 +386,7 @@ export const initialTasks: Task[] = [
     owner: team[4],
     initials: "MD",
     due: "2026-11-01",
-    status: "Done",
+    status: "DONE",
     source: "deadline",
   },
 ];
@@ -482,7 +577,7 @@ export function seedWorkspaces(): Workspace[] {
           owner: team[0],
           initials: "GK",
           due: "2026-11-05",
-          status: "To do",
+          status: "TODO",
           source: "reading",
         },
       ],
@@ -571,6 +666,10 @@ export function emptyWorkspace(name: string, description: string): Workspace {
     draft: blankDraft(),
     threads: [],
     members: [team[0]],
+    requirements: [],
+    reconciliationRuns: [],
+    reconciledItems: [],
+    schemaVersion: 3,
   };
 }
 export function detectMode(text: string): Mode {
@@ -614,6 +713,6 @@ console.assert(
   "Eight seeded conversations",
 );
 console.assert(
-  initialTasks.filter((t) => t.status === "Done").length === 2,
+  initialTasks.filter((t) => t.status === "DONE").length === 2,
   "Progress reconciles with task rows",
 );

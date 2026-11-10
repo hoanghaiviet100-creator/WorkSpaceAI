@@ -1,0 +1,174 @@
+/* Reference-led light palette. Scope every rule so dark mode keeps its own colors. */
+:root[data-theme="light"] {
+  --bg: #f3f0f8;
+  --canvas: #fcfbfe;
+  --surface: #f5f0fa;
+  --raised: #efebf5;
+  --subtle: #f8f5fb;
+  --active: #ebe3f3;
+  --text: #28232f;
+  --muted: #6b6274;
+  --faint: #706777;
+  --border: #e5deed;
+  --control: #b5a6c3;
+  --accent: #f78f67;
+  --accent-ink: #9a4228;
+  --accent-soft: #fff0e8;
+  --on-accent: #452310;
+}
+
+:root[data-theme="light"] ::selection {
+  background: #e7d8f2;
+  color: #28232f;
+}
+
+:root[data-theme="light"] .notebook {
+  --nb-panel: #fcfbfe;
+  --nb-canvas: #f0ecf6;
+  --nb-soft: #f1ecf7;
+  --nb-line: #e3dbea;
+  --nb-ink: #28232f;
+  --nb-muted: #6b6274;
+  --nb-teal: #825576;
+}
+
+:root[data-theme="light"] .nb-header {
+  background: #f5f2fa;
+}
+
+:root[data-theme="light"] .nb-panel {
+  border-color: #e7e0ee;
+}
+
+:root[data-theme="light"] .nb-chat {
+  background:
+    radial-gradient(ellipse at 60% 35%, #fae8ed99, transparent 66%),
+    radial-gradient(ellipse at 0% 0%, #eae5fa99, transparent 75%), #f7f4fa;
+}
+
+:root[data-theme="light"] .nb-chat > .nb-panel-header {
+  border-color: #e8e0ee;
+  background: #fbf9fd99;
+}
+
+:root[data-theme="light"] .nb-add-source,
+:root[data-theme="light"] .nb-avatar {
+  background: #fff0e8;
+  color: #9a4228;
+}
+
+:root[data-theme="light"] .nb-add-source:not(:disabled):hover {
+  background: #ffe5d8;
+  border-color: #bd7458;
+}
+
+:root[data-theme="light"] .nb-source-search {
+  background: #f7f3fb;
+}
+
+:root[data-theme="light"] .nb-source-row.is-selected {
+  background: #eee7f7;
+}
+
+:root[data-theme="light"] .nb-source-row:not(.is-selected):hover {
+  background: #f4eef9;
+}
+
+:root[data-theme="light"] .nb-tool-card {
+  border-color: #ece2ed;
+  background: linear-gradient(120deg, #fff0e7, #f8eaf2 55%, #f0e8fa);
+}
+
+:root[data-theme="light"] .nb-tool-main:not(:disabled):hover {
+  background: #f6e9f199;
+}
+
+:root[data-theme="light"] .nb-prompt-cards button {
+  border-color: #e9e1ed;
+  background: #fdfbfe;
+}
+
+:root[data-theme="light"] .nb-prompt-cards button:not(:disabled):hover {
+  border-color: #cbb7da;
+  background: #f1e8f8;
+}
+
+:root[data-theme="light"] .nb-prompt-cards button:disabled {
+  background: #f6f1f9;
+}
+
+:root[data-theme="light"] .notebook .composer-area {
+  border-color: #e9e0ed;
+  background: #f8f4fa;
+}
+
+:root[data-theme="light"] .notebook .nb-chat-welcome .composer-area {
+  background: transparent;
+}
+
+/* The sample's peach/pink edge is limited to the central writing surface. */
+:root[data-theme="light"] .notebook .composer {
+  border: 1px solid transparent;
+  background:
+    linear-gradient(#fdfcfe, #fdfcfe) padding-box,
+    linear-gradient(115deg, #efb39a, #e6d4f1 52%, #e9b4d7) border-box;
+  box-shadow:
+    0 0 0 3px #f9eaf366,
+    0 8px 24px -16px #cc8b93a6;
+}
+
+:root[data-theme="light"] .notebook .composer:focus-within {
+  border-color: #a75b40;
+  outline: 2px solid #f5dcd7;
+  outline-offset: 2px;
+}
+
+:root[data-theme="light"] .notebook .composer textarea::placeholder {
+  color: #706777;
+  opacity: 1;
+}
+
+:root[data-theme="light"] .notebook .send-button,
+:root[data-theme="light"] .button.primary,
+:root[data-theme="light"] .landing-primary {
+  border: 1px solid #b95c3a;
+  background: linear-gradient(110deg, #ffa480, #f78961);
+  color: #452310;
+}
+
+:root[data-theme="light"] .notebook .send-button:not(:disabled):hover,
+:root[data-theme="light"] .button.primary:not(:disabled):hover,
+:root[data-theme="light"] .landing-primary:not(:disabled):hover {
+  border-color: #9a4228;
+  background: #f5865d;
+  color: #452310;
+}
+
+:root[data-theme="light"] .notebook .question-bubble {
+  border-color: #ead8e6;
+  background: #f6e8ef;
+}
+
+:root[data-theme="light"] .notebook .nb-citation,
+:root[data-theme="light"] .nb-answer-tools [aria-pressed="true"] {
+  background: #fff0e8;
+  color: #9a4228;
+}
+
+:root[data-theme="light"] .nb-bottom-tabs {
+  background: #fcfaff;
+}
+
+:root[data-theme="light"] .nb-bottom-tabs [aria-current="page"] {
+  background: #f8e6e1;
+  color: #9a4228;
+}
+
+:root[data-theme="light"] .landing-start {
+  color: #28232f;
+  background: linear-gradient(112deg, #fbdccc, #f4dce9 56%, #e7def7);
+}
+
+:root[data-theme="light"] .landing-hero-rule span {
+  background: linear-gradient(90deg, #e89a76, #ddb6d4 55%, #c5b1e6);
+}

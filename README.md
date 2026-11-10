@@ -9,7 +9,7 @@ $$\text{REQUEST} \longrightarrow \text{UNDERSTAND} \longrightarrow \text{ROUTE} 
 
 ## 🚀 Quick Start with Docker (Recommended)
 
-You can run the entire WorkspaceAI platform (FastAPI Backend + Streamlit UI + Local Ollama LLM) with a single command without installing Python dependencies locally.
+You can run the entire WorkspaceAI platform (React UI + FastAPI Backend + Local Ollama LLM) with a single command without installing Python dependencies locally.
 
 ### 1. Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/) installed and running.
@@ -22,12 +22,12 @@ cp .env.example .env
 
 ### 3. Build & Run
 ```bash
-docker compose up --build
+docker compose up --build -d
 ```
 
 Once started:
-- 🌐 **Interactive Web UI (Streamlit):** [http://localhost:8501](http://localhost:8501)
-- 📖 **API Docs & Swagger UI (FastAPI):** [http://localhost:8000/docs](http://localhost:8000/docs)
+- 🌐 **Interactive Web UI (React):** [http://localhost:8501](http://localhost:8501)
+- 📖 **API Docs & Swagger UI (FastAPI):** [http://localhost:8001/docs](http://localhost:8001/docs)
 - 🦙 **Ollama LLM Engine:** [http://localhost:11434](http://localhost:11434)
 
 ### 4. Pull Local LLM Model (Optional for Ollama)
@@ -47,6 +47,16 @@ docker compose run --rm app test
 ```
 
 ---
+
+### Docker data and stopping
+
+React is served at http://localhost:8501. `/api` requests are forwarded to FastAPI inside Docker. Ports are bound to this computer only.
+
+Backend document libraries persist in `./.workspace_data` on the host; back up this folder. Ollama models persist in the `workspaceai_ollama_models` volume. UI conversations and boards use browser local storage: keep the same browser profile and URL. Data from `http://127.0.0.1:5174` is not automatically transferred to `http://localhost:8501`.
+
+Stop without deleting data: `docker compose down`. Start again: `docker compose up -d`. Do not use `down --volumes` unless you intend to delete model storage. Keep original documents as backups.
+
+To use the 1.5B model, set `OLLAMA_MODEL=qwen2.5:1.5b` in `.env`, pull that exact model, and recreate app with `docker compose up -d`. No Node.js, Python or Ollama installation is needed on the host.
 
 ## 💻 Manual Local Setup (Without Docker)
 
@@ -98,3 +108,11 @@ pytest -v
 | **Safeguards & Guardrails** | Prompt injection detection ($R_7$), recipient validation, untrusted context framing | `backend/core/guardrails.py`<br>`backend/services/router_service.py` |
 
 For detailed architectural specification, see [`WORKSPACEAI_PROJECT_ARCHITECTURE_AND_STATUS_REPORT.md`](WORKSPACEAI_PROJECT_ARCHITECTURE_AND_STATUS_REPORT.md).
+
+
+
+### NVIDIA laptop profile
+
+The Ollama service requests NVIDIA GPU access (requires a working Docker Desktop WSL2 GPU setup). It limits CPU to 4 cores, host memory to 10 GB, parallel requests to one and loaded models to one; queue limit is four. Models unload after 60 seconds idle. Backend generation uses a 4096-token context, up to 1024 output tokens (2048 for detailed Q&A) and four CPU threads. These are resource controls, not GPU wattage or hardware temperature limits. Do not interpret a successful short test as a hardware safety guarantee.
+
+Qwen2.5 7B downloads about 4.7 GB; keep disk headroom for Docker. Stop model use immediately with `docker compose stop ollama`; restart with `docker compose up -d ollama`. Check loaded GPU placement with `docker compose exec ollama ollama ps`. Keep the same browser origin for existing UI history.

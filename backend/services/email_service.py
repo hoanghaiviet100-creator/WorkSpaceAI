@@ -87,7 +87,7 @@ class EmailService:
             recipient = extracted[0] if extracted else "an.nguyen@hcmus.edu.vn"
 
         # Retrieve relevant chunks from workspace documents
-        retrieved = self.workspace_repo.search(req.query, top_k=2)
+        retrieved = self.workspace_repo.search(req.query, top_k=2, selected_doc_ids=req.selected_doc_ids)
         citations = [f"{c.doc_name} (Page {c.page_number})" for c in retrieved]
 
         # Use LLMProvider to generate dynamic Subject and Body according to user topic

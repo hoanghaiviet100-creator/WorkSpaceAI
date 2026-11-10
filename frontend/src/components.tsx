@@ -2,10 +2,12 @@ import {
   createContext,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   FileText,
@@ -31,13 +33,75 @@ export function Badge({
 export function Citation({
   id,
   onOpen,
+  number,
 }: {
   id: EvidenceKey;
   onOpen: (id: EvidenceKey) => void;
+  number?: number;
 }) {
+  const tooltipId = useId();
+  const [preview, setPreview] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    transform: string;
+  } | null>(null);
   const entry = useContext(EvidenceContext)[id];
   if (!entry)
     return <span className="unavailable-source">Source unavailable</span>;
+  if (number !== undefined)
+    return (
+      <span className="nb-citation-wrap">
+        <button
+          className="citation nb-citation"
+          aria-label={`Nguồn ${number}: ${entry.file}, ${entry.locator}`}
+          aria-describedby={preview ? tooltipId : undefined}
+          onMouseEnter={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const width = Math.min(320, innerWidth - 32);
+            setPreview({
+              width,
+              left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
+              top: rect.top > 260 ? rect.top - 8 : rect.bottom + 8,
+              transform: rect.top > 260 ? "translateY(-100%)" : "none",
+            });
+          }}
+          onMouseLeave={() => setPreview(null)}
+          onFocus={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const width = Math.min(320, innerWidth - 32);
+            setPreview({
+              width,
+              left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
+              top: rect.top > 260 ? rect.top - 8 : rect.bottom + 8,
+              transform: rect.top > 260 ? "translateY(-100%)" : "none",
+            });
+          }}
+          onBlur={() => setPreview(null)}
+          onClick={() => {
+            setPreview(null);
+            onOpen(id);
+          }}
+        >
+          [{number}]
+        </button>
+        {preview &&
+          createPortal(
+            <span
+              id={tooltipId}
+              className="nb-citation-preview is-visible"
+              role="tooltip"
+              style={preview}
+            >
+              <strong>
+                {entry.file} · {entry.locator}
+              </strong>
+              <span>“{entry.quote}”</span>
+            </span>,
+            document.body,
+          )}
+      </span>
+    );
   return (
     <button className="citation" onClick={() => onOpen(id)}>
       <FileText size={13} />
@@ -102,6 +166,15 @@ export function Modal({
     const old = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const handle = (e: KeyboardEvent) => {
+      // Only the topmost dialog owns Escape and the focus loop (task editors can nest).
+      const dialogs = document.querySelectorAll(
+        '[role="dialog"][aria-modal="true"]',
+      );
+      if (
+        dialogs[dialogs.length - 1] !== el ||
+        document.querySelector(".nb-action-menu")
+      )
+        return;
       if (
         e.key === "Escape" &&
         !e.defaultPrevented &&
@@ -173,6 +246,39 @@ export function Modal({
   );
 }
 export type Theme = "light" | "dark" | "system";
+/** Apply the saved theme even when the Display popover is closed or a deep link opens. */
+export function ThemeRuntime() {
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      let saved = "system";
+      try {
+        saved = localStorage.getItem("wai-theme") || "system";
+      } catch {
+        /* Use the device preference. */
+      }
+      const resolved =
+        saved === "light" || saved === "dark"
+          ? saved
+          : media.matches
+            ? "dark"
+            : "light";
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    };
+    const changed = (event: StorageEvent) => {
+      if (event.key === "wai-theme") apply();
+    };
+    apply();
+    media.addEventListener("change", apply);
+    addEventListener("storage", changed);
+    return () => {
+      media.removeEventListener("change", apply);
+      removeEventListener("storage", changed);
+    };
+  }, []);
+  return null;
+}
 export function ThemeControl() {
   const [theme, setTheme] = useState<Theme>(() => {
     try {

@@ -1,12 +1,16 @@
 from datetime import datetime
 import hashlib
 import io
+from pathlib import Path
 import re
+from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 import pypdf
 
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
+from backend.repositories.local_library_store import LocalLibraryStore
+from backend.services.source_formats import parse_office_pages, MAX_SOURCE_BYTES
 
 
 def format_chunk_with_lines(chunk: DocumentChunk) -> str:
@@ -39,8 +43,25 @@ class DocumentService:
       * Identical name, different hash -> Increment version (v1 -> v2) and ingest.
     """
 
-    def __init__(self, repository: Optional[WorkspaceRepository] = None) -> None:
+    def __init__(self, repository: Optional[WorkspaceRepository] = None, library_path: Optional[Path] = None) -> None:
         self.repository = repository or workspace_repository
+        self._library_lock = RLock()
+        self._store: Optional[LocalLibraryStore] = None
+        if library_path is not None:
+            self.enable_local_storage(library_path)
+
+    def enable_local_storage(self, path: Path) -> bool:
+        """Attach local persistence; return whether a saved library was restored."""
+        with self._library_lock:
+            store = LocalLibraryStore(path)
+            restored = store.restore(self.repository)
+            self._store = store
+            return restored
+
+    def save_library(self) -> None:
+        with self._library_lock:
+            if self._store is not None:
+                self._store.save(self.repository)
 
     def compute_hash(self, content_bytes: bytes) -> str:
         """Computes SHA-256 checksum over raw file bytes."""
@@ -233,14 +254,22 @@ class DocumentService:
         return chunks
 
     def ingest_file(self, filename: str, content_bytes: bytes) -> Dict[str, Any]:
+        with self._library_lock:
+            result = self._ingest_file(filename, content_bytes)
+            self.save_library()
+            return result
+
+    def _ingest_file(self, filename: str, content_bytes: bytes) -> Dict[str, Any]:
         """
         Ingests a user file into the workspace.
         Enforces deduplication by SHA-256 hash and automatic version increment.
         """
         lower = filename.lower()
-        if not (lower.endswith(".pdf") or lower.endswith((".txt", ".md")) or lower.endswith(".csv")):
+        if len(content_bytes) > MAX_SOURCE_BYTES:
+            raise ValueError("Tệp vượt giới hạn 25 MB.")
+        if not lower.endswith((".pdf", ".txt", ".md", ".csv", ".docx", ".pptx")):
             raise ValueError(
-                f"Định dạng tệp '{filename}' không được hỗ trợ. Vui lòng tải PDF (text layer), TXT, MD hoặc CSV."
+                f"Định dạng tệp '{filename}' không được hỗ trợ. Dùng PDF có văn bản, DOCX, PPTX, TXT, MD hoặc CSV."
             )
 
         file_hash = self.compute_hash(content_bytes)
@@ -259,11 +288,18 @@ class DocumentService:
         clean_name = filename.strip()
         version_id = self.repository.get_next_version_id(clean_name)
         doc_id = clean_name if version_id == "v1" else f"{clean_name}_{version_id}"
+        # Renaming keeps IDs stable. A former filename may still occupy its old ID.
+        while doc_id in self.repository.documents:
+            version_id = f"v{int(version_id[1:]) + 1}"
+            doc_id = f"{clean_name}_{version_id}"
 
         # Extract pages
         if lower.endswith(".pdf"):
             pages = self.parse_pdf_pages(clean_name, content_bytes)
             file_type = "pdf"
+        elif lower.endswith((".docx", ".pptx")):
+            pages = parse_office_pages(clean_name, content_bytes)
+            file_type = "docx" if lower.endswith(".docx") else "pptx"
         elif lower.endswith(".csv"):
             csv_text = content_bytes.decode("utf-8-sig", errors="ignore")
             added_count = self.repository.ingest_csv_tasks(
@@ -325,7 +361,47 @@ class DocumentService:
 
     def delete_document(self, doc_id: str) -> bool:
         """Deletes a document from the workspace repository."""
-        return self.repository.delete_document(doc_id)
+        with self._library_lock:
+            removed = self.repository.delete_document(doc_id)
+            if removed:
+                self.save_library()
+            return removed
+
+    def rename_document(self, doc_id: str, name: str):
+        with self._library_lock:
+            metadata = self.repository.documents.get(doc_id)
+            if not metadata:
+                raise KeyError(doc_id)
+            name = name.strip()
+            if not name or len(name) > 180 or any(character in name for character in '\\/:*?"<>|'):
+                raise ValueError("Tên tài liệu không hợp lệ.")
+            if Path(name).suffix.lower() != Path(metadata.doc_name).suffix.lower():
+                raise ValueError("Giữ nguyên phần mở rộng của tệp khi đổi tên.")
+            metadata.doc_name = name
+            for chunk in self.repository.get_document_chunks(doc_id):
+                chunk.doc_name = name
+            self.save_library()
+            return metadata
+
+    def page_text(self, doc_id: str, page_number: int):
+        """Return stored extracted lines at their real coordinates, not a fabricated PDF render."""
+        metadata = self.repository.documents.get(doc_id)
+        if not metadata or page_number < 1 or page_number > metadata.page_count:
+            raise KeyError(doc_id)
+        lines = {}
+        for chunk in self.repository.get_document_chunks(doc_id):
+            if chunk.page_number == page_number:
+                for offset, line in enumerate(chunk.text.splitlines()):
+                    lines[chunk.start_line + offset] = line
+        if not lines:
+            raise ValueError("Trang này không có văn bản đã được lưu.")
+        last = max(lines)
+        text = "\n".join(lines.get(index, "") for index in range(1, last + 1))
+        return {"page_id": page_number, "doc_id": doc_id, "page_number": page_number,
+                "line_count": last, "raw_text": text, "page_hash": self.compute_hash(text.encode("utf-8")),
+                "created_at": metadata.uploaded_at, "doc_hash": metadata.file_hash,
+                "doc_version": metadata.version_id, "extracted_text": True,
+                "partial": len(lines) != last}
 
     def list_documents(self) -> List[Dict[str, Any]]:
         """Lists all documents currently in the workspace library."""
@@ -333,7 +409,9 @@ class DocumentService:
 
     def set_selected_documents(self, doc_ids: List[str]) -> None:
         """Updates the list of active/selected document IDs."""
-        self.repository.set_selected_documents(doc_ids)
+        with self._library_lock:
+            self.repository.set_selected_documents(doc_ids)
+            self.save_library()
 
     def get_selected_doc_ids(self) -> List[str]:
         """Gets all currently selected document IDs."""

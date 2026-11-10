@@ -16,10 +16,19 @@ import {
   Clock3,
   ChevronDown,
 } from "lucide-react";
-import { type Task, type EvidenceKey, type Suggestion } from "./data";
+import {
+  type Task,
+  type EvidenceKey,
+  type Suggestion,
+  type Workspace,
+} from "./data";
+import Requirements from "./Requirements";
+import Reconciliation from "./Reconciliation";
+import { clampProgress } from "./schema";
 import { Badge, Citation, Notice, Modal } from "./components";
 import {
   TASK_STATUSES,
+  LOCAL_TASK_LABELS,
   TaskStatusPill,
   taskLane,
   type BoardLane,
@@ -35,7 +44,11 @@ export default function Tasks({
   onEvidence,
   notify,
   initialTab = "board",
+  workspace,
+  updateWorkspace,
 }: {
+  workspace: Workspace;
+  updateWorkspace: (fn: (w: Workspace) => Workspace) => void;
   tasks: Task[];
   setTasks: Dispatch<SetStateAction<Task[]>>;
   suggestions: Suggestion[];
@@ -76,8 +89,17 @@ export default function Tasks({
               .join("")
           : "?",
         due: s.due,
-        status: s.status ?? ("To do" as const),
+        status: s.status ?? ("TODO" as const),
         source: s.source,
+        sourceRef:
+          s.source && workspace.evidence[s.source]
+            ? `${workspace.evidence[s.source].file} ${workspace.evidence[s.source].locator}`
+            : "",
+        mappedReqId: s.mappedReqId,
+        completionPct:
+          s.status === "DONE" ? 100 : clampProgress(s.completionPct),
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
       })),
     ]);
     setSuggestions((ss) => ss.filter((s) => !ids.includes(s.id)));
@@ -100,17 +122,16 @@ export default function Tasks({
       (filter === "All members" || t.owner === filter) &&
       (statusFilter === "All statuses" || t.status === statusFilter),
   );
-  const activeTasks = tasks.filter((t) => t.status !== "Archived");
+  const activeTasks = tasks.filter((t) => !t.archived);
   const lanes: BoardLane[] =
     statusFilter !== "All statuses"
       ? [taskLane(statusFilter)]
       : [
           "To do",
           "In progress",
+          "In Review",
           "Done",
-          ...(visible.some((t) => t.status === "Archived")
-            ? ["Archived" as const]
-            : []),
+          ...(visible.some((t) => t.archived) ? ["Archived" as const] : []),
         ];
   const mobileLane = lanes.includes(mobileStatus) ? mobileStatus : lanes[0];
   return (
@@ -130,6 +151,18 @@ export default function Tasks({
           >
             Suggestion review <span>{suggestions.length}</span>
           </button>
+          <button
+            className={tab === "requirements" ? "selected" : ""}
+            onClick={() => setTab("requirements")}
+          >
+            Requirements <span>{workspace.requirements?.length ?? 0}</span>
+          </button>
+          <button
+            className={tab === "reconciliation" ? "selected" : ""}
+            onClick={() => setTab("reconciliation")}
+          >
+            Reconciliation
+          </button>
         </div>
         <button
           className="button primary"
@@ -142,7 +175,15 @@ export default function Tasks({
           Suggest tasks
         </button>
       </div>
-      {tab === "board" ? (
+      {tab === "requirements" ? (
+        <Requirements
+          workspace={workspace}
+          update={updateWorkspace}
+          notify={notify}
+        />
+      ) : tab === "reconciliation" ? (
+        <Reconciliation workspace={workspace} update={updateWorkspace} />
+      ) : tab === "board" ? (
         <>
           <div className="board-summary">
             <div>
@@ -150,14 +191,14 @@ export default function Tasks({
                 Project progress <span className="badge">Computed</span>
               </span>
               <strong>
-                {activeTasks.filter((t) => t.status === "Done").length}{" "}
+                {activeTasks.filter((t) => t.status === "DONE").length}{" "}
                 <span>of {activeTasks.length} active tasks complete</span>
               </strong>
             </div>
             <div className="progress-track">
               <span
                 style={{
-                  width: `${activeTasks.length ? (activeTasks.filter((t) => t.status === "Done").length / activeTasks.length) * 100 : 0}%`,
+                  width: `${activeTasks.length ? (activeTasks.filter((t) => t.status === "DONE").length / activeTasks.length) * 100 : 0}%`,
                 }}
               />
             </div>
@@ -167,9 +208,27 @@ export default function Tasks({
             </div>
           </div>
           <div className="board-toolbar">
-            <span className="small muted">
-              Workspace task board · Reviewed by you
-            </span>
+            <button
+              className="button"
+              onClick={() => {
+                const now = new Date().toISOString();
+                setEditing({
+                  id: crypto.randomUUID(),
+                  title: "",
+                  description: "",
+                  owner: "",
+                  initials: "?",
+                  due: "",
+                  status: "TODO",
+                  completionPct: 0,
+                  createdAt: now,
+                  updatedAt: now,
+                });
+              }}
+            >
+              <Plus size={14} />
+              New task
+            </button>
             <div className="board-filter-controls">
               <label>
                 <ListFilter size={14} />
@@ -210,7 +269,7 @@ export default function Tasks({
           </div>
           <details className="task-status-guide">
             <summary>
-              Task statuses <span>10 available</span>
+              Task statuses <span>4 workflow states</span>
               <ChevronDown size={14} />
             </summary>
             <div className="task-status-legend">
@@ -231,23 +290,24 @@ export default function Tasks({
               ))}
             </div>
           </details>
-          {suggestions.some((s) => s.source === "rubric") &&
-            !tasks.some((t) => /computational thinking/i.test(t.title)) && (
-              <div className="requirement-gap">
-                <div>
-                  <AlertTriangle size={17} />
-                  <strong>Missing work</strong>
-                  <span>
-                    No confirmed task covers the computational thinking
-                    analysis.
-                  </span>
-                  <Citation id="rubric" onOpen={onEvidence} />
-                </div>
-                <button onClick={() => setTab("review")}>
-                  Review suggestion <ArrowRight size={14} />
-                </button>
+          {(workspace.requirements ?? []).some(
+            (r) =>
+              r.mandatory_flag &&
+              !tasks.some((t) => t.mappedReqId === r.req_id),
+          ) && (
+            <div className="requirement-gap">
+              <div>
+                <AlertTriangle size={17} />
+                <strong>Missing work</strong>
+                <span>
+                  Some mandatory requirements have no explicitly linked task.
+                </span>
               </div>
-            )}
+              <button onClick={() => setTab("requirements")}>
+                Review requirements <ArrowRight size={14} />
+              </button>
+            </div>
+          )}
           <div
             className="mobile-board-nav"
             role="group"
@@ -263,7 +323,11 @@ export default function Tasks({
               >
                 {status === "In progress" ? "Active" : status}
                 <span>
-                  {visible.filter((t) => taskLane(t.status) === status).length}
+                  {
+                    visible.filter(
+                      (t) => taskLane(t.status, t.archived) === status,
+                    ).length
+                  }
                 </span>
               </button>
             ))}
@@ -288,19 +352,20 @@ export default function Tasks({
                   </h2>
                   <span className="small muted">
                     {
-                      visible.filter((t) => taskLane(t.status) === status)
-                        .length
+                      visible.filter(
+                        (t) => taskLane(t.status, t.archived) === status,
+                      ).length
                     }
                   </span>
                 </header>
                 <div className="task-stack">
                   {visible
-                    .filter((t) => taskLane(t.status) === status)
+                    .filter((t) => taskLane(t.status, t.archived) === status)
                     .map((t) => (
                       <article
                         className="task-card"
                         data-status={t.status}
-                        data-lane={taskLane(t.status)}
+                        data-lane={taskLane(t.status, t.archived)}
                         key={t.id}
                       >
                         <div className="task-card-top">
@@ -320,6 +385,35 @@ export default function Tasks({
                         </div>
                         <h3>{t.title}</h3>
                         <p>{t.description}</p>
+                        <div className="task-mapping">
+                          <span>
+                            {t.mappedReqId
+                              ? ((workspace.requirements ?? []).find(
+                                  (r) => r.req_id === t.mappedReqId,
+                                )?.title ??
+                                `Unavailable requirement: ${t.mappedReqId}`)
+                              : "No linked requirement"}
+                          </span>
+                          <strong>{t.completionPct ?? 0}%</strong>
+                        </div>
+                        {t.localLabel && (
+                          <span
+                            className="task-status-pill"
+                            data-task-tag={t.localLabel
+                              .toLowerCase()
+                              .replaceAll(" ", "-")}
+                          >
+                            {t.localLabel}
+                          </span>
+                        )}
+                        {t.archived && (
+                          <span
+                            className="task-status-pill"
+                            data-task-tag="archived"
+                          >
+                            Archived locally
+                          </span>
+                        )}
                         {t.flag && (
                           <Badge
                             tone={t.flag === "Overdue" ? "danger" : "warning"}
@@ -380,11 +474,16 @@ export default function Tasks({
                                         ...x,
                                         status: e.target
                                           .value as Task["status"],
+                                        completionPct:
+                                          e.target.value === "DONE"
+                                            ? 100
+                                            : x.status === "DONE"
+                                              ? 0
+                                              : x.completionPct,
+                                        updatedAt: new Date().toISOString(),
                                         flag:
                                           x.flag === "Overdue" &&
-                                          ["Done", "Archived"].includes(
-                                            e.target.value,
-                                          )
+                                          ["DONE"].includes(e.target.value)
                                             ? undefined
                                             : x.flag,
                                       }
@@ -406,7 +505,9 @@ export default function Tasks({
                         </label>
                       </article>
                     ))}
-                  {!visible.some((t) => taskLane(t.status) === status) && (
+                  {!visible.some(
+                    (t) => taskLane(t.status, t.archived) === status,
+                  ) && (
                     <div className="empty-slot">
                       No tasks{" "}
                       {status === "Done" ? "completed yet" : "in this column"}.
@@ -532,11 +633,11 @@ export default function Tasks({
                 <label className="suggestion-status-field">
                   <span>
                     Initial status{" "}
-                    <TaskStatusPill status={s.status ?? "To do"} />
+                    <TaskStatusPill status={s.status ?? "TODO"} />
                   </span>
                   <select
                     aria-label={`Initial status for ${s.title}`}
-                    value={s.status ?? "To do"}
+                    value={s.status ?? "TODO"}
                     onChange={(e) => update(s.id, "status", e.target.value)}
                   >
                     {TASK_STATUSES.map((item) => (
@@ -552,6 +653,23 @@ export default function Tasks({
                 </label>
               </div>
               <div className="suggestion-footer">
+                <label className="suggestion-requirement">
+                  Linked requirement
+                  <select
+                    aria-label={`Requirement for ${s.title}`}
+                    value={s.mappedReqId ?? ""}
+                    onChange={(e) =>
+                      update(s.id, "mappedReqId", e.target.value)
+                    }
+                  >
+                    <option value="">Unspecified</option>
+                    {(workspace.requirements ?? []).map((r) => (
+                      <option value={r.req_id} key={r.req_id}>
+                        {r.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 {s.source ? (
                   <Citation id={s.source} onOpen={onEvidence} />
                 ) : (
@@ -591,8 +709,36 @@ export default function Tasks({
             className="edit-task-form"
             onSubmit={(e) => {
               e.preventDefault();
+              if (!editing.title.trim()) {
+                notify("Enter a task title before saving.");
+                return;
+              }
               setTasks((ts) =>
-                ts.map((t) => (t.id === editing.id ? editing : t)),
+                ts.some((t) => t.id === editing.id)
+                  ? ts.map((t) =>
+                      t.id === editing.id
+                        ? {
+                            ...editing,
+                            title: editing.title.trim(),
+                            completionPct:
+                              editing.status === "DONE"
+                                ? 100
+                                : clampProgress(editing.completionPct),
+                            updatedAt: new Date().toISOString(),
+                          }
+                        : t,
+                    )
+                  : [
+                      ...ts,
+                      {
+                        ...editing,
+                        title: editing.title.trim(),
+                        completionPct:
+                          editing.status === "DONE"
+                            ? 100
+                            : clampProgress(editing.completionPct),
+                      },
+                    ],
               );
               setEditing(null);
               notify("Task updated.");
@@ -627,9 +773,15 @@ export default function Tasks({
                   setEditing({
                     ...editing,
                     status: e.target.value as TaskStatus,
+                    completionPct:
+                      e.target.value === "DONE"
+                        ? 100
+                        : editing.status === "DONE"
+                          ? 0
+                          : editing.completionPct,
                     flag:
                       editing.flag === "Overdue" &&
-                      ["Done", "Archived"].includes(e.target.value)
+                      ["DONE"].includes(e.target.value)
                         ? undefined
                         : editing.flag,
                   })
@@ -664,10 +816,101 @@ export default function Tasks({
                 }
               >
                 <option value="">Unspecified</option>
+                {editing.owner && !team.includes(editing.owner) && (
+                  <option value={editing.owner}>{editing.owner}</option>
+                )}
                 {team.map((n) => (
                   <option key={n}>{n}</option>
                 ))}
               </select>
+            </label>
+            <label>
+              Linked requirement
+              <select
+                aria-label="Linked requirement"
+                value={editing.mappedReqId ?? ""}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    mappedReqId: e.target.value || undefined,
+                  })
+                }
+              >
+                <option value="">Unspecified</option>
+                {(workspace.requirements ?? []).map((r) => (
+                  <option key={r.req_id} value={r.req_id}>
+                    {r.title}
+                  </option>
+                ))}
+                {editing.mappedReqId &&
+                  !(workspace.requirements ?? []).some(
+                    (r) => r.req_id === editing.mappedReqId,
+                  ) && (
+                    <option value={editing.mappedReqId}>
+                      Unavailable requirement ({editing.mappedReqId})
+                    </option>
+                  )}
+              </select>
+            </label>
+            <label>
+              Completion (%)
+              <input
+                aria-label="Task completion"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                required
+                value={editing.completionPct ?? 0}
+                readOnly={editing.status === "DONE"}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    completionPct: e.target.valueAsNumber,
+                  })
+                }
+              />
+            </label>
+            <label>
+              Additional label
+              <select
+                aria-label="Additional task label"
+                value={editing.localLabel ?? ""}
+                onChange={(e) =>
+                  setEditing({
+                    ...editing,
+                    localLabel: e.target.value || undefined,
+                  })
+                }
+              >
+                <option value="">None</option>
+                {LOCAL_TASK_LABELS.map((label) => (
+                  <option key={label}>{label}</option>
+                ))}
+                {editing.localLabel &&
+                  !(LOCAL_TASK_LABELS as readonly string[]).includes(
+                    editing.localLabel,
+                  ) && <option>{editing.localLabel}</option>}
+              </select>
+            </label>
+            <label className="schema-check">
+              <input
+                type="checkbox"
+                checked={editing.archived ?? false}
+                onChange={(e) =>
+                  setEditing({ ...editing, archived: e.target.checked })
+                }
+              />
+              Archived on this device
+            </label>
+            <label>
+              Source reference
+              <input
+                value={editing.sourceRef ?? ""}
+                onChange={(e) =>
+                  setEditing({ ...editing, sourceRef: e.target.value })
+                }
+              />
             </label>
             <label>
               Deadline

@@ -1,6 +1,6 @@
 from datetime import date
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 from pydantic import BaseModel, Field
 
 
@@ -41,6 +41,7 @@ class DocumentMetadata(BaseModel):
     version_id: str = "v1"
     uploaded_at: str = ""
     is_selected: bool = True
+    source_url: Optional[str] = None
 
 
 class RequirementItem(BaseModel):
@@ -147,6 +148,7 @@ class UserRequest(BaseModel):
     recipient_email: Optional[str] = None
     reference_date: date = Field(default_factory=lambda: date(2026, 10, 26))
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
+    studio_tool: Optional[Literal["plan", "email"]] = None
 
 
 class DocumentSelectRequest(BaseModel):

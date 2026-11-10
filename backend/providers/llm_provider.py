@@ -57,6 +57,10 @@ def _safe_parse_json(text: str) -> Optional[dict]:
     return None
 
 
+class GeminiRequestError(RuntimeError):
+    """A safe user-facing error; never contains Google response bodies or credentials."""
+
+
 class LLMProvider:
     """
     R4 AI Capability with Local-First Strategy Pattern:
@@ -79,23 +83,18 @@ class LLMProvider:
         key = (settings.gemini_api_key or "").strip()
         return bool(key and key != "your_gemini_api_key_here" and len(key) > 10)
 
-    def call_gemini(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
+    def call_gemini(self, prompt: str, enforce_json: bool = False, *, feature: str = "qa") -> Optional[str]:
         """
         Calls Google Gemini REST API with explicit timeout and safety parameters.
-        Includes automatic fallback across available Flash endpoints (e.g. gemini-flash-lite-latest).
+        Only Feature 1 Q&A/summaries may call Gemini. One request to the selected model.
         """
-        if not self.is_gemini_configured():
+        if feature not in {"qa", "summary"} or settings.offline_only or settings.llm_provider != "gemini" or not self.is_gemini_configured():
             return None
-
-        # Try configured model first, then auto-fallback to active lite/latest variants
-        models_to_try = [settings.gemini_model]
-        for fallback_m in ["gemini-flash-lite-latest", "gemini-flash-latest"]:
-            if fallback_m not in models_to_try:
-                models_to_try.append(fallback_m)
+        if not re.fullmatch(r"gemini-[A-Za-z0-9._-]+", settings.gemini_model):
+            raise GeminiRequestError("The configured Gemini model is invalid. Open AI settings to select a model.")
 
         gen_config: Dict[str, Any] = {
-            "temperature": 0.1,
-            "maxOutputTokens": 2048,
+            "maxOutputTokens": 4096,
         }
         if enforce_json:
             gen_config["responseMimeType"] = "application/json"
@@ -105,23 +104,30 @@ class LLMProvider:
             "generationConfig": gen_config,
         }
 
-        for model_name in models_to_try:
-            url = (
-                f"https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{model_name}:generateContent?key={settings.gemini_api_key}"
-            )
-            try:
-                resp = httpx.post(url, json=payload, timeout=httpx.Timeout(25.0, connect=3.0))
-                if resp.status_code == 200:
-                    data = resp.json()
-                    candidates = data.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts:
-                            return parts[0].get("text", "").strip()
-            except Exception:
-                continue
-        return None
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent"
+        try:
+            resp = httpx.post(url, headers={"x-goog-api-key": settings.gemini_api_key}, json=payload, timeout=httpx.Timeout(25.0, connect=3.0))
+        except httpx.HTTPError:
+            raise GeminiRequestError("Could not reach Gemini. Your question is preserved; retry or switch to Offline.") from None
+        if resp.status_code == 429:
+            raise GeminiRequestError("Gemini quota or rate limit reached. Check your project's limits, wait, or switch to Offline. No other model was called.")
+        if resp.status_code in {401, 403}:
+            raise GeminiRequestError("Google denied access. Check the API key and this project's model access in AI Studio.")
+        if resp.status_code != 200:
+            raise GeminiRequestError("Gemini could not answer with the selected model. Retry later or switch to Offline.")
+        try:
+            data = resp.json()
+            candidates = data.get("candidates", [])
+            candidate = candidates[0] if candidates else {}
+            if candidate.get("finishReason") == "MAX_TOKENS":
+                raise GeminiRequestError("Gemini reached the response limit. Ask a narrower question or summarize a smaller document.")
+            parts = candidate.get("content", {}).get("parts", [])
+            answer = "\n".join(p["text"] for p in parts if isinstance(p.get("text"), str) and not p.get("thought")).strip()
+        except (ValueError, TypeError, AttributeError, KeyError):
+            raise GeminiRequestError("Gemini returned an unreadable answer. No additional request was sent.") from None
+        if not answer:
+            raise GeminiRequestError("Gemini returned no answer. Try rephrasing your question.")
+        return answer
 
     def get_effective_ollama_model(self) -> str:
         """Resolves the best available local Ollama model if configured one is missing."""
@@ -153,7 +159,7 @@ class LLMProvider:
     def call_ollama(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
         """
         Calls local Ollama instance with qwen2.5 optimization options:
-        - num_ctx: 8192 (prevents context truncation)
+        - num_ctx: 4096 (bounded laptop memory usage)
         - temperature: 0.1 (strict factual grounding)
         - top_p: 0.85
         - repeat_penalty: 1.1
@@ -163,12 +169,15 @@ class LLMProvider:
         if not self.is_ollama_online():
             return None
         active_model = self.get_effective_ollama_model()
+        detailed = "YÊU CẦU TRIỂN KHAI CHI TIẾT:" in prompt
         payload: Dict[str, Any] = {
             "model": active_model,
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_ctx": 8192,
+                "num_ctx": 4096,
+                "num_predict": 2048 if detailed else 1024,
+                "num_thread": 4,
                 "temperature": 0.1,
                 "top_p": 0.85,
                 "repeat_penalty": 1.1,
@@ -176,12 +185,38 @@ class LLMProvider:
         }
         if enforce_json:
             payload["format"] = "json"
+            if detailed:
+                citation_schema = {
+                    "type": "object",
+                    "properties": {
+                        "claim": {"type": "string", "minLength": 180},
+                        "doc_id": {"type": "string"},
+                        "page": {"type": "integer", "minimum": 1},
+                        "line_start": {"type": "integer", "minimum": 1},
+                        "line_end": {"type": "integer", "minimum": 1},
+                        "excerpt": {"type": "string"},
+                    },
+                    "required": ["claim", "doc_id", "page", "line_start", "line_end", "excerpt"],
+                    "additionalProperties": False,
+                }
+                payload["format"] = {
+                    "type": "object",
+                    "properties": {
+                        "answer": {"type": "string"},
+                        "citations": {"anyOf": [
+                            {"type": "array", "items": citation_schema, "minItems": 3, "maxItems": 5},
+                            {"type": "array", "maxItems": 0},
+                        ]},
+                    },
+                    "required": ["answer", "citations"],
+                    "additionalProperties": False,
+                }
 
         try:
             resp = httpx.post(
                 f"{settings.ollama_base_url}/api/generate",
                 json=payload,
-                timeout=httpx.Timeout(60.0, connect=2.0),
+                timeout=httpx.Timeout(120.0 if detailed else 60.0, connect=2.0),
             )
             if resp.status_code == 200:
                 return resp.json().get("response", "").strip()
@@ -258,6 +293,7 @@ class LLMProvider:
         query: str,
         chunks: List[DocumentChunk],
         conversation_history: Optional[List[Dict[str, str]]] = None,
+        force_offline: bool = False,
     ) -> List[GeneratedClaim]:
         """
         Generates grounded claims with exact citations and line locators.
@@ -289,12 +325,33 @@ class LLMProvider:
         raw_response: Optional[str] = None
 
         # 2. Try Local Ollama if configured
-        if settings.llm_provider == "ollama" and self.is_ollama_online():
+        if not force_offline and settings.llm_provider == "ollama" and self.is_ollama_online():
             raw_response = self.call_ollama(prompt, enforce_json=True)
 
         # 3. Try Gemini API if configured
-        if not raw_response and (settings.llm_provider == "gemini" or self.is_gemini_configured()):
-            raw_response = self.call_gemini(prompt, enforce_json=True)
+        if not force_offline and not raw_response and settings.llm_provider == "gemini":
+            raw_response = self.call_gemini(prompt, enforce_json=True, feature="qa")
+
+        if raw_response and settings.llm_provider in {"gemini", "ollama"} and not settings.offline_only:
+            parsed = _safe_parse_json(raw_response)
+            if not isinstance(parsed, dict) or not isinstance(parsed.get("answer"), str) or not isinstance(parsed.get("citations"), list):
+                if settings.llm_provider == "gemini":
+                    raise GeminiRequestError("Gemini returned no usable citation structure. Try rephrasing your question.")
+                return []
+            claims = []
+            for cit in parsed["citations"]:
+                if not isinstance(cit, dict) or not all(isinstance(cit.get(k), str) and cit[k].strip() for k in ("doc_id", "excerpt", "claim")):
+                    continue
+                if not all(isinstance(cit.get(k), int) and not isinstance(cit[k], bool) and cit[k] > 0 for k in ("page", "line_start", "line_end")) or cit["line_start"] > cit["line_end"]:
+                    continue
+                cited = next((c for c in chunks if c.doc_id == cit["doc_id"] and c.page_number == cit["page"]), None)
+                claims.append(GeneratedClaim(
+                    claim_text=cit["claim"].strip(), cited_doc_id=cit["doc_id"],
+                    cited_page=cit["page"], cited_start_line=cit["line_start"], cited_end_line=cit["line_end"],
+                    evidence_quote=cit["excerpt"], doc_version=cited.doc_version if cited else None,
+                    doc_hash=cited.doc_hash if cited else None,
+                ))
+            return claims
 
         # 4. Parse Structured JSON response if available
         if raw_response:
@@ -383,8 +440,8 @@ class LLMProvider:
 
         prompt = build_summary_prompt(doc_name, chunks)
 
-        if settings.llm_provider == "gemini" or self.is_gemini_configured():
-            ans = self.call_gemini(prompt)
+        if settings.llm_provider == "gemini":
+            ans = self.call_gemini(prompt, feature="summary")
             if ans:
                 return ans
 

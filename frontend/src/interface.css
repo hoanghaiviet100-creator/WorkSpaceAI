@@ -376,104 +376,6 @@ select,
   }
 }
 
-/* Theme selection and viewport preview are deliberately separate tools. */
-.toolbar-tool {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.tool-label {
-  color: var(--muted);
-  font-size: 11px;
-}
-.device-control {
-  display: flex;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-.device-control button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 27px;
-  padding: 4px 8px;
-  border-radius: 5px;
-  font-size: 11px;
-  color: var(--muted);
-}
-.device-control button.selected {
-  background: var(--active);
-  color: var(--text);
-}
-.device-control button:last-child {
-  color: var(--accent-ink);
-}
-.overlay:has(.phone-preview-modal) {
-  align-items: center;
-  justify-content: center;
-  padding: 18px;
-}
-.phone-preview-modal {
-  width: 466px;
-  height: calc(100dvh - 36px);
-  max-height: 1050px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 16px 18px;
-  border-radius: 20px;
-  background: var(--subtle);
-}
-.phone-preview-modal > header {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-}
-.phone-preview-modal > header h2 {
-  font-size: 17px;
-}
-.phone-preview-caption {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--muted);
-  margin: 0 auto 12px;
-  width: 100%;
-  max-width: 406px;
-}
-.phone-preview-caption > span {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
-  font-size: 11px;
-}
-.phone-preview-frame {
-  width: 406px;
-  max-width: 100%;
-  flex: 1;
-  min-height: 0;
-  margin: 0 auto;
-  padding: 7px;
-  border: 1px solid var(--control);
-  border-radius: 23px;
-  background: var(--raised);
-}
-.phone-preview-frame iframe {
-  display: block;
-  width: 100%;
-  height: 100%;
-  background: var(--bg);
-  border: 0;
-  border-radius: 16px;
-}
-.phone-preview-note {
-  font-size: 11px;
-  color: var(--muted);
-  text-align: center;
-  margin-top: 11px;
-}
-
 /* Requested workflow tags. Color is backed by an icon and a written label.
    Flat pill fills keep the reference's identity without glow on working UI. */
 [data-task-tag="in-progress"] {
@@ -687,15 +589,11 @@ select,
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 @media (max-width: 1100px) {
-  .header-right .preview-label,
   .header-right .account-avatar {
     display: none;
   }
   .header-right {
     gap: 14px;
-  }
-  .toolbar-tool {
-    gap: 6px;
   }
 }
 @media (max-width: 850px) {
@@ -703,14 +601,8 @@ select,
   .app-header .header-divider {
     display: none;
   }
-  .tool-label {
-    display: none;
-  }
 }
 @media (max-width: 640px) {
-  .device-tool {
-    display: none;
-  }
   .theme-control button {
     min-width: 40px;
     min-height: 40px;
@@ -766,7 +658,11 @@ select,
     min-height: 38px;
   }
 }
-.task-card-top { flex-wrap: wrap; }
-@media(max-width:640px) {
-  .kanban[data-lane-count="1"] .task-stack { grid-template-columns: minmax(0,1fr); }
+.task-card-top {
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .kanban[data-lane-count="1"] .task-stack {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

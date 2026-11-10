@@ -15,12 +15,15 @@ def route_user_request(req: UserRequest) -> Tuple[RouteType, List[str]]:
 
     q = req.query.lower()
     missing_slots: List[str] = []
+    # Explicit Studio actions reuse the same guarded services without guessing from goal text.
+    if req.studio_tool == "plan":
+        return RouteType.QA_FLOW, []
 
     email_keywords = [
         "email", "mail", "send", "draft", "gửi mail", "nháp",
-        "thư", "soạn mail", "viết mail", "soạn thư", "viết thư", "gửi thư",
+        "soạn mail", "viết mail", "soạn thư", "viết thư", "gửi thư",
     ]
-    if any(k in q for k in email_keywords):
+    if req.studio_tool == "email" or any(re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", q) for k in email_keywords):
         if not validate_email_address(req.recipient_email):
             extracted_emails = re.findall(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", req.query)
             if extracted_emails:
@@ -35,7 +38,7 @@ def route_user_request(req: UserRequest) -> Tuple[RouteType, List[str]]:
         return RouteType.EMAIL_FLOW, []
 
 
-    if any(k in q for k in ["compare", "reconcile", "overdue", "conflict", "extract", "table", "đối chiếu", "trễ hạn"]):
+    if any(re.search(r"(?<!\w)" + re.escape(k) + r"(?!\w)", q) for k in ["compare", "reconcile", "overdue", "conflict", "extract", "table", "đối chiếu", "trễ hạn"]):
         return RouteType.RECONCILE_FLOW, []
 
     return RouteType.QA_FLOW, []

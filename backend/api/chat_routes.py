@@ -1,19 +1,23 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from backend.providers.llm_provider import GeminiRequestError
 from backend.core.schemas import RouteType, UserRequest
 from backend.services.email_service import email_service
 from backend.services.qa_service import qa_service
 from backend.services.reconciliation_service import reconciliation_service
 from backend.services.router_service import route_user_request
+from backend.services.workspace_context import WorkspaceServices, resolve_workspace_services
+from backend.api.dependencies import workspace_services
 
 router = APIRouter(prefix="/api", tags=["Chat & Orchestration"])
 
 
 @router.post("/chat")
-def handle_user_request(req: UserRequest):
+def handle_user_request(req: UserRequest, scope: WorkspaceServices = Depends(workspace_services)):
     """
     POST /api/chat
     Router endpoint: Receives user request, classifies route, and delegates to corresponding service.
     """
+    workspace = resolve_workspace_services(scope)
     route, missing_slots = route_user_request(req)
 
     if route == RouteType.REJECTED_SAFEGUARD:
@@ -33,17 +37,21 @@ def handle_user_request(req: UserRequest):
         }
 
     if route == RouteType.QA_FLOW:
-        return qa_service.answer_question(
-            query=req.query,
-            selected_doc_ids=req.selected_doc_ids,
-            conversation_history=req.conversation_history,
-        )
+        try:
+            return workspace.qa.answer_question(
+                query=req.query,
+                selected_doc_ids=req.selected_doc_ids,
+                conversation_history=req.conversation_history,
+                **({"force_offline": True} if req.studio_tool == "plan" else {}),
+            )
+        except GeminiRequestError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from None
 
     if route == RouteType.RECONCILE_FLOW:
-        return reconciliation_service.reconcile(reference_date=req.reference_date)
+        return reconciliation_service.reconcile(reference_date=req.reference_date, **({} if workspace.is_default else {"requirements": [], "tasks": []}))
 
     if route == RouteType.EMAIL_FLOW:
-        return email_service.create_draft(req)
+        return workspace.email.create_draft(req)
 
     return {
         "route": route,

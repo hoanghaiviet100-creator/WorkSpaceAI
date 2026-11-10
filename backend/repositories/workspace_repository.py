@@ -59,25 +59,17 @@ class WorkspaceRepository:
         Removes a document and all its chunks from the repository.
         Returns True if removed, False if doc_id was not found.
         """
-        target_id = None
-        for d_id, doc in self.documents.items():
-            if d_id == doc_id or doc.doc_name == doc_id or d_id.lower() == doc_id.lower():
-                target_id = d_id
-                break
-
-        if target_id is None:
-            # Check if any chunks match doc_id directly
-            has_chunks = any(c.doc_id == doc_id or c.doc_name == doc_id for c in self.chunks)
-            if not has_chunks:
-                return False
-            target_id = doc_id
+        resolved = self._resolve_document_ids([doc_id])
+        if len(resolved) != 1:
+            return False
+        target_id = next(iter(resolved))
 
         if target_id in self.documents:
             del self.documents[target_id]
 
         self.chunks = [
             c for c in self.chunks
-            if c.doc_id != target_id and c.doc_name != target_id
+            if c.doc_id != target_id
         ]
         self._rebuild_index()
         return True
@@ -97,10 +89,10 @@ class WorkspaceRepository:
 
     def set_selected_documents(self, doc_ids: List[str]) -> None:
         """Updates the selection state across all documents in the library."""
-        selected_set = {d.strip().lower() for d in doc_ids}
+        selected_set = self._resolve_document_ids(doc_ids)
         for d_id, doc in self.documents.items():
             doc.is_selected = (
-                d_id.lower() in selected_set or doc.doc_name.lower() in selected_set
+                d_id in selected_set
             )
 
     def get_selected_doc_ids(self) -> List[str]:
@@ -151,11 +143,25 @@ class WorkspaceRepository:
 
     def get_document_chunks(self, doc_id: str) -> List[DocumentChunk]:
         """Returns all chunks belonging to a document by doc_id or doc_name."""
-        target = doc_id.lower().strip()
+        targets = self._resolve_document_ids([doc_id])
         return [
             c for c in self.chunks
-            if c.doc_id.lower().strip() == target or c.doc_name.lower().strip() == target
+            if c.doc_id in targets
         ]
+
+    def _resolve_document_ids(self, values: List[str]):
+        """Stable IDs win over renamed filenames; legacy names resolve only unambiguously."""
+        records = {doc_id: document.doc_name for doc_id, document in self.documents.items()}
+        for chunk in self.chunks:
+            records.setdefault(chunk.doc_id, chunk.doc_name)
+        resolved = set()
+        for value in values:
+            target = value.strip().lower()
+            exact = [doc_id for doc_id in records if doc_id.lower() == target]
+            matches = exact or [doc_id for doc_id, name in records.items() if name.strip().lower() == target]
+            if len(matches) == 1:
+                resolved.add(matches[0])
+        return resolved
 
     def ingest_text_document(
         self,
@@ -341,10 +347,10 @@ class WorkspaceRepository:
             if len(selected_doc_ids) == 0:
                 # Rule: Empty selection must return empty, do NOT search everything
                 return []
-            target_ids = {d.strip().lower() for d in selected_doc_ids}
+            target_ids = self._resolve_document_ids(selected_doc_ids)
             eligible = [
                 c for c in self.chunks
-                if c.doc_id.lower() in target_ids or c.doc_name.lower() in target_ids
+                if c.doc_id in target_ids
             ]
         else:
             selected_in_repo = {

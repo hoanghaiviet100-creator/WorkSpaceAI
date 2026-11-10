@@ -1,6 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from backend.algorithms.email_state_machine import SecurityError
 from backend.services.email_service import email_service
+from backend.services.workspace_context import WorkspaceServices, resolve_workspace_services
+from backend.api.dependencies import workspace_services
 
 router = APIRouter(prefix="/api/email", tags=["Email Approval"])
 
@@ -12,13 +14,14 @@ def approve_email(
     subject: str,
     body: str,
     user_confirmed: bool = True,
+    scope: WorkspaceServices = Depends(workspace_services),
 ):
     """
     POST /api/email/approve/{draft_id}
     Router endpoint: Receives human approval signal and dispatches email after hash verification.
     """
     try:
-        return email_service.approve_and_send(
+        return resolve_workspace_services(scope).email.approve_and_send(
             draft_id=draft_id,
             recipient_email=recipient_email,
             subject=subject,
