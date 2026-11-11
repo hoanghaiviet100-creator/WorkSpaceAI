@@ -11,6 +11,35 @@ Tất cả các thay đổi và nâng cấp quan trọng của dự án **Worksp
 
 ---
 
+## [2.7.0] - 2026-11-10 — Feature 3: Context-Aware Email Reporting & Cryptographic FSM Send Gate
+### Added
+- **100% Pure-Stdlib Finite State Machine (`backend/algorithms/email_state_machine.py`)**:
+  - Khởi tạo 5 trạng thái FSM chuẩn theo Báo cáo Computational Thinking: `DRAFT`, `APPROVED`, `SENT`, `FAILED`, `DELIVERY_UNKNOWN`.
+  - Hàm kiểm tra định dạng email chuẩn RFC-5322 độc lập (`validate_rfc5322_email`).
+  - Hàm băm mật mã SHA-256 bảo chứng toàn vẹn tuple lõi `(recipients, subject, body)` chuẩn hóa (`compute_draft_hash`).
+  - Cổng duyệt ảnh chụp trạng thái có xác nhận người dùng (`approve_snapshot`), phát hiện sửa đổi và khóa mã băm SHA-256.
+  - Cổng xác minh tiền phát tán (`verify_and_lock_for_send`), bảo đảm không gửi lặp (duplicate-send rejection) và phát hiện can thiệp nội dung trái phép (tamper detection).
+- **Mô hình Dữ liệu & Schemas (`backend/core/schemas.py`)**:
+  - `EmailFSMState`: Enum 5 trạng thái FSM.
+  - `EmailDraftRecord`: Pydantic model ánh xạ 100% bảng `EmailDraft` trong Database Schema (`id: UUID`, `workspace_id: UUID`, `recipients`, `subject`, `body`, `fsm_state`, `sha256_digest`, `audit_timestamp`, `citations`).
+  - `CreateDraftRequest`, `ApproveDraftRequest`: Schemas tiếp nhận yêu cầu API.
+- **Tầng Lưu trữ Nháp & Đối soát (`backend/repositories/draft_repository.py`)**:
+  - Hỗ trợ lưu trữ in-memory đầy đủ CRUD (`save`, `get`, `list_by_workspace`, `list_all`, `delete`, `clear`).
+  - Tự động sinh khóa chính `UUID` (chuẩn `uuid.uuid4`) và cập nhật nhãn thời gian đối soát `audit_timestamp` UTC.
+- **Dịch vụ Email Phân luồng Nghiệp vụ (`backend/services/email_service.py`)**:
+  - `create_draft`: Khởi tạo bản nháp với trạng thái ban đầu `DRAFT`.
+  - `approve_draft_snapshot`: Phê duyệt snapshot, ghi nhận mã SHA-256 digest và chuyển trạng thái sang `APPROVED`.
+  - `dispatch_email`: Xác thực điều kiện tiên quyết trước khi gửi; xử lý chế độ Mock Mode và gửi thực qua Gmail SMTP (STARTTLS port 587); tự động bắt lỗi `SMTPAuthenticationError` (`FAILED`), `socket.timeout` / `SMTPServerDisconnected` (`DELIVERY_UNKNOWN` - không tự động retry theo NFR-04).
+- **FastAPI REST Endpoints (`backend/api/email_routes.py`)**:
+  - `POST /api/email/draft`: Tạo mới bản nháp email.
+  - `POST /api/email/{draft_id}/approve`: Duyệt snapshot và khóa mã băm.
+  - `POST /api/email/{draft_id}/send`: Gửi email và cập nhật biên lai kết quả.
+  - `GET /api/email/audit-log`: Truy vấn lịch sử đối soát và trạng thái gửi theo workspace.
+- **Bộ Kiểm thử Tự động Toàn diện (`tests/test_feature3_email_reporting.py`)**:
+  - 10 test case bao phủ 100% luồng FSM, tính cô lập stdlib, chống can thiệp SHA-256, chống gửi trùng lặp, giả lập lỗi SMTP timeout và API workflow (nâng tổng số test case hệ thống lên 30/30 PASSED).
+
+---
+
 ## [2.6.1] - 2026-11-03 — Dynamic Natural Language Target Resolution & Robust Gemini Live Fallback
 ### Added
 - **Natural Language Summary Target Resolution (`resolve_summary_target` trong `qa_service.py`)**:

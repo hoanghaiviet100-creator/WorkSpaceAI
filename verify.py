@@ -64,6 +64,25 @@ def run_ast_check(root_dir: Path) -> bool:
     return True
 
 
+def get_test_executable() -> str:
+    """Finds a Python interpreter that has the required test dependencies (pytest) installed."""
+    check = subprocess.run([sys.executable, "-c", "import pytest"], capture_output=True)
+    if check.returncode == 0:
+        return sys.executable
+    import shutil
+    candidates = [
+        shutil.which("python3.12"),
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+        shutil.which("python3"),
+    ]
+    for c in candidates:
+        if c and Path(c).is_file():
+            chk = subprocess.run([c, "-c", "import pytest"], capture_output=True)
+            if chk.returncode == 0:
+                return c
+    return sys.executable
+
+
 def run_r2_purity_gate() -> bool:
     """Step 2: Subprocess verification of R2 algorithm purity (Pure Python Stdlib Only)."""
     print_step("BUOC 2: R2 STDLIB PURITY GATE (Kiem tra co lap thu vien ben ngoai)")
@@ -92,8 +111,9 @@ def run_r2_purity_gate() -> bool:
         "print('R2_PURITY_VERIFIED_OK')\n"
     )
 
+    py_exe = get_test_executable()
     res = subprocess.run(
-        [sys.executable, "-c", check_code],
+        [py_exe, "-c", check_code],
         capture_output=True,
         text=True,
     )
@@ -111,7 +131,8 @@ def run_r2_purity_gate() -> bool:
 def run_pytest_suite() -> bool:
     """Step 3: Test suite execution via pytest."""
     print_step("BUOC 3: TEST SUITE EXECUTION (Chay toan bo kiem thu he thong)")
-    res = subprocess.run([sys.executable, "-m", "pytest", "-v"])
+    py_exe = get_test_executable()
+    res = subprocess.run([py_exe, "-m", "pytest", "-v"])
     return res.returncode == 0
 
 
