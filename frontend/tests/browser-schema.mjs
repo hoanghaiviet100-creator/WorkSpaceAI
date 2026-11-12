@@ -27,42 +27,6 @@ let emailOutcome = "sent",
       is_selected: true,
     },
   ];
-const report = {
-  coverage_ratio: 0.5,
-  overdue_count: 0,
-  conflict_count: 1,
-  item_reports: [
-    {
-      req_id: "R1",
-      title: "Server requirement complete",
-      state: "COMPLETED",
-      risk_level: "LOW",
-      avg_completion: 100,
-      days_remaining: 3,
-      owners: ["Alex"],
-      date_conflicts: [],
-      citations: ["Project.md p. 1"],
-    },
-    {
-      req_id: "R8",
-      title: "Server deadline mismatch",
-      state: "IN_PROGRESS",
-      risk_level: "MEDIUM",
-      avg_completion: 20,
-      days_remaining: 3,
-      owners: ["Sam"],
-      date_conflicts: [
-        {
-          doc_a: "Official",
-          date_a: "2026-11-09",
-          doc_b: "Team",
-          date_b: "2026-11-08",
-        },
-      ],
-      citations: ["Team.csv row 2"],
-    },
-  ],
-};
 const server = createServer(async (req, res) => {
   if (req.url.startsWith("/api")) {
     const chunks = [];
@@ -95,16 +59,6 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (req.url === "/api/chat") {
-      if (/reconcile/i.test(body.query)) {
-        res.end(
-          JSON.stringify({
-            route: "RECONCILE_FLOW",
-            status: "RECONCILIATION_COMPLETE",
-            reconciliation_report: report,
-          }),
-        );
-        return;
-      }
       if (/draft.*email/i.test(body.query)) {
         res.end(
           JSON.stringify({
@@ -285,131 +239,6 @@ const screenshot = async (name) =>
     fullPage: false,
   });
 try {
-  await go("tasks");
-  await check(
-    "Existing shell, font and 4 workflow states remain",
-    () =>
-      !!document.querySelector(".workspace-layout") &&
-      getComputedStyle(document.body).fontFamily.includes("Be Vietnam Pro") &&
-      document.querySelector('[aria-label="Filter tasks by status"]').options
-        .length === 5,
-  );
-  await textClick("Requirements", ".tabs button");
-  await check(
-    "Requirements show mandatory flag, deadline and linked tasks",
-    () =>
-      document.querySelectorAll(".requirement-row").length === 5 &&
-      document
-        .querySelector(".requirement-row")
-        .innerText.includes("2026-11-06") &&
-      document
-        .querySelector(".requirement-row")
-        .innerText.includes("Mandatory"),
-  );
-  await textClick("Add requirement");
-  await field("Title", "Schema test requirement");
-  await field("Official deadline", "2026-11-20");
-  await field("Keywords (comma separated)", "testing, integration");
-  await textClick("Save requirement");
-  await check(
-    "Requirement creates and persists with source-ready schema fields",
-    () =>
-      JSON.parse(localStorage.getItem("workspaceai-v2"))[0].requirements.some(
-        (r) =>
-          r.title === "Schema test requirement" &&
-          r.official_deadline === "2026-11-20" &&
-          r.mandatory_flag &&
-          r.keywords[1] === "integration",
-      ),
-  );
-  await page.eval(() =>
-    [...document.querySelectorAll(".requirement-row")]
-      .find((e) => e.innerText.includes("Schema test requirement"))
-      .querySelector(".requirement-actions .button")
-      .click(),
-  );
-  await sleep(100);
-  await textClick("Task board", ".tabs button");
-  await click('[aria-label="Edit Schema test requirement"]');
-  await field("Status", "REVIEW");
-  await field("Completion (%)", "45.5");
-  await field("Additional label", "Blocked");
-  await textClick("Save changes");
-  await check(
-    "Task mapping, fractional completion and legacy label are independent",
-    () => {
-      const t = JSON.parse(
-        localStorage.getItem("workspaceai-v2"),
-      )[0].tasks.find((t) => t.title === "Schema test requirement");
-      return (
-        t.status === "REVIEW" &&
-        t.completionPct === 45.5 &&
-        t.localLabel === "Blocked" &&
-        !!t.mappedReqId &&
-        document
-          .querySelector('[data-lane="In Review"]')
-          .innerText.includes("45.5%")
-      );
-    },
-  );
-  await input('[aria-label="Status of Schema test requirement"]', "DONE");
-  await check(
-    "Completing a task records 100 percent",
-    () =>
-      JSON.parse(localStorage.getItem("workspaceai-v2"))[0].tasks.find(
-        (t) => t.title === "Schema test requirement",
-      ).completionPct === 100,
-  );
-  await textClick("Requirements", ".tabs button");
-  await click('[aria-label="Delete requirement Schema test requirement"]');
-  await textClick("Delete requirement", ".modal .button.primary");
-  await check("Deleting a requirement preserves and unlinks its task", () => {
-    const w = JSON.parse(localStorage.getItem("workspaceai-v2"))[0];
-    return (
-      !w.requirements.some((r) => r.title === "Schema test requirement") &&
-      w.tasks.some(
-        (t) => t.title === "Schema test requirement" && !t.mappedReqId,
-      )
-    );
-  });
-  await textClick("Reconciliation", ".tabs button");
-  if (!live) {
-    await check(
-      "Disconnected report has no invented coverage or results",
-      () =>
-        document
-          .querySelector(".reconciliation-screen")
-          .innerText.includes("No reconciliation runs yet") &&
-        document.querySelector(".reconciliation-screen button.primary")
-          .disabled &&
-        !document.querySelector(".reconciliation-metrics"),
-    );
-  } else {
-    await textClick("Run reconciliation");
-    await sleep(300);
-    await check(
-      "Server report shows coverage, conflicts, owners and state adaptation",
-      () =>
-        document
-          .querySelector(".reconciliation-metrics")
-          .innerText.includes("50%") &&
-        document
-          .querySelector(".reconciliation-list")
-          .innerText.includes("Deadline conflict") &&
-        document
-          .querySelector(".reconciliation-list")
-          .innerText.includes("Sam"),
-    );
-    await textClick("Run reconciliation");
-    await sleep(200);
-    await check(
-      "Run history preserves previous report snapshots",
-      () =>
-        document.querySelector('[aria-label="Reconciliation history"]').options
-          .length === 2,
-    );
-  }
-  await screenshot("reconciliation-desktop");
   if (live) {
     await textClick("Sync server library");
     await sleep(150);
@@ -437,7 +266,7 @@ try {
     );
     await go("chat");
     await input(
-      '[aria-label="Message your workspace"]',
+      '[aria-label="Message this note"]',
       "What is the official deadline?",
     );
     await click('[aria-label="Send message"]');
@@ -550,23 +379,6 @@ try {
     await click('.modal [aria-label="Close dialog"]');
   }
   await screenshot("chat-desktop");
-  if (live) {
-    await input(
-      '[aria-label="Message your workspace"]',
-      "Reconcile requirement coverage",
-    );
-    await click('[aria-label="Send message"]');
-    await sleep(250);
-    await textClick("Open Tasks & reconciliation");
-    await check(
-      "A chat reconciliation result opens its report tab directly",
-      () =>
-        document.querySelector(".reconciliation-screen")?.getClientRects()
-          .length > 0 &&
-        document.querySelector(".tasks-screen .tabs .selected").innerText ===
-          "Reconciliation",
-    );
-  }
   await go("email");
   await input('[aria-label="CC recipients"]', "");
   await input('[aria-label="Email recipients"]', "person@example.org");
@@ -679,9 +491,8 @@ try {
     await page.eval((t) => localStorage.setItem("wai-theme", t), theme);
     for (const width of [1440, 768, 390, 320]) {
       await page.setViewport({ width, height: 1000 });
-      for (const view of ["chat", "tasks", "email"]) {
+      for (const view of ["chat", "email"]) {
         await go(view);
-        if (view === "tasks") await textClick("Requirements", ".tabs button");
         await check(
           `${view} ${theme} ${width}px has no page overflow`,
           () =>

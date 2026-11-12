@@ -4,60 +4,20 @@ Column 1: Document Library Management, File Ingestion, and System Configuration.
 """
 from __future__ import annotations
 
-import csv
-import io
-from datetime import date
-from typing import List, Tuple
+from typing import Tuple
 
 import streamlit as st
 from backend.core.config import settings
-from backend.core.schemas import TaskRecord
 from backend.services.document_service import document_service
 from frontend.state import (
     AI_MODES,
-    DEMO_REFERENCE_DATE,
     PROVIDER_FOR_MODE,
     STRETCH,
     esc,
     ollama_online,
-    parse_date,
     queue_query,
     reset_workspace,
 )
-
-
-def parse_tasks_csv(content: str, filename: str) -> List[TaskRecord]:
-    reader = csv.DictReader(io.StringIO(content))
-    tasks: List[TaskRecord] = []
-    seen: set = set()
-    for row_idx, row in enumerate(reader, start=1):
-        clean = {(k or "").strip().lower(): (v or "").strip() for k, v in row.items()}
-        task_id = clean.get("task_id") or clean.get("id") or f"T-{row_idx:02d}"
-        if task_id in seen:
-            task_id = f"{task_id}-{row_idx}"
-        seen.add(task_id)
-
-        comp_raw = clean.get("completion_pct") or clean.get("progress") or clean.get("completion") or "0"
-        try:
-            comp = float(comp_raw.replace("%", "").strip())
-        except ValueError:
-            comp = 0.0
-
-        tasks.append(
-            TaskRecord(
-                task_id=task_id,
-                mapped_req_id=clean.get("mapped_req_id") or clean.get("req_id") or clean.get("req") or None,
-                title=clean.get("title") or clean.get("task") or clean.get("name") or f"Nhiệm vụ {row_idx}",
-                owner=clean.get("owner") or clean.get("assignee") or "Chưa phân công",
-                status=(clean.get("status") or "IN_PROGRESS").upper(),
-                logged_deadline=parse_date(
-                    clean.get("logged_deadline") or clean.get("deadline") or clean.get("due_date")
-                ),
-                completion_pct=min(100.0, max(0.0, comp)),
-                source_ref=f"{filename}#row{row_idx}",
-            )
-        )
-    return tasks
 
 
 def process_uploaded_file(uploaded_file) -> Tuple[bool, str]:
@@ -66,13 +26,6 @@ def process_uploaded_file(uploaded_file) -> Tuple[bool, str]:
     try:
         res = document_service.ingest_file(filename, content_bytes)
         msg = res.get("message", "Nạp tệp thành công.")
-
-        # If CSV, sync taskboard
-        if filename.lower().endswith(".csv"):
-            csv_text = content_bytes.decode("utf-8-sig", errors="ignore")
-            new_tasks = parse_tasks_csv(csv_text, filename)
-            if new_tasks:
-                st.session_state["tasks"] = new_tasks
 
         # Ensure newly ingested doc is in selected list
         doc_meta = res.get("document")
@@ -189,17 +142,11 @@ def render_document_library() -> None:
                 st.markdown(f"- **Thời gian tải:** `{d.get('uploaded_at', 'N/A')}`")
 
 
-def render_sidebar_settings() -> Tuple[date, str]:
-    """Renders the settings sidebar and returns (ref_date, recipient_email)."""
+def render_sidebar_settings() -> str:
+    """Render model settings and return the default email recipient."""
     with st.sidebar:
         st.subheader("⚙️ Thiết lập hệ thống")
 
-        ref_date = st.date_input(
-            "Ngày đối soát mốc tiến độ",
-            value=DEMO_REFERENCE_DATE,
-            format="DD/MM/YYYY",
-            help="Công việc có hạn trước ngày này và chưa hoàn thành sẽ tính là trễ hạn.",
-        )
         recipient_email = st.text_input(
             "Email nhận báo cáo mặc định",
             value="an.nguyen@hcmus.edu.vn",
@@ -257,13 +204,13 @@ def render_sidebar_settings() -> Tuple[date, str]:
             )
             st.markdown(
                 "- **R1:** Bounded query & Ingestion\n"
-                "- **R2:** Pure Python Reconciliation & Citation Verifier\n"
+                "- **R2:** Pure Python Citation Verifier\n"
                 "- **R3:** Hybrid BM25 + Dense RRF Search\n"
                 "- **R4:** Grounded QA with Line Locators (Ollama qwen2.5:7b)\n"
                 "- **R7:** Human-in-the-Loop Safeguards"
             )
         with st.popover("Khôi phục dữ liệu mẫu", icon=":material/restart_alt:"):
-            st.write("Thao tác này xóa tài liệu mới tải, hoàn tác tiến độ và lịch sử chat.")
+            st.write("Thao tác này xóa tài liệu mới tải và lịch sử chat.")
             st.button(
                 "Xác nhận khôi phục",
                 type="primary",
@@ -272,4 +219,4 @@ def render_sidebar_settings() -> Tuple[date, str]:
                 **STRETCH,
             )
 
-    return ref_date, recipient_email
+    return recipient_email

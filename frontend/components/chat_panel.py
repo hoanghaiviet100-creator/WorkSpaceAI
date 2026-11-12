@@ -4,19 +4,16 @@ Column 2: Conversational Q&A Panel with Clickable Citations and Hallucination In
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-import pandas as pd
 import streamlit as st
 from backend.api.chat_routes import handle_user_request
 from backend.core.schemas import EmailState, RouteType, UserRequest
 from backend.repositories.workspace_repository import workspace_repository
-from backend.services.reconciliation_service import reconciliation_service
 from frontend.components.email_assistant import email_dialog
 from frontend.state import (
-    RECON_STATE_LABEL,
-    RECON_STATE_PRIORITY,
+    GREETING,
     STRETCH,
     add_message,
     esc,
@@ -32,58 +29,6 @@ def tag(text: str, state: str = "done") -> None:
     )
 
 
-def render_reconciliation(summary: Any) -> None:
-    if not summary:
-        return
-    c1, c2, c3 = st.columns(3)
-    c1.metric(
-        "Độ bao phủ yêu cầu",
-        f"{summary.coverage_ratio * 100:.0f}%",
-        help="Tỷ lệ yêu cầu của đề bài đã có công việc tương ứng.",
-    )
-    c2.metric("Việc trễ hạn", summary.overdue_count)
-    c3.metric("Xung đột ngày", summary.conflict_count)
-
-    def state_key(item: Any) -> str:
-        return str(getattr(item.state, "value", item.state))
-
-    items = sorted(
-        summary.item_reports, key=lambda i: RECON_STATE_PRIORITY.get(state_key(i), 9)
-    )
-    rows = [
-        {
-            "Mã": it.req_id,
-            "Nội dung": it.title,
-            "Trạng thái": RECON_STATE_LABEL.get(state_key(it), state_key(it)),
-            "Rủi ro": it.risk_level,
-            "Tiến độ": float(it.avg_completion),
-            "Hạn còn lại": f"{it.days_remaining} ngày"
-            if it.days_remaining is not None
-            else "—",
-            "Người làm": ", ".join(it.owners) if it.owners else "Chưa có",
-        }
-        for it in items
-    ]
-    st.dataframe(
-        pd.DataFrame(rows),
-        hide_index=True,
-        column_config={
-            "Tiến độ": st.column_config.ProgressColumn(
-                "Tiến độ", min_value=0, max_value=100, format="%d%%"
-            )
-        },
-        **STRETCH,
-    )
-    conflicts = [it for it in items if it.date_conflicts]
-    if conflicts:
-        with st.expander(f"Xung đột ngày ({len(conflicts)} yêu cầu)", expanded=True):
-            for it in conflicts:
-                for c in it.date_conflicts:
-                    st.markdown(
-                        f"- **{it.req_id}**: {c.doc_a} ghi {c.date_a}, {c.doc_b} ghi {c.date_b}"
-                    )
-
-
 def render_structured(
     data: Dict[str, Any], idx: int, last_email_idx: Optional[int]
 ) -> None:
@@ -91,8 +36,6 @@ def render_structured(
 
     if status == "SUMMARY_GENERATED":
         tag(f"Tóm tắt từ {data.get('doc_name', 'tài liệu')}")
-    elif is_route(route, RouteType.RECONCILE_FLOW):
-        render_reconciliation(data.get("reconciliation_report"))
     elif is_route(route, RouteType.QA_FLOW):
         if status == "ANSWER_VERIFIED":
             grounding_score = data.get("grounding_score", 1.0)
@@ -192,8 +135,6 @@ def build_reply_text(resp: Dict[str, Any]) -> str:
     route, status = resp.get("route"), resp.get("status")
     if status == "SUMMARY_GENERATED":
         return f"**Tóm tắt `{resp.get('doc_name')}`**\n\n{resp.get('summary', '')}"
-    if is_route(route, RouteType.RECONCILE_FLOW):
-        return "Kết quả đối soát giữa đề bài và bảng công việc:"
     if is_route(route, RouteType.QA_FLOW):
         if status == "ANSWER_VERIFIED":
             claims = resp.get("validated_claims", [])
@@ -224,29 +165,39 @@ def build_reply_text(resp: Dict[str, Any]) -> str:
     return "Tôi đã xử lý yêu cầu của bạn."
 
 
-def run_assistant(query: str, recipient: str, ref: date) -> Dict[str, Any]:
+def visible_chat_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    retired = {
+        index
+        for index, message in enumerate(messages)
+        if is_route((message.get("data") or {}).get("route"), RouteType.RECONCILE_FLOW)
+    }
+    hidden = retired | {
+        index - 1
+        for index in retired
+        if index > 0 and messages[index - 1]["role"] == "user"
+    }
+    visible = [message for index, message in enumerate(messages) if index not in hidden]
+    if visible and visible[0].get("content", "").startswith(GREETING.split("\n")[0]):
+        visible[0] = {**visible[0], "content": GREETING}
+    return visible
+
+
+def run_assistant(query: str, recipient: str) -> Dict[str, Any]:
     try:
         recent_history = [
             {"role": m["role"], "content": m["content"]}
-            for m in st.session_state.get("chat_messages", [])[-4:]
+            for m in visible_chat_messages(st.session_state.get("chat_messages", []))[-4:]
             if m.get("content")
         ]
         user_req = UserRequest(
             query=query,
             recipient_email=recipient.strip() or None,
-            reference_date=ref,
+            allow_reconciliation=False,
             selected_doc_ids=st.session_state.get("selected_doc_ids"),
             conversation_history=recent_history,
         )
         resp = handle_user_request(user_req)
 
-        if is_route(resp.get("route"), RouteType.RECONCILE_FLOW):
-            live = reconciliation_service.reconcile(
-                reference_date=ref,
-                requirements=st.session_state["requirements"],
-                tasks=st.session_state["tasks"],
-            )
-            resp["reconciliation_report"] = live["reconciliation_report"]
         if resp.get("status") in ("PENDING_APPROVAL", EmailState.PENDING_APPROVAL):
             st.session_state["current_draft"] = resp.get("draft")
             st.session_state["email_sent_result"] = None
@@ -265,7 +216,7 @@ def run_assistant(query: str, recipient: str, ref: date) -> Dict[str, Any]:
         }
 
 
-def render_chat_panel(recipient_email: str, ref_date: date) -> None:
+def render_chat_panel(recipient_email: str) -> None:
     """Renders the Middle Panel: Multi-turn Chat, Suggestions, and Evidence Badges."""
     head, clear = st.columns([3, 2], vertical_alignment="center")
     head.subheader("💬 Trò chuyện & Hỏi đáp")
@@ -290,7 +241,8 @@ def render_chat_panel(recipient_email: str, ref_date: date) -> None:
             "⚠️ **Chưa chọn tài liệu nào!** Vui lòng tick chọn ít nhất 1 nguồn ở cột bên trái để đặt câu hỏi."
         )
 
-    messages: List[Dict[str, Any]] = st.session_state["chat_messages"]
+    history = st.session_state["chat_messages"]
+    messages = visible_chat_messages(history)
 
     suggestions = [
         (
@@ -304,10 +256,6 @@ def render_chat_panel(recipient_email: str, ref_date: date) -> None:
         (
             "📌 Tiêu chuẩn kỹ thuật R1 – R5",
             "Hệ thống quy định các tiêu chuẩn kỹ thuật R1 đến R5 như thế nào?",
-        ),
-        (
-            "📊 Đối soát tiến độ",
-            "Đối chiếu Project_Brief.pdf với bảng công việc và kiểm tra công việc trễ hạn",
         ),
         (
             "✉️ Soạn email báo cáo",
@@ -341,9 +289,9 @@ def render_chat_panel(recipient_email: str, ref_date: date) -> None:
     queued = st.session_state.pop("queued_query", None)
     if queued:
         add_message("user", queued)
-        render_message(messages[-1], len(messages) - 1, last_email_idx)
+        render_message(history[-1], len(messages), last_email_idx)
         with st.chat_message("assistant"):
-            with st.spinner("Đang truy xuất và đối soát căn cứ trích dẫn…"):
-                reply = run_assistant(queued, recipient_email, ref_date)
-        messages.append(reply)
+            with st.spinner("Đang tìm bằng chứng và kiểm tra trích dẫn…"):
+                reply = run_assistant(queued, recipient_email)
+        history.append(reply)
         st.rerun()

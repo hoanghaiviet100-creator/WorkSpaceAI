@@ -1,4 +1,4 @@
-import type { Mode, Thread, Workspace } from "./data";
+import type { Workspace } from "./data";
 
 export const WORKSPACE_COLORS = [
   "blue",
@@ -9,7 +9,6 @@ export const WORKSPACE_COLORS = [
   "orange",
 ] as const;
 export type WorkspaceColor = (typeof WORKSPACE_COLORS)[number];
-export type ConversationRow = { workspace: Workspace; thread: Thread };
 
 export function isWorkspaceColor(value: unknown): value is WorkspaceColor {
   return WORKSPACE_COLORS.includes(value as WorkspaceColor);
@@ -74,53 +73,6 @@ export function workspaceHistory(workspaces: Workspace[]) {
     );
 }
 
-export function conversationRows(
-  workspaces: Workspace[],
-  scope: string | null = null,
-  mode: Mode | null = null,
-  query = "",
-): ConversationRow[] {
-  const normalize = (text: string) =>
-    text
-      .normalize("NFD")
-      .replace(/\p{M}/gu, "")
-      .replace(/[đĐ]/g, "d")
-      .toLowerCase();
-  const needle = normalize(query.trim());
-  return workspaces
-    .filter((workspace) => !scope || workspace.id === scope)
-    .flatMap((workspace) =>
-      workspace.threads.map((thread) => ({ workspace, thread })),
-    )
-    .filter(
-      ({ workspace, thread }) =>
-        (!mode || thread.mode === mode) &&
-        (!needle ||
-          normalize(
-            `${workspace.name} ${thread.title} ${thread.messages.map((message) => message.request).join(" ")}`,
-          ).includes(needle)),
-    )
-    .sort(
-      (a, b) =>
-        (Date.parse(b.thread.updated) || 0) -
-          (Date.parse(a.thread.updated) || 0) ||
-        a.workspace.id.localeCompare(b.workspace.id) ||
-        a.thread.id.localeCompare(b.thread.id),
-    );
-}
-
-/** A historical source trail must describe the exchange, not today's checkbox selection. */
-export function conversationSources(workspace: Workspace, thread: Thread) {
-  const latest = thread.messages.at(-1);
-  const ids = [
-    ...new Set(latest?.sourceIds ?? thread.handoff?.sourceIds ?? []),
-  ];
-  const sources = ids
-    .map((id) => workspace.sources.find((source) => source.id === id))
-    .filter((source) => source !== undefined);
-  return { sources, missing: ids.length - sources.length };
-}
-
 export function activityLabel(value: string, now = new Date()) {
   const date = new Date(value);
   if (!Number.isFinite(date.getTime())) return "—";
@@ -139,70 +91,4 @@ export function activityLabel(value: string, now = new Date()) {
     day: "numeric",
     ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {}),
   });
-}
-
-/** Home metrics, deadlines and progress share the same scoped, non-archived task rows. */
-export function dashboardData(
-  workspaces: Workspace[],
-  scope: string | null = null,
-  now = new Date(),
-) {
-  const projects = workspaces.filter(
-    (workspace) => !scope || workspace.id === scope,
-  );
-  const tasks = projects.flatMap((workspace) =>
-    workspace.tasks
-      .filter((task) => !task.archived)
-      .map((task) => ({ workspace, task })),
-  );
-  const today = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Bangkok",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-  const dated = tasks
-    .filter(({ task }) => {
-      if (task.status === "DONE" || !/^\d{4}-\d{2}-\d{2}$/.test(task.due))
-        return false;
-      const date = new Date(`${task.due}T12:00:00Z`);
-      return (
-        Number.isFinite(date.getTime()) &&
-        date.toISOString().slice(0, 10) === task.due
-      );
-    })
-    .sort(
-      (a, b) =>
-        a.task.due.localeCompare(b.task.due) ||
-        a.task.id.localeCompare(b.task.id),
-    );
-  return {
-    open: tasks.filter(({ task }) => task.status !== "DONE").length,
-    inProgress: tasks.filter(({ task }) => task.status === "IN_PROGRESS")
-      .length,
-    done: tasks.filter(({ task }) => task.status === "DONE").length,
-    documents: projects.reduce(
-      (sum, workspace) => sum + workspace.sources.length,
-      0,
-    ),
-    overdue: dated.filter(({ task }) => task.due < today).length,
-    today,
-    deadlines: dated.map((row) => ({ ...row, overdue: row.task.due < today })),
-    progress: projects.map((workspace) => {
-      const active = workspace.tasks.filter((task) => !task.archived);
-      const complete = active.filter((task) => task.status === "DONE").length;
-      return {
-        workspace,
-        complete,
-        total: active.length,
-        percent: active.length
-          ? Math.round((complete / active.length) * 100)
-          : null,
-      };
-    }),
-    recent: conversationRows(projects),
-    resume: conversationRows(projects, null, "Ask").find(
-      ({ thread }) => thread.messages.length > 0,
-    ),
-  };
 }

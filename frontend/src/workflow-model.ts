@@ -1,72 +1,7 @@
-import type { Workspace, Draft, Task, Source } from "./data";
-import {
-  clampProgress,
-  normalizeTaskStatus,
-  type RequirementRow,
-  type TaskRow,
-} from "./schema";
+import type { Workspace, Draft, Source } from "./data";
+import { clampProgress, normalizeTaskStatus } from "./schema";
 
 export const SCHEMA_VERSION = 3;
-const sampleTime = "2026-11-04T03:42:00.000Z";
-export function sampleRequirements(w: Workspace): RequirementRow[] {
-  if (w.id !== "midterm") return [];
-  const rows = [
-    [
-      "R1",
-      "spec",
-      "Submit the midterm report",
-      "One member submits the final PDF for the group.",
-      "2026-11-06",
-      "Assignment_Spec.pdf p. 3",
-    ],
-    [
-      "R2",
-      "rubric-file",
-      "Complete use case specifications",
-      "Describe the alternate and exception flows for all three features.",
-      "2026-11-06",
-      "Grading_Rubric.pdf p. 2",
-    ],
-    [
-      "R3",
-      "spec",
-      "Verify source citations",
-      "Check quotations and page numbers against the original documents.",
-      "2026-11-06",
-      "Assignment_Spec.pdf p. 3",
-    ],
-    [
-      "R4",
-      "rubric-file",
-      "Review functional requirements",
-      "Align the functional requirements with the project scope.",
-      "2026-11-06",
-      "Grading_Rubric.pdf p. 2",
-    ],
-    [
-      "R5",
-      "rubric-file",
-      "Document computational thinking analysis",
-      "Cover decomposition, pattern recognition, abstraction and algorithm design.",
-      "2026-11-06",
-      "Grading_Rubric.pdf p. 2",
-    ],
-  ];
-  return rows.map(
-    ([req_id, doc_id, title, description, official_deadline, source_ref]) => ({
-      req_id,
-      doc_id,
-      title,
-      description,
-      official_deadline,
-      source_ref,
-      keywords: title.toLowerCase().split(" "),
-      mandatory_flag: true,
-      created_at: sampleTime,
-      updated_at: sampleTime,
-    }),
-  );
-}
 export function normalizeDraft(draft: Draft): Draft {
   return {
     ...draft,
@@ -77,17 +12,7 @@ export function normalizeDraft(draft: Draft): Draft {
 }
 /** Migrate on read without discarding records, legacy labels, CC or drafts. */
 export function migrateWorkspace(w: Workspace): Workspace {
-  const firstMigration = !w.schemaVersion;
-  const sampleMapping: Record<string, string> = {
-    t1: "R1",
-    t2: "R2",
-    t3: "R3",
-    t4: "R4",
-    t5: "R1",
-  };
-  const requirements =
-    w.requirements ?? (firstMigration ? sampleRequirements(w) : []);
-  const requirementIds = new Set(requirements.map((r) => r.req_id));
+  const requirements = w.requirements ?? [];
   return {
     ...w,
     schemaVersion: SCHEMA_VERSION,
@@ -125,13 +50,6 @@ export function migrateWorkspace(w: Workspace): Workspace {
           t.completionPct,
           status === "DONE" ? 100 : 0,
         ),
-        mappedReqId:
-          t.mappedReqId ??
-          (firstMigration &&
-          w.id === "midterm" &&
-          requirementIds.has(sampleMapping[t.id])
-            ? sampleMapping[t.id]
-            : undefined),
         sourceRef:
           t.sourceRef ??
           (t.source && w.evidence[t.source]
@@ -153,20 +71,6 @@ export function migrateWorkspace(w: Workspace): Workspace {
       draft: t.draft ? normalizeDraft(t.draft) : undefined,
       messages: t.messages.map((m) => ({ ...m, origin: m.origin ?? "sample" })),
     })),
-  };
-}
-export function taskRow(task: Task): TaskRow {
-  return {
-    task_id: task.id,
-    mapped_req_id: task.mappedReqId || null,
-    title: task.title.trim(),
-    owner: task.owner || null,
-    status: normalizeTaskStatus(task.status),
-    logged_deadline: task.due || null,
-    completion_pct: clampProgress(task.completionPct),
-    source_ref: task.sourceRef ?? "",
-    created_at: task.createdAt ?? "",
-    updated_at: task.updatedAt ?? "",
   };
 }
 export function draftPayload(d: Draft) {

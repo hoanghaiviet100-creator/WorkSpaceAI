@@ -1,5 +1,7 @@
 import {
   createContext,
+  startTransition,
+  useCallback,
   useContext,
   useEffect,
   useId,
@@ -20,6 +22,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { type Evidence, type EvidenceKey } from "./data";
+import { useEntrance, useExit } from "./useEntrance";
 export const EvidenceContext = createContext<Record<string, Evidence>>({});
 export function Badge({
   children,
@@ -54,7 +57,7 @@ export function Citation({
       <span className="nb-citation-wrap">
         <button
           className="citation nb-citation"
-          aria-label={`Nguồn ${number}: ${entry.file}, ${entry.locator}`}
+          aria-label={`Source ${number}: ${entry.file}, ${entry.locator}`}
           aria-describedby={preview ? tooltipId : undefined}
           onMouseEnter={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
@@ -143,30 +146,68 @@ export function Status({ status }: { status: string }) {
     </span>
   );
 }
+const DialogDismiss = createContext<() => void>(() => {});
+
+export function DialogCancel({
+  children = "Cancel",
+  disabled,
+}: {
+  children?: ReactNode;
+  disabled?: boolean;
+}) {
+  const dismiss = useContext(DialogDismiss);
+  return (
+    <button
+      type="button"
+      className="button"
+      disabled={disabled}
+      onClick={dismiss}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Modal({
   title,
+  titleIcon,
   children,
   onClose,
   wide = false,
   className = "",
+  deferContent = false,
+  exitDuration,
 }: {
   title: string;
+  titleIcon?: ReactNode;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
   className?: string;
+  deferContent?: boolean;
+  exitDuration?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const exit = useExit(exitDuration);
+  const [contentReady, setContentReady] = useState(!deferContent);
+  const revealContent = () => {
+    if (deferContent) startTransition(() => setContentReady(true));
+  };
+  useEntrance(ref, true, { onEntered: revealContent });
+  const dismiss = useCallback(
+    () => exit(ref.current, () => closeRef.current()),
+    [exit],
+  );
   useEffect(() => {
     const before = document.activeElement as HTMLElement;
     const el = ref.current;
-    el?.focus();
+    el?.focus({ preventScroll: true });
     const old = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const handle = (e: KeyboardEvent) => {
-      // Only the topmost dialog owns Escape and the focus loop (task editors can nest).
+      // Only the topmost dialog owns Escape and the focus loop.
       const dialogs = document.querySelectorAll(
         '[role="dialog"][aria-modal="true"]',
       );
@@ -181,7 +222,7 @@ export function Modal({
         !document.querySelector("select:open")
       ) {
         e.preventDefault();
-        closeRef.current();
+        dismiss();
       }
       if (e.key === "Tab" && el) {
         const nodes = Array.from(
@@ -212,14 +253,14 @@ export function Modal({
     return () => {
       document.removeEventListener("keydown", handle);
       document.body.style.overflow = old;
-      before?.focus();
+      before?.focus({ preventScroll: true });
     };
-  }, []);
+  }, [dismiss]);
   return (
     <div
       className="overlay"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) dismiss();
       }}
     >
       <div
@@ -227,20 +268,32 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-busy={contentReady ? undefined : true}
         tabIndex={-1}
         ref={ref}
       >
         <header>
-          <h2>{title}</h2>
+          <h2>
+            {titleIcon}
+            {title}
+          </h2>
           <button
             className="icon-button"
             aria-label="Close dialog"
-            onClick={onClose}
+            onClick={dismiss}
           >
             <X size={19} />
           </button>
         </header>
-        {children}
+        <DialogDismiss.Provider value={dismiss}>
+          {contentReady ? (
+            children
+          ) : (
+            <p role="status" className="window-loading modal-placeholder">
+              Loading…
+            </p>
+          )}
+        </DialogDismiss.Provider>
       </div>
     </div>
   );

@@ -1,12 +1,11 @@
 import type { Draft, Message, Suggestion, Thread, Workspace } from "./data";
+import { sampleStudy } from "./study-sample";
 
 export type StudioKind = "plan" | "email";
 export type StudioConfig = {
   kind: StudioKind;
   title: string;
   goal: string;
-  timeframe: string;
-  detail: "concise" | "standard" | "detailed";
   recipient: string;
   tone: string;
   length: string;
@@ -30,23 +29,98 @@ export type StudioResult = {
   attemptId?: string;
 };
 
-export const defaultStudioConfig = (kind: StudioKind): StudioConfig => ({
-  kind,
+export const defaultStudioConfig = (): StudioConfig => ({
+  kind: "email",
   title: "",
   goal: "",
-  timeframe: "7 ngày",
-  detail: "standard",
   recipient: "",
-  tone: "Trang trọng",
-  length: "Vừa phải",
+  tone: "Formal",
+  length: "Medium",
 });
 const timestamp = (value?: string) => Date.parse(value ?? "") || 0;
+
+export function isRetiredThread(thread: Thread) {
+  return thread.mode === "Tasks" || thread.view === "tasks";
+}
+
+export function visibleStudioResults(workspace: Workspace) {
+  return (workspace.studioResults ?? []).filter(
+    (result) => result.kind === "email",
+  );
+}
+
+/** Legacy feature records stay in storage without appearing in the UI or chat context. */
+export function visibleChatMessages(workspace: Workspace, thread: Thread) {
+  if (workspace.notebookVersion !== 1 && isRetiredThread(thread)) return [];
+  const retiredThreads = new Set(
+    (workspace.legacyThreads ?? [])
+      .filter(isRetiredThread)
+      .map((item) => item.id),
+  );
+  const retiredResults = new Set(
+    (workspace.studioResults ?? [])
+      .filter((result) => result.kind === "plan")
+      .map((result) => result.id),
+  );
+  return thread.messages.filter(
+    (message) =>
+      message.mode !== "Tasks" &&
+      message.state !== "suggestions" &&
+      message.routeType !== "RECONCILE_FLOW" &&
+      !message.kanbanEvent &&
+      !retiredThreads.has(message.legacyThreadId ?? "") &&
+      !retiredResults.has(message.studioResultId ?? "") &&
+      !(
+        workspace.id === "midterm" &&
+        message.id === "m5" &&
+        message.origin !== "server"
+      ),
+  );
+}
 
 /** Lossless UI migration: one active conversation, original sessions retained as an archive. */
 export function notebookWorkspace(
   workspace: Workspace,
   recoverPending = true,
 ): Workspace {
+  const hasLegacySample = (set: NonNullable<Workspace["studySets"]>[number]) =>
+    set.engine === "sample" &&
+    (set.id === "sample-flashcard" || set.id === "sample-quiz") &&
+    set.items[0]?.citation.file === "Tư duy tính toán · tài liệu mẫu";
+  if (workspace.studySets?.some(hasLegacySample)) {
+    workspace = {
+      ...workspace,
+      studySets: workspace.studySets.map((set) => {
+        if (!hasLegacySample(set)) return set;
+        const sample = sampleStudy(set.config.kind);
+        const defaultTitle =
+          set.title === "Nền tảng tư duy tính toán" ||
+          set.title === "Kiểm tra tư duy tính toán";
+        return {
+          ...set,
+          title: defaultTitle ? sample.title : set.title,
+          items: sample.items,
+        };
+      }),
+    };
+  }
+  if (
+    recoverPending &&
+    workspace.studySets?.some((set) => set.status === "generating")
+  ) {
+    workspace = {
+      ...workspace,
+      studySets: workspace.studySets.map((set) =>
+        set.status === "generating"
+          ? {
+              ...set,
+              status: "error",
+              error: "Study set creation was interrupted. Try again.",
+            }
+          : set,
+      ),
+    };
+  }
   if (workspace.notebookVersion === 1) {
     if (
       !recoverPending ||
@@ -60,8 +134,7 @@ export function notebookWorkspace(
           ? {
               ...result,
               status: "error",
-              error:
-                "Tác vụ bị gián đoạn khi tải lại trang. Bạn có thể thử lại.",
+              error: "The page was reloaded before this finished. Try again.",
             }
           : result,
       ),
@@ -77,16 +150,10 @@ export function notebookWorkspace(
   const messages: Message[] = [];
   const results: StudioResult[] = [...(workspace.studioResults ?? [])];
   for (const thread of originals) {
-    const kind =
-      thread.mode === "Email" ||
-      (thread.mode === "Ask" && thread.messages.at(-1)?.state === "draft")
-        ? "email"
-        : "plan";
     const output =
-      thread.mode !== "Ask" ||
-      thread.messages.some((message) =>
-        ["draft", "suggestions"].includes(message.state),
-      );
+      !isRetiredThread(thread) &&
+      (thread.mode === "Email" ||
+        thread.messages.some((message) => message.state === "draft"));
     const resultId = `legacy-${thread.id}`;
     if (output && !results.some((result) => result.id === resultId)) {
       const sourceIds = [
@@ -95,22 +162,16 @@ export function notebookWorkspace(
       const evidenceIds = [
         ...new Set(thread.messages.flatMap((message) => message.evidenceIds)),
       ];
-      const suggestions = workspace.suggestions.filter(
-        (suggestion) => suggestion.threadId === thread.id,
-      );
       const content =
         thread.draft?.body ||
         thread.messages
           .map((message) => message.answerText)
           .filter(Boolean)
           .join("\n\n") ||
-        suggestions
-          .map((suggestion) => `${suggestion.title}\n${suggestion.description}`)
-          .join("\n\n") ||
-        "Kết quả từ lịch sử trước đây. Mở công cụ chỉnh sửa để tiếp tục với dữ liệu đã lưu.";
+        "Result from an earlier conversation. Open the editor to continue with the saved data.";
       results.push({
         id: resultId,
-        kind,
+        kind: "email",
         title: thread.title,
         createdAt: thread.createdAt || thread.updated,
         updatedAt: thread.updated,
@@ -120,14 +181,13 @@ export function notebookWorkspace(
           id,
           name:
             workspace.sources.find((source) => source.id === id)?.name ||
-            "Nguồn không còn trong thư viện",
+            "Source no longer in the library",
         })),
         evidenceIds,
         content,
         draft: thread.draft,
-        suggestions,
         config: {
-          ...defaultStudioConfig(kind),
+          ...defaultStudioConfig(),
           title: thread.title,
           goal: thread.messages.at(-1)?.request || thread.title,
           recipient: thread.draft?.to || "",
@@ -139,7 +199,7 @@ export function notebookWorkspace(
       const message: Message = {
         ...original,
         legacyThreadId: thread.id,
-        ...(output && ["draft", "suggestions"].includes(original.state)
+        ...(output && original.state === "draft"
           ? { studioResultId: resultId }
           : {}),
       };
@@ -171,7 +231,7 @@ export function notebookWorkspace(
       createdAt: workspace.updated,
       engineMode: "offline",
     }),
-    title: "Hội thoại workspace",
+    title: "Note conversation",
     mode: "Ask",
     view: "chat",
     updated: messages.at(-1)?.at || preferred?.updated || workspace.updated,
@@ -203,17 +263,16 @@ export function captureChatOutputs(workspace: Workspace): Workspace {
   const messages = thread.messages.map((message) => {
     if (
       message.studioResultId ||
-      !["draft", "suggestions"].includes(message.state)
+      message.state !== "draft" ||
+      message.mode === "Tasks"
     )
       return message;
-    const kind = message.state === "draft" ? "email" : "plan";
     const id = `chat-${message.id}`;
     if (!results.some((result) => result.id === id)) {
-      const draft =
-        kind === "email" ? thread.draft || workspace.draft : undefined;
+      const draft = thread.draft || workspace.draft;
       results.unshift({
         id,
-        kind,
+        kind: "email",
         title: draft?.subject || message.request.slice(0, 80),
         createdAt: message.at,
         updatedAt: message.at,
@@ -223,22 +282,16 @@ export function captureChatOutputs(workspace: Workspace): Workspace {
           id: sourceId,
           name:
             workspace.sources.find((source) => source.id === sourceId)?.name ||
-            "Nguồn đã xóa",
+            "Removed source",
         })),
         evidenceIds: message.evidenceIds,
         content:
           draft?.body ||
           message.answerText ||
-          "Mở bảng công việc để xem và xác nhận các đề xuất.",
+          "Open Studio to view the email draft.",
         draft,
-        suggestions:
-          kind === "plan"
-            ? workspace.suggestions.filter(
-                (suggestion) => suggestion.threadId === thread.id,
-              )
-            : undefined,
         config: {
-          ...defaultStudioConfig(kind),
+          ...defaultStudioConfig(),
           title: message.request.slice(0, 80),
           goal: message.request,
           recipient: draft?.to || "",

@@ -1,4 +1,3 @@
-import type { TaskStatus } from "./task-status";
 import type {
   DocumentPageRow,
   EmailAuditRow,
@@ -9,9 +8,10 @@ import type {
   ReconciledItemRow,
   VerificationStatus,
   RouteType,
+  TaskState,
 } from "./schema";
 export type Mode = "Ask" | "Tasks" | "Email";
-export type View = "chat" | "tasks" | "email";
+export type View = "chat" | "email";
 export type Source = {
   id: string;
   name: string;
@@ -62,7 +62,7 @@ export type Task = {
   owner: string;
   initials: string;
   due: string;
-  status: TaskStatus;
+  status: TaskState;
   flag?: string;
   source?: string;
   secondarySource?: string;
@@ -80,7 +80,7 @@ export type Suggestion = {
   description: string;
   owner: string;
   due: string;
-  status?: TaskStatus;
+  status?: TaskState;
   selected: boolean;
   source?: string;
   threadId?: string;
@@ -146,7 +146,7 @@ export type Thread = {
   id: string;
   title: string;
   mode: Mode;
-  view: View;
+  view: View | "tasks";
   updated: string;
   messages: Message[];
   draft?: Draft;
@@ -182,7 +182,7 @@ export type Workspace = {
   notebookVersion?: 1;
   legacyThreads?: Thread[];
   studioResults?: import("./notebook-model").StudioResult[];
-  kanban?: import("./kanban-model").KanbanBoard;
+  studySets?: import("./study-model").StudySet[];
 };
 export const team = [
   "Phạm Gia Khiêm",
@@ -228,16 +228,6 @@ export const evidence: Record<string, Evidence> = {
     finding:
       "Email Mr. Châu Thành Đức and CC Mr. Đỗ Đức Hào and Mr. Trần Hoàng Quân. Include the course code and team name in the subject.",
   },
-  conflict: {
-    file: "Team_Tasks.csv",
-    locator: "row 4",
-    title: "A conflicting submission date",
-    quote: "T04, Submit midterm report, Phạm Gia Khiêm, 2026-11-05, To do",
-    context: "Task row 4 · Internal planning record",
-    id: "task-file",
-    finding:
-      "The internal task sheet lists November 5 for report submission. This conflicts with November 6 in the assignment specification.",
-  },
   rubric: {
     file: "Grading_Rubric.pdf",
     locator: "p. 2",
@@ -248,26 +238,6 @@ export const evidence: Record<string, Evidence> = {
     id: "rubric-file",
     finding:
       "Cover functional requirements, use cases, and the four pillars of computational thinking for each feature.",
-  },
-  slides: {
-    file: "Kickoff_Slides.pptx",
-    locator: "slide 6",
-    title: "The three connected features",
-    quote:
-      "WorkspaceAI connects document-based learning, reviewed task planning, and user-approved academic email reporting.",
-    context: "Slide 6 · Product overview",
-    id: "slides-file",
-    finding:
-      "The three features are document-based learning, reviewed task planning, and user-approved email reporting.",
-  },
-  config: {
-    file: "Config.json",
-    locator: "$.workspace.max_files",
-    title: "Workspace file capacity",
-    quote: '"workspace": { "max_files": 20 }',
-    context: "Workspace configuration · JSON path",
-    id: "config-file",
-    finding: "This workspace has a soft limit of 20 active files.",
   },
   checklist: {
     file: "Submission_Checklist.txt",
@@ -302,7 +272,6 @@ export const initialSources = [
   source("rubric-file", "Grading_Rubric.pdf", "4 pages · PDF", true),
   source("slides-file", "Kickoff_Slides.pptx", "14 slides · PowerPoint"),
   source("policy", "Course_Policy.docx", "4 sections · Word", true),
-  source("task-file", "Team_Tasks.csv", "7 rows · Spreadsheet", true),
   source("config-file", "Config.json", "12 fields · Configuration"),
   source("checklist-file", "Submission_Checklist.txt", "18 lines · Text"),
   source(
@@ -332,84 +301,14 @@ export const initialSources = [
   source("roles-file", "Team_Roles.json", "7 team members · JSON"),
   source("milestones-file", "Milestones.csv", "5 milestones · Spreadsheet"),
 ];
-export const initialTasks: Task[] = [
-  {
-    id: "t1",
-    title: "Clarify the report deadline",
-    description:
-      "Resolve November 5 versus November 6 before the final submission.",
-    owner: team[0],
-    initials: "GK",
-    due: "2026-11-05",
-    status: "TODO",
-    flag: "Conflicting dates",
-    source: "conflict",
-    secondarySource: "deadline",
-  },
-  {
-    id: "t2",
-    title: "Complete use case specifications",
-    description:
-      "Document the alternate and exception flows for all three features.",
-    owner: team[2],
-    initials: "QM",
-    due: "2026-11-03",
-    status: "IN_PROGRESS",
-    flag: "Overdue",
-    source: "rubric",
-  },
-  {
-    id: "t3",
-    title: "Verify source citations",
-    description:
-      "Check page numbers and quotations against the original files.",
-    owner: team[1],
-    initials: "HV",
-    due: "2026-11-05",
-    status: "IN_PROGRESS",
-    source: "deadline",
-  },
-  {
-    id: "t4",
-    title: "Review functional requirements",
-    description: "Align the requirements with the project scope.",
-    owner: team[3],
-    initials: "BH",
-    due: "2026-11-02",
-    status: "DONE",
-    source: "rubric",
-  },
-  {
-    id: "t5",
-    title: "Prepare the report structure",
-    description: "Create the shared outline for the midterm report.",
-    owner: team[4],
-    initials: "MD",
-    due: "2026-11-01",
-    status: "DONE",
-    source: "deadline",
-  },
-];
-export const seedSuggestions: Suggestion[] = [
-  {
-    id: "s1",
-    title: "Document computational thinking analysis",
-    description:
-      "Cover decomposition, pattern recognition, abstraction, and algorithm design for the three features.",
-    owner: "",
-    due: "",
-    selected: true,
-    source: "rubric",
-  },
-];
 export const initialEmail: Draft = {
   to: "Châu Thành Đức <chau.thanh.duc@example.edu>",
   cc: "Đỗ Đức Hào <do.duc.hao@example.edu>, Trần Hoàng Quân <tran.hoang.quan@example.edu>",
   subject: "[CSC10014 – WorkspaceAI] Midterm report deadline clarification",
-  body: "Dear Mr. Đức, Mr. Hào, and Mr. Quân,\n\nOur CSC10014 team is preparing the WorkspaceAI midterm report. The assignment lists November 6, 2026 at 23:59 (ICT) as the deadline, while our internal task sheet lists November 5.\n\nCould you please confirm which date we should follow? We will update our task board once the date is clarified.\n\nThank you for your guidance.\n\nBest regards,\nPhạm Gia Khiêm\nOn behalf of the WorkspaceAI team",
+  body: "Dear Mr. Đức, Mr. Hào, and Mr. Quân,\n\nOur CSC10014 team is preparing the WorkspaceAI midterm report. The assignment lists November 6, 2026 at 23:59 (ICT) as the deadline.\n\nCould you please confirm that this is the submission deadline?\n\nThank you for your guidance.\n\nBest regards,\nPhạm Gia Khiêm\nOn behalf of the WorkspaceAI team",
   purpose: "Clarification request",
   tone: "Formal and respectful",
-  evidenceIds: ["deadline", "cc", "conflict"],
+  evidenceIds: ["deadline", "cc"],
 };
 const thesisEvidence: Record<string, Evidence> = {
   reading: {
@@ -452,7 +351,7 @@ const message = (
   evidenceIds: ids,
   at,
 });
-const midSources = ["spec", "policy", "task-file", "rubric-file"];
+const midSources = ["spec", "policy", "rubric-file"];
 const makeThread = (
   id: string,
   title: string,
@@ -469,8 +368,8 @@ export function seedWorkspaces(): Workspace[] {
       updated: "2026-11-04T10:42:00+07:00",
       sources: initialSources,
       evidence,
-      tasks: initialTasks,
-      suggestions: seedSuggestions,
+      tasks: [],
+      suggestions: [],
       draft: initialEmail,
       members: team,
       threads: [
@@ -484,23 +383,8 @@ export function seedWorkspaces(): Workspace[] {
             "What is the deadline for the midterm report and who must be CC’d?",
             "Ask",
             "answer",
-            ["deadline", "cc", "conflict"],
+            ["deadline", "cc"],
             "2026-11-04T10:42:00+07:00",
-            midSources,
-          ),
-        ),
-        makeThread(
-          "midterm-plan",
-          "Break down the report requirements",
-          "Tasks",
-          "chat",
-          message(
-            "m2",
-            "Break down the report requirements into tasks.",
-            "Tasks",
-            "suggestions",
-            ["rubric"],
-            "2026-11-04T09:20:00+07:00",
             midSources,
           ),
         ),
@@ -514,7 +398,7 @@ export function seedWorkspaces(): Workspace[] {
             "Draft a formal email to clarify the submission date.",
             "Email",
             "draft",
-            ["deadline", "cc", "conflict"],
+            ["deadline", "cc"],
             "2026-11-03T16:30:00+07:00",
             midSources,
           ),
@@ -532,21 +416,6 @@ export function seedWorkspaces(): Workspace[] {
             ["checklist"],
             "2026-11-03T14:05:00+07:00",
             ["checklist-file"],
-          ),
-        ),
-        makeThread(
-          "midterm-scope",
-          "The three core features",
-          "Ask",
-          "chat",
-          message(
-            "m5",
-            "What features are in our project scope?",
-            "Ask",
-            "answer",
-            ["slides"],
-            "2026-11-02T11:15:00+07:00",
-            ["slides-file"],
           ),
         ),
       ],
@@ -568,19 +437,7 @@ export function seedWorkspaces(): Workspace[] {
         source("seminar-file", "Seminar_Notes.txt", "64 lines · Text"),
       ],
       evidence: thesisEvidence,
-      tasks: [
-        {
-          id: "thesis-task",
-          title: "Prepare this week’s paper summary",
-          description:
-            "Bring a paper summary and two discussion questions to the reading group.",
-          owner: team[0],
-          initials: "GK",
-          due: "2026-11-05",
-          status: "TODO",
-          source: "reading",
-        },
-      ],
+      tasks: [],
       suggestions: [],
       draft: blankDraft(),
       members: team.slice(0, 3),
@@ -598,21 +455,6 @@ export function seedWorkspaces(): Workspace[] {
             ["reading"],
             "2026-11-04T08:15:00+07:00",
             ["reading-file"],
-          ),
-        ),
-        makeThread(
-          "thesis-questions",
-          "Plan the literature review",
-          "Tasks",
-          "chat",
-          message(
-            "m7",
-            "Suggest tasks for the next literature review.",
-            "Tasks",
-            "suggestions",
-            ["research"],
-            "2026-11-03T13:00:00+07:00",
-            ["research-file"],
           ),
         ),
         makeThread(
@@ -672,12 +514,10 @@ export function emptyWorkspace(name: string, description: string): Workspace {
     schemaVersion: 3,
   };
 }
-export function detectMode(text: string): Mode {
+export function detectMode(text: string): "Ask" | "Email" {
   return /\b(email|mail|draft|write to|send to)\b/i.test(text)
     ? "Email"
-    : /\b(tasks?|plan|assign|kanban|break down|to.do)\b/i.test(text)
-      ? "Tasks"
-      : "Ask";
+    : "Ask";
 }
 export function relevantEvidence(
   workspace: Workspace,
@@ -689,13 +529,9 @@ export function relevantEvidence(
   );
   if (workspace.id === "midterm") {
     if (/deadline|cc|recipient|submission date/i.test(text))
-      return available.filter((id) =>
-        ["deadline", "cc", "conflict"].includes(id),
-      );
+      return available.filter((id) => ["deadline", "cc"].includes(id));
     if (/checklist|final checks/i.test(text))
       return available.filter((id) => id === "checklist");
-    if (/scope|features/i.test(text))
-      return available.filter((id) => id === "slides");
     if (/requirement|computational|rubric/i.test(text))
       return available.filter((id) => id === "rubric");
     if (/file limit|capacity|maximum/i.test(text))
@@ -708,11 +544,3 @@ export function relevantEvidence(
   }
   return [];
 }
-console.assert(
-  seedWorkspaces().reduce((n, w) => n + w.threads.length, 0) === 8,
-  "Eight seeded conversations",
-);
-console.assert(
-  initialTasks.filter((t) => t.status === "DONE").length === 2,
-  "Progress reconciles with task rows",
-);

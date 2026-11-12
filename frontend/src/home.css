@@ -88,7 +88,8 @@
   background: var(--canvas);
   border: 1px solid var(--border);
   border-radius: 8px;
-  box-shadow: 0 8px 24px #00000012;
+  box-shadow: 0 4px 10px #00000012;
+  contain: layout paint;
 }
 .display-tools-panel[hidden] {
   display: none;

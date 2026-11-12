@@ -181,8 +181,8 @@ try {
     fixture.calls.filter((c) => c.path.endsWith("/upload")).length,
     3,
   );
-  await pointer('[aria-label="Tùy chọn Picker A.txt"]');
-  await textPointer("Tải lại file gốc");
+  await pointer('[aria-label="Options for Picker A.txt"]');
+  await textPointer("Re-upload original file");
   await check(
     "re-upload opens the same accessible picker with a single-file limit",
     () =>
@@ -215,7 +215,7 @@ try {
         .querySelector(".nb-upload-job")
         .textContent.includes("Temporary upload failure"),
   );
-  await pointer('[aria-label="Thử tải lại Retry.txt"]');
+  await pointer('[aria-label="Retry upload for Retry.txt"]');
   await sleep(100);
   await check(
     "retry reuses the chosen File without reopening or blocking the picker",

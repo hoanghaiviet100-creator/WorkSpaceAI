@@ -1,5 +1,7 @@
 # Kanban trong WorkspaceAI
 
+Tài liệu lịch sử. Kanban đã được gỡ khỏi giao diện cùng F2 ngày 11/11/2026.
+
 ## Mục tiêu và các điểm UX cần tránh
 
 Một workspace có một bảng duy nhất. Công việc chính là xem điều cần làm tiếp theo, di chuyển thẻ và cập nhật nội dung. Bảng mở rộng toàn màn hình để không ép các cột vào Studio rộng 360px.

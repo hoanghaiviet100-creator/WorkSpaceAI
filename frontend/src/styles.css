@@ -2,7 +2,9 @@
 /* Client-specified minimalism and orange branding take precedence. Gradients are
    confined to brand surfaces. Desktop: 228px history + flexible work + 286px files. */
 :root {
-  font-family: "Be Vietnam Pro", sans-serif;
+  --font-ui: "Nunito", system-ui, sans-serif;
+  --font-chat: "Söhne", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-ui);
   font-synthesis: none;
   color-scheme: light;
   --bg: #fff;
@@ -77,7 +79,7 @@ button,
 input,
 select,
 textarea {
-  font-family: "Be Vietnam Pro", sans-serif;
+  font-family: inherit;
 }
 button,
 input,
@@ -112,16 +114,6 @@ a {
 svg {
   flex-shrink: 0;
   vertical-align: middle;
-}
-button,
-input,
-select,
-textarea,
-.workspace-card {
-  transition:
-    background-color 0.15s,
-    color 0.15s,
-    border-color 0.15s;
 }
 button:focus-visible,
 a:focus-visible,
@@ -1194,8 +1186,8 @@ h3 {
   color: var(--accent-ink);
   margin-top: 2px;
 }
-.chat-scroll > .handoff-context,
-.chat-scroll > .chat-empty {
+.chat-history > .handoff-context,
+.chat-history > .chat-empty {
   max-width: var(--chat-width);
   margin-inline: auto;
 }
@@ -1737,118 +1729,10 @@ h3 {
   font-size: 11px;
   max-width: 120px;
 }
-.kanban {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 14px;
-  align-items: start;
-}
-.kanban-column > header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 13px;
-  padding: 0 2px;
-}
-.kanban-column h2 {
-  font-size: 12px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-.column-dot {
-  width: 6px;
-  height: 6px;
-  background: var(--faint);
-  border-radius: 50%;
-}
-.column-dot.in-progress {
-  background: var(--accent);
-}
-.column-dot.done {
-  background: var(--text);
-}
-.task-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.task-card {
-  border: 1px solid var(--border);
-  background: var(--subtle);
-  border-radius: 9px;
-  padding: 14px;
-  min-width: 0;
-}
-.task-card-top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 7px;
-}
-.task-id {
-  font-size: 11px;
-  color: var(--muted);
-}
-.task-card h3 {
-  font-size: 13px;
-}
-.task-card > p {
-  font-size: 12px;
-  line-height: 1.8;
-  color: var(--muted);
-  margin: 9px 0 13px;
-}
-.task-card .citation {
-  font-size: 11px;
-  margin-top: 9px;
-}
-.task-card .citation > svg:last-child {
-  display: none;
-}
-.task-card .badge {
-  font-size: 11px;
-  white-space: normal;
-}
-.task-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  align-items: center;
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 16px;
-}
 .small-avatar {
   width: 21px;
   height: 21px;
   font-size: 11px;
-}
-.task-meta > span:last-child {
-  margin-left: auto;
-  display: flex;
-  gap: 3px;
-  align-items: center;
-}
-.task-meta .overdue {
-  color: var(--danger-ink);
-}
-.task-status-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 5px;
-  align-items: center;
-  font-size: 11px;
-  color: var(--muted);
-  border-top: 1px solid var(--border);
-  margin-top: 13px;
-  padding-top: 9px;
-}
-.task-status-label select {
-  font-size: 11px;
-  max-width: 90px;
-  border: 0;
-  background: transparent;
 }
 .empty-slot {
   border: 1px dashed var(--control);
@@ -1856,31 +1740,6 @@ h3 {
   padding: 16px;
   font-size: 12px;
   color: var(--muted);
-}
-.requirement-gap {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-  background: var(--warning-bg);
-  color: var(--warning-ink);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 13px;
-  margin-top: 23px;
-  font-size: 11px;
-}
-.requirement-gap > div {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-}
-.requirement-gap > button {
-  white-space: nowrap;
-  display: flex;
-  align-items: center;
-  gap: 5px;
 }
 .review-intro {
   display: flex;
@@ -1897,19 +1756,6 @@ h3 {
   color: var(--muted);
   margin-top: 5px;
 }
-.task-request {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 17px;
-}
-.task-request input {
-  flex: 1;
-  min-width: 0;
-  font-size: 12px;
-  border: 1px solid var(--control);
-  padding: 10px;
-  border-radius: 7px;
-}
 .bulk-actions {
   display: flex;
   align-items: center;
@@ -1923,85 +1769,15 @@ h3 {
   align-items: center;
   gap: 8px;
 }
-.suggestion-card {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 18px;
-  margin-bottom: 15px;
-  background: var(--subtle);
-}
-.suggestion-title {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.suggestion-title > input:not([type="checkbox"]) {
-  flex: 1;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  font-size: 13px;
-  font-weight: 500;
-}
-.suggestion-card > textarea {
-  width: 100%;
-  margin: 13px 0;
-  min-height: 54px;
-  line-height: 1.8;
-  resize: vertical;
-  font-size: 12px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-}
-.suggestion-fields {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-.suggestion-fields label > span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--muted);
-  font-size: 11px;
-  margin-bottom: 7px;
-}
-.suggestion-fields select,
-.suggestion-fields input {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--control);
-  border-radius: 6px;
-  padding: 9px;
-  font-size: 12px;
-}
-.suggestion-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  margin-top: 19px;
-}
-.suggestion-footer > div {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.edit-task-form,
 .form-stack {
   display: grid;
   gap: 20px;
 }
-.edit-task-form label,
 .form-stack label {
   display: grid;
   gap: 8px;
   font-size: 13px;
 }
-.edit-task-form input,
-.edit-task-form textarea,
-.edit-task-form select,
 .form-stack input,
 .form-stack textarea {
   border: 1px solid var(--control);
@@ -2011,7 +1787,6 @@ h3 {
   padding: 11px;
   font-size: 13px;
 }
-.edit-task-form textarea,
 .form-stack textarea {
   min-height: 100px;
   resize: vertical;
@@ -2284,6 +2059,19 @@ h3 {
 }
 .modal > header h2 {
   font-size: 20px;
+}
+.modal[aria-busy="true"] {
+  contain: layout paint;
+}
+.window-loading::after {
+  content: "";
+  display: block;
+  height: 3rem;
+  margin-top: 0.75rem;
+  background:
+    linear-gradient(var(--raised), var(--raised)) 0 0 / 92% 0.55rem no-repeat,
+    linear-gradient(var(--raised), var(--raised)) 0 1.15rem / 78% 0.55rem no-repeat,
+    linear-gradient(var(--raised), var(--raised)) 0 2.3rem / 56% 0.55rem no-repeat;
 }
 .modal-actions {
   display: flex;
@@ -2993,44 +2781,10 @@ mark {
   .board-toolbar select {
     max-width: 115px;
   }
-  .kanban {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 24px;
-  }
-  .kanban-column h2 {
-    font-size: 13px;
-  }
-  .task-card {
-    padding: 16px;
-  }
-  .task-card h3 {
-    font-size: 14px;
-  }
-  .task-card > p {
-    font-size: 13px;
-  }
-  .task-card .citation,
-  .task-card .badge,
-  .task-meta,
-  .task-status-label,
-  .task-status-label select {
-    font-size: 11px;
-  }
-  .task-status-label select {
-    min-height: 36px;
-    max-width: 120px;
-  }
   .small-avatar {
     width: 25px;
     height: 25px;
     font-size: 11px;
-  }
-  .requirement-gap {
-    flex-direction: column;
-    gap: 14px;
-  }
-  .requirement-gap > button {
-    min-height: 35px;
   }
   .review-intro {
     align-items: flex-start;
@@ -3041,33 +2795,6 @@ mark {
   }
   .review-intro h2 {
     font-size: 15px;
-  }
-  .suggestion-card {
-    padding: 14px;
-  }
-  .suggestion-title {
-    flex-wrap: wrap;
-  }
-  .suggestion-title > input:not([type="checkbox"]) {
-    font-size: 12px;
-  }
-  .suggestion-card > textarea {
-    min-height: 85px;
-    font-size: 12px;
-  }
-  .suggestion-fields {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 13px;
-  }
-  .suggestion-fields input,
-  .suggestion-fields select {
-    min-height: 42px;
-  }
-  .suggestion-footer {
-    flex-wrap: wrap;
-  }
-  .suggestion-footer > div {
-    margin-left: auto;
   }
   .email-titlebar {
     flex-wrap: wrap;
@@ -3212,15 +2939,6 @@ mark {
   }
 }
 
-body,
-.app-header,
-.workspace-main,
-.workspace-sidebar,
-.repository-panel {
-  transition:
-    background-color 0.18s,
-    color 0.18s;
-}
 .history-title {
   font-size: 13px;
 }
@@ -3232,9 +2950,6 @@ body,
 }
 .source-file-line > svg {
   width: 14px;
-}
-.task-card {
-  background: var(--surface);
 }
 .history-group {
   display: flex;
@@ -3283,6 +2998,5 @@ body,
 }
 .history-workspace {
   font-size: 12px;
-}
-.requirement-gap{margin-top:0;margin-bottom:20px}@media(max-width:640px){.file-chip button{min-width:19px;min-height:19px}.theme-control button{min-width:29px;min-height:31px}.history-row .row-menu .icon-button{min-height:40px}.workspace-heading-top>div{min-width:0}}
+}@media(max-width:640px){.file-chip button{min-width:19px;min-height:19px}.theme-control button{min-width:29px;min-height:31px}.history-row .row-menu .icon-button{min-height:40px}.workspace-heading-top>div{min-width:0}}
 @media(max-width:640px){.history-row .history-time{font-size:11px}}

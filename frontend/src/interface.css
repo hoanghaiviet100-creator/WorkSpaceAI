@@ -90,70 +90,6 @@
 .workspace-card[data-tone] > p {
   padding-bottom: 2px;
 }
-
-.task-card[data-status="To do"],
-.kanban-column[data-status="To do"],
-.mobile-board-nav button[data-status="To do"] {
-  --state-bg: var(--todo-bg);
-  --state-line: var(--todo-line);
-  --state-ink: var(--todo-ink);
-}
-.task-card[data-status="In progress"],
-.kanban-column[data-status="In progress"],
-.mobile-board-nav button[data-status="In progress"] {
-  --state-bg: var(--progress-bg);
-  --state-line: var(--progress-line);
-  --state-ink: var(--progress-ink);
-}
-.task-card[data-status="Done"],
-.kanban-column[data-status="Done"],
-.mobile-board-nav button[data-status="Done"] {
-  --state-bg: var(--done-bg);
-  --state-line: var(--done-line);
-  --state-ink: var(--done-ink);
-}
-.task-card[data-status] {
-  background: var(--state-bg);
-  border-color: var(--state-line);
-  padding: 16px;
-}
-.kanban-column[data-status] > header {
-  background: var(--state-bg);
-  color: var(--state-ink);
-  padding: 10px 12px;
-  border-radius: 7px;
-}
-.kanban-column[data-status] .column-dot {
-  background: var(--state-ink);
-}
-.task-card-top {
-  gap: 6px;
-  margin-bottom: 12px;
-}
-.task-state-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--state-ink);
-  font-size: 11px;
-  font-weight: 500;
-}
-.task-card-top .task-id {
-  margin-left: auto;
-  font-size: 11px;
-}
-.task-card .citation,
-.task-card .task-status-label {
-  border-color: var(--state-line);
-}
-.task-card .task-status-label {
-  padding-top: 12px;
-}
-.task-card .avatar {
-  color: var(--state-ink);
-  border-color: var(--state-line);
-  background: var(--canvas);
-}
 .segmented-nav button.active,
 .theme-control button.selected {
   background: var(--accent-soft);
@@ -173,8 +109,6 @@ select,
 .workspace-switcher > select,
 .history-filters select,
 .email-purpose select,
-.suggestion-fields select,
-.edit-task-form select,
 .demo-controls select {
   color: var(--text);
   background-color: var(--canvas);
@@ -190,8 +124,7 @@ select,
   min-height: 44px;
 }
 .mode-field select,
-.board-toolbar select,
-.task-status-label select {
+.board-toolbar select {
   color: var(--text);
   background-color: var(--canvas);
   border: 1px solid var(--control);
@@ -205,11 +138,6 @@ select,
   min-width: 76px;
   min-height: 36px;
   font-size: 12px;
-}
-.task-status-label select {
-  max-width: 117px;
-  border-color: var(--state-line);
-  color: var(--state-ink);
 }
 @supports (appearance: base-select) {
   select,
@@ -276,10 +204,6 @@ select,
     color: var(--accent-ink);
   }
 }
-
-.mobile-board-nav {
-  display: none;
-}
 @media (min-width: 641px) and (max-width: 1000px) {
   .workspace-grid[data-layout="three"] {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -298,50 +222,6 @@ select,
   .workspace-card[data-tone] {
     padding: 18px;
   }
-  .mobile-board-nav {
-    display: flex;
-    gap: 5px;
-    padding: 4px;
-    margin-bottom: 16px;
-    background: var(--raised);
-    border-radius: 9px;
-  }
-  .mobile-board-nav button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    min-height: 44px;
-    flex: 1;
-    font-size: 11px;
-    border-radius: 6px;
-    color: var(--muted);
-  }
-  .mobile-board-nav button.selected {
-    background: var(--state-bg);
-    color: var(--state-ink);
-    font-weight: 500;
-  }
-  .mobile-board-nav button > span {
-    font-variant-numeric: tabular-nums;
-  }
-  .kanban[data-mobile-status="To do"] > :not([data-status="To do"]),
-  .kanban[data-mobile-status="In progress"] > :not([data-status="In progress"]),
-  .kanban[data-mobile-status="Done"] > :not([data-status="Done"]) {
-    display: none;
-  }
-  .kanban-column[data-status] > header {
-    display: none;
-  }
-  .task-state-label {
-    font-size: 12px;
-  }
-  .task-card-top {
-    gap: 9px;
-  }
-  .task-status-label select {
-    min-height: 40px;
-  }
   .email-purpose select {
     min-height: 44px;
     font-size: 12px;
@@ -357,16 +237,6 @@ select,
     width: 38px;
     min-height: 38px;
   }
-  .requirement-gap {
-    gap: 8px;
-    padding: 12px;
-  }
-  .requirement-gap > div {
-    gap: 6px;
-  }
-  .requirement-gap > button {
-    min-height: 32px;
-  }
   .composer-area {
     padding-bottom: max(12px, env(safe-area-inset-bottom));
   }
@@ -378,147 +248,6 @@ select,
 
 /* Requested workflow tags. Color is backed by an icon and a written label.
    Flat pill fills keep the reference's identity without glow on working UI. */
-[data-task-tag="in-progress"] {
-  --tag-bg: #e0f6f5;
-  --tag-line: #9ed7d5;
-  --tag-ink: #176368;
-}
-[data-task-tag="todo"] {
-  --tag-bg: #ebeafd;
-  --tag-line: #c5c2ee;
-  --tag-ink: #51468e;
-}
-[data-task-tag="review"] {
-  --tag-bg: #fcf4ce;
-  --tag-line: #e6d38d;
-  --tag-ink: #746016;
-}
-[data-task-tag="design-review"] {
-  --tag-bg: #f0e7fa;
-  --tag-line: #d8bde9;
-  --tag-ink: #724496;
-}
-[data-task-tag="rework"] {
-  --tag-bg: #fae8e5;
-  --tag-line: #e6b6ad;
-  --tag-ink: #934b43;
-}
-[data-task-tag="done"] {
-  --tag-bg: #dcf4e5;
-  --tag-line: #9cd0b0;
-  --tag-ink: #25623c;
-}
-[data-task-tag="not-started"] {
-  --tag-bg: #fbe6ee;
-  --tag-line: #e7b7c7;
-  --tag-ink: #963e60;
-}
-[data-task-tag="blocked"] {
-  --tag-bg: #fae3e3;
-  --tag-line: #e6aeae;
-  --tag-ink: #9b3838;
-}
-[data-task-tag="on-hold"] {
-  --tag-bg: #e4efff;
-  --tag-line: #b1cbed;
-  --tag-ink: #365f96;
-}
-[data-task-tag="archived"] {
-  --tag-bg: #ededee;
-  --tag-line: #ccccd0;
-  --tag-ink: #5a5b61;
-}
-:root[data-theme="dark"] [data-task-tag="in-progress"] {
-  --tag-bg: #103d40;
-  --tag-line: #23696d;
-  --tag-ink: #86e3e3;
-}
-:root[data-theme="dark"] [data-task-tag="todo"] {
-  --tag-bg: #2c2850;
-  --tag-line: #514783;
-  --tag-ink: #c7beff;
-}
-:root[data-theme="dark"] [data-task-tag="review"] {
-  --tag-bg: #3d3310;
-  --tag-line: #766526;
-  --tag-ink: #eed679;
-}
-:root[data-theme="dark"] [data-task-tag="design-review"] {
-  --tag-bg: #362347;
-  --tag-line: #62427e;
-  --tag-ink: #d9b7f3;
-}
-:root[data-theme="dark"] [data-task-tag="rework"] {
-  --tag-bg: #472925;
-  --tag-line: #7e4940;
-  --tag-ink: #f2b0a4;
-}
-:root[data-theme="dark"] [data-task-tag="done"] {
-  --tag-bg: #133e29;
-  --tag-line: #287448;
-  --tag-ink: #86e7ac;
-}
-:root[data-theme="dark"] [data-task-tag="not-started"] {
-  --tag-bg: #462437;
-  --tag-line: #7a3f59;
-  --tag-ink: #f1b2cb;
-}
-:root[data-theme="dark"] [data-task-tag="blocked"] {
-  --tag-bg: #472525;
-  --tag-line: #834646;
-  --tag-ink: #f3adad;
-}
-:root[data-theme="dark"] [data-task-tag="on-hold"] {
-  --tag-bg: #1d3555;
-  --tag-line: #355e8b;
-  --tag-ink: #abcfff;
-}
-:root[data-theme="dark"] [data-task-tag="archived"] {
-  --tag-bg: #323235;
-  --tag-line: #57575b;
-  --tag-ink: #d1d1d6;
-}
-.task-status-pill {
-  display: inline-flex;
-  gap: 5px;
-  align-items: center;
-  width: fit-content;
-  padding: 4px 8px;
-  min-height: 25px;
-  border: 1px solid var(--tag-line);
-  border-radius: 999px;
-  background: var(--tag-bg);
-  color: var(--tag-ink);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.4;
-  white-space: nowrap;
-}
-.task-card[data-lane="To do"] {
-  --state-bg: var(--todo-bg);
-  --state-line: var(--todo-line);
-  --state-ink: var(--todo-ink);
-}
-.task-card[data-lane="In progress"] {
-  --state-bg: var(--progress-bg);
-  --state-line: var(--progress-line);
-  --state-ink: var(--progress-ink);
-}
-.task-card[data-lane="Done"] {
-  --state-bg: var(--done-bg);
-  --state-line: var(--done-line);
-  --state-ink: var(--done-ink);
-}
-.task-card[data-lane="Archived"],
-.kanban-column[data-status="Archived"],
-.mobile-board-nav button[data-status="Archived"] {
-  --state-bg: var(--raised);
-  --state-line: var(--border);
-  --state-ink: var(--muted);
-}
-.task-card-top .task-id {
-  font-size: 11px;
-}
 .board-filter-controls {
   display: flex;
   align-items: center;
@@ -529,64 +258,6 @@ select,
 }
 .board-filter-controls select {
   max-width: 170px;
-}
-.task-status-guide {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 10px 13px;
-  margin-bottom: 18px;
-}
-.task-status-guide summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  font-size: 12px;
-  list-style: none;
-}
-.task-status-guide summary::marker,
-.task-status-guide summary::-webkit-details-marker {
-  display: none;
-}
-.task-status-guide summary > span {
-  margin-left: auto;
-  color: var(--muted);
-  font-size: 11px;
-}
-.task-status-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 14px;
-}
-.task-status-legend button {
-  border-radius: 999px;
-  padding: 0;
-}
-.task-status-legend button[aria-pressed="true"] {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
-}
-.suggestion-status-field {
-  grid-column: 1 / -1;
-}
-.suggestion-fields .suggestion-status-field > span {
-  display: flex;
-  justify-content: space-between;
-}
-.edit-task-form label > .task-status-pill {
-  display: inline-flex;
-}
-.kanban[data-lane-count="1"] {
-  grid-template-columns: minmax(0, 1fr);
-}
-.kanban[data-lane-count="1"] .task-stack {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-  align-items: start;
-}
-.kanban[data-lane-count="4"] {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 @media (max-width: 1100px) {
   .header-right .account-avatar {
@@ -629,40 +300,5 @@ select,
   }
   .board-filter-controls label:first-child {
     gap: 5px;
-  }
-  .kanban[data-mobile-status="Archived"] > :not([data-status="Archived"]) {
-    display: none;
-  }
-  .kanban[data-lane-count] {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .task-card-top {
-    gap: 6px;
-  }
-  .task-card-top .task-status-pill {
-    font-size: 11px;
-  }
-  .mobile-board-nav {
-    flex-wrap: wrap;
-  }
-  .mobile-board-nav button {
-    white-space: nowrap;
-  }
-  .task-status-guide {
-    padding: 11px;
-  }
-  .task-status-legend {
-    gap: 10px;
-  }
-  .task-status-legend button {
-    min-height: 38px;
-  }
-}
-.task-card-top {
-  flex-wrap: wrap;
-}
-@media (max-width: 640px) {
-  .kanban[data-lane-count="1"] .task-stack {
-    grid-template-columns: minmax(0, 1fr);
   }
 }

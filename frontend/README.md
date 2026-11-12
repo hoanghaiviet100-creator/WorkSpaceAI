@@ -106,16 +106,19 @@ Mở **[http://127.0.0.1:5174/](http://127.0.0.1:5174/)**. Các biến `$env:...
 2. Cột **Nguồn**: bấm **Thêm nguồn → Tải file → Chọn file từ thiết bị** để mở hộp chọn file của máy. Có thể chọn nhiều file hoặc hủy rồi mở lại; cũng có thể kéo file vào cột này, nhập liên kết công khai hoặc dán văn bản. Menu **Tải lại file gốc** mở cùng hộp thoại nhưng chỉ chọn một file để khôi phục nguồn tương ứng.
 3. Tick nguồn cần dùng. Nguồn **Sẵn sàng** mới được chọn; bản mẫu hoặc bản xem trước cần tải file gốc lên backend.
 4. Cột **Hội thoại**: nhập câu hỏi. Mỗi workspace có một hội thoại chung; bấm chip số để mở đoạn nguồn. Có thể sao chép, lưu ghi chú và đánh giá câu trả lời.
-5. Cột **Studio**: chọn **Lên kế hoạch** hoặc **Soạn email**, điền tùy chọn và bấm **Tạo**. Kết quả lưu vào lịch sử bên dưới; có thể đổi tên, xem, chỉnh sửa, sao chép hoặc xuất file.
-6. Thẻ **Kanban** trong Studio mở bảng rộng. Lần đầu chọn **Tạo bảng Kanban từ gợi ý của AI**, sửa/chọn nội dung trong bản xem trước rồi bấm **Xác nhận**. Mỗi workspace chỉ có một bảng; **Nhờ AI gợi ý thêm** chỉ nối các thẻ được duyệt. Có nút thử bản mẫu 8 thẻ. Hiện gợi ý dùng quy tắc Offline, không gọi mô hình AI.
-7. Trong Kanban, **+ Thêm thẻ** rồi Enter để thêm nhanh. Kéo nút chấm để di chuyển thẻ/cột; bàn phím dùng Alt + mũi tên trên nút kéo. Bấm thẻ để sửa ngày, ưu tiên, nhãn, checklist, nguồn và ghi chú. Xóa thẻ có **Hoàn tác**; xóa cột yêu cầu chuyển thẻ sang cột khác. Bảng tự lưu trên trình duyệt, có thông báo **Đã lưu**. Dùng nút **Thu nhỏ** để trở lại ba cột.
-8. **Bảng công việc** trong Studio giữ các mục Tasks, yêu cầu và đối soát hiện có. Thẻ Kanban liên kết Tasks qua task ID. Đề xuất task cần được xác nhận; email cần mở bản nháp và duyệt riêng trước khi gửi.
+
+5. Trong **Studio**, chọn **Flashcard** hoặc **Quiz** để mở cửa sổ tạo bộ học. Chọn số lượng, độ khó, ngôn ngữ hướng dẫn, nguồn và chủ đề, rồi bấm **Tạo ngay**. Có thể mở bộ mẫu 8 thẻ hoặc 5 câu ngay khi chưa tải nguồn.
+6. Mở một bộ từ lịch sử để học tiếp. Dùng nút mở rộng để học trên phần giữa và phải. Trên điện thoại, chọn tab Studio ở cuối màn hình.
+
+Studio lưu bộ học, thẻ đã nhớ và lượt Quiz theo workspace trong trình duyệt. Frontend dùng API trang tài liệu hiện có để trích câu hỏi và dẫn nguồn. Khi phù hợp, bộ học ưu tiên đoạn trích đã được kiểm chứng trong hội thoại. Chất lượng và số câu tạo được phụ thuộc vào văn bản trích xuất từ tài liệu.
+
+Soạn email vẫn mở từ hội thoại. Ghi chú đã lưu có nút riêng trên thanh Hội thoại.
 
 Backend hỗ trợ **PDF có văn bản, Word (.docx), PowerPoint (.pptx), TXT, MD và CSV**, tối đa 25 MB/file. PDF scan cần OCR trước. DOCX được đọc thành một trang văn bản; PPTX theo thứ tự slide. Nhập liên kết cần Internet và chỉ đọc nội dung công khai.
 
-Khung chat trống đặt lời gợi mở và ô nhập ở giữa; có tin nhắn thì ô nhập nằm ở đáy. Desktop hiển thị ba cột, hai cột bên có thể thu gọn. Tablet dùng Chat và một cột chuyển giữa Nguồn/Studio. Điện thoại chuyển bằng ba tab ở cuối màn hình. Giao diện tự thích ứng kích thước thật, không còn nút Preview Desktop/Phone.
+Khung chat trống đặt lời gợi mở và ô nhập ở giữa. Khi có tin nhắn, ô nhập nằm ở đáy. Desktop hiển thị ba cột, hai cột bên có thể thu gọn. Tablet dùng Chat và một cột chuyển giữa Nguồn/Studio. Kéo tay nắm giữa các cột để đổi chiều rộng, nhấp đúp để đặt lại. Có thể dùng phím mũi tên, Home và End khi tay nắm được chọn. Điện thoại chuyển bằng ba tab ở cuối màn hình.
 
-Giao diện vẫn giữ bảng màu cam và phông Be Vietnam Pro. Hai nút New workspace ở header và banner cuối Landing đã bỏ; nút trong phần chính vẫn hoạt động. [Bản thiết kế, wireframe và quyết định UX](WORKSPACE_DESIGN.md).
+Giao diện dùng Source Sans 3 và bảng màu đen, xanh than, đồng đào ở chế độ tối. Nút New workspace nằm trong phần chính của Landing. [Bản thiết kế, wireframe và quyết định UX](WORKSPACE_DESIGN.md).
 
 ## 5. Kết nối frontend với backend
 
@@ -125,7 +128,7 @@ Trình duyệt :5174 → /api → FastAPI :8000 → các service xử lý
 
 | File | Vai trò |
 | --- | --- |
-| `src/api.ts` | Gọi API tài liệu, hỏi đáp, đối soát và duyệt email bằng `fetch` |
+| `src/api.ts` | Gọi API tài liệu, hỏi đáp và duyệt email bằng `fetch` |
 | `vite.config.ts` | Chuyển tiếp `/api` đến `http://127.0.0.1:8000` khi chạy Vite dev |
 | `../Start-Workspace.ps1` | Khởi động hai dịch vụ và bật các biến kết nối |
 | `../backend/main.py` | Đăng ký các route backend |
@@ -148,7 +151,7 @@ Mỗi workspace gửi header `X-Workspace-ID` để tách thư viện tài liệ
 | POST | `/api/documents/upload` | Tải và xử lý file |
 | POST | `/api/documents/select` | Lưu các tài liệu được chọn |
 | DELETE | `/api/documents/{doc_id}` | Xóa tài liệu |
-| POST | `/api/chat` | Hỏi đáp, yêu cầu đối soát hoặc tạo bản nháp email |
+| POST | `/api/chat` | Hỏi đáp hoặc tạo bản nháp email |
 | POST | `/api/email/approve/{draft_id}` | Duyệt và thực hiện bước gửi theo chế độ backend |
 
 API key chỉ thuộc cấu hình backend. Các biến `VITE_*` có thể xuất hiện trong mã gửi đến trình duyệt, vì vậy không đặt bí mật vào chúng. Hướng dẫn này giữ các luồng ở Offline; Gemini chỉ được bật khi người dùng chủ động cấu hình lại engine.
@@ -158,16 +161,13 @@ API key chỉ thuộc cấu hình backend. Các biến `VITE_*` có thể xuất
 | Phần | Hiện trạng |
 | --- | --- |
 | Tài liệu và hỏi đáp | Đã gọi backend; tìm kiếm theo các file được chọn và kiểm tra trích dẫn |
-| Tasks / Requirements | Thêm, sửa và ánh xạ ở phía trình duyệt; chưa có API CRUD để đồng bộ các thay đổi này |
-| Kanban | Một bảng/workspace, xem trước và xác nhận, kéo-thả, chi tiết và hoàn tác; lưu localStorage, đồng bộ các thẻ liên kết với Tasks; chưa có API cộng tác/SQL riêng |
-| Đối soát | Gọi backend và lưu lịch sử báo cáo trên trình duyệt; tính từ dữ liệu phía server, chưa bao gồm chỉnh sửa Tasks/Requirements cục bộ |
 | Email | Tạo bản nháp và duyệt qua backend; launcher dùng `local_mock`, kết quả gửi là mô phỏng. CC và đính kèm chưa được API gửi hiện tại hỗ trợ |
 | Đăng nhập | Các màn hình xem trước; chưa xác thực tài khoản Google, Microsoft, Apple hoặc email/password |
 | Cơ sở dữ liệu | `src/schema.ts` mô tả 12 bảng từ `database/schema.sql`; chưa có kết nối lưu trữ SQL đầy đủ |
 
 Nơi lưu dữ liệu:
 
-- **Trình duyệt:** workspace, hội thoại, task, requirement và lịch sử báo cáo trong localStorage `workspaceai-v2`. Dùng cùng địa chỉ `http://127.0.0.1:5174/` và cùng hồ sơ trình duyệt để truy cập lại. `localhost`, cổng khác và trình duyệt khác có vùng lưu riêng.
+- **Trình duyệt:** workspace, hội thoại, ghi chú và bản nháp email trong localStorage `workspaceai-v2`. Dùng cùng địa chỉ `http://127.0.0.1:5174/` và cùng hồ sơ trình duyệt để truy cập lại. `localhost`, cổng khác và trình duyệt khác có vùng lưu riêng.
 - **Backend:** metadata, nội dung đã lập chỉ mục và trạng thái chọn file tại `../.workspace_data/libraries/{workspaceId}.json`, khôi phục khi khởi động lại. Snapshot này không chứa file PDF gốc hoặc bản nháp email; giữ lại file gốc để có thể tải lại khi cần.
 - **Nhật ký launcher:** `../.workspace_data/runtime/`, gồm `backend.out.log`, `backend.err.log`, `frontend.out.log`, `frontend.err.log` và các file PID. Thư mục này được bỏ qua khi đưa lên Git.
 
@@ -213,12 +213,10 @@ Kiểm tra riêng bộ chọn file trong trình duyệt, sau khi build:
 
 ```powershell
 node tests/browser-file-picker.mjs
-node tests/browser-kanban.mjs
 ```
 
 Bài kiểm tra dùng Chrome/Edge và helper `../../.agents/skills/design-taste-frontend/scripts/lib/cdp.mjs` đã có trên máy hiện tại. Nếu helper ở nơi khác, đặt biến `TASTE_CDP_PATH` bằng đường dẫn đầy đủ đến `cdp.mjs`. Bài kiểm tra chạy trên địa chỉ tạm riêng với file mẫu tự tạo, kiểm tra mở/hủy hộp chọn, bàn phím, nhiều file, tải lại, thử lại và kích thước điện thoại; không sửa workspace đang dùng. Kết quả nằm trong `.taste-skill/file-picker-v9/`.
 
-Kiểm tra Kanban bao gồm xem trước/xác nhận, chuột/cảm ứng/bàn phím, cột, bộ lọc, hoàn tác, lưu lại, chip Chat và nguồn kiểm thử; ảnh/kết quả ở `.taste-skill/kanban-v10/`. [Phân tích UX, wireframe, màu sắc và giới hạn Kanban](KANBAN_DESIGN.md).
 
 Xem trước bản build:
 
@@ -241,16 +239,15 @@ Set-Location H:\WorkSpaceAI\WorkSpaceAI
 | --- | --- |
 | `src/App.tsx` | Điều hướng và cập nhật trạng thái workspace |
 | `src/Landing.tsx`, `src/landing.css` | Landing Home theo ảnh mẫu và lịch sử workspace hiện có |
-| `src/Home.tsx`, `src/HomeOverview.tsx`, `src/home-model.ts` | Trang chủ, thống kê, khung hỏi đáp, lịch sử và bộ lọc workspace |
-| `src/home.css`, `src/home-dashboard.css` | Màu workspace, bố cục Home ba cột và giao diện điện thoại |
+| `src/home-model.ts`, `src/home.css` | Màu workspace và cách trình bày lịch sử workspace |
 | `src/Chat.tsx` | Khung hỏi đáp, câu trả lời và trích dẫn |
 | `src/NotebookWorkspace.tsx`, `src/notebook.css` | Khung ba cột và responsive |
-| `src/notebook-model.ts` | Gộp hội thoại, giữ bản lưu gốc và snapshot Studio |
-| `src/Studio.tsx`, `src/studio-service.ts` | Tạo/lưu Plan và bản nháp Email |
-| `src/Kanban.tsx`, `src/kanban-model.ts`, `src/kanban-service.ts`, `src/kanban.css` | Một bảng Kanban, gợi ý có duyệt, chỉnh sửa và responsive |
+| `src/notebook-model.ts` | Gộp hội thoại, giữ bản lưu gốc và phục hồi bộ học bị gián đoạn |
+| `src/Studio.tsx`, `src/StudyCreateDialog.tsx`, `src/StudySession.tsx` | Lịch sử, cửa sổ tạo và màn học Flashcard/Quiz |
+| `src/panel-resize.tsx`, `src/notebook.css`, `src/study.css` | Kéo cột, bố cục workspace và giao diện bộ học |
+| `src/study-model.ts`, `src/study-generator.ts`, `src/study-sample.ts` | Dữ liệu bộ học, tạo từ văn bản và hai bộ mẫu |
+| `src/EmailWorkspace.tsx`, `src/studio-service.ts` | Soạn và duyệt bản nháp email từ hội thoại |
 | `src/Sources.tsx` | Upload, link/văn bản, đổi tên, xóa và chọn nguồn |
-| `src/Tasks.tsx`, `src/Requirements.tsx` | Task, yêu cầu và liên kết giữa chúng |
-| `src/Reconciliation.tsx`, `src/report-model.ts` | Hiển thị và lưu kết quả đối soát |
 | `src/Email.tsx` | Soạn, kiểm tra và duyệt bản nháp email |
 | `src/api.ts`, `src/schema.ts`, `src/workflow-model.ts` | Gọi backend, kiểu dữ liệu SQL và chuyển đổi dữ liệu giao diện |
 | `src/AISettings.tsx` | Trạng thái engine và cấu hình xử lý |
@@ -263,3 +260,9 @@ Các file Python `app.py`, `state.py`, `styles.py` và `components/` trong cùng
 
 ## Docker (React + backend + Ollama)
 From the project root run `docker compose up --build -d` and open http://localhost:8501. See the root README for model download and data persistence. Browser storage from port 5174 is a separate origin and is not migrated automatically.
+
+## Chọn Ollama / Gemini (cấu hình bởi dev)
+
+Bấm tên AI ở thanh nhập Chat, chọn Ollama hoặc Gemini và Áp dụng. Người dùng không nhập khóa API. Backend kiểm tra dịch vụ/model trước khi đổi; nếu Gemini chưa có khóa máy chủ thì giao diện báo chưa sẵn sàng. Khóa không nằm trong frontend hay localStorage.
+
+Dev cấu hình `GEMINI_API_KEY` và `GEMINI_MODEL` trong `.env` trên máy chủ rồi tạo lại backend (`docker compose up -d --force-recreate app`). Không dùng biến `VITE_*` cho khóa. Gemini gửi câu hỏi/đoạn tài liệu đến Google và áp dụng cho Ask/tóm tắt. Lựa chọn hiện áp dụng cho backend đang chạy; khi restart sẽ dùng `LLM_PROVIDER` từ cấu hình dev.

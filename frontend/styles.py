@@ -64,31 +64,12 @@ CSS = """
 }
 .legend b { margin-left: 0.2rem; font-variant-numeric: tabular-nums; }
 
-/* Task rows */
-.task { border-left: 3px solid var(--c); padding: 0.1rem 0 0.1rem 0.85rem; margin: 0.8rem 0 0.2rem; }
-.t-todo { --c: var(--c-todo); }
-.t-doing { --c: var(--c-doing); }
-.t-overdue { --c: var(--c-over); }
 .t-done { --c: var(--c-done); }
-.task-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.6rem; }
-.task-id {
-  font-size: 0.78rem; font-weight: 600; padding: 0 0.4rem; border-radius: 4px;
-  border: 1px solid color-mix(in srgb, currentColor 28%, transparent);
-  font-variant-numeric: tabular-nums;
-}
-.task-title { font-weight: 600; line-height: 1.35; flex: 1 1 12rem; }
 .state {
   display: inline-flex; align-items: center; font-size: 0.8rem; font-weight: 600;
   padding: 0 0.55rem; border-radius: 999px; border: 1px solid var(--c);
   background: color-mix(in srgb, var(--c) 12%, transparent); white-space: nowrap;
 }
-.task-facts { display: flex; flex-wrap: wrap; gap: 0.15rem 1.1rem; margin-top: 0.3rem; font-size: 0.86rem; }
-.task-facts b { font-weight: 500; opacity: 0.7; margin-right: 0.3rem; }
-.task-bar {
-  height: 6px; border-radius: 3px; margin-top: 0.5rem; overflow: hidden;
-  background: color-mix(in srgb, currentColor 12%, transparent);
-}
-.task-bar > span { display: block; height: 100%; background: var(--c); }
 
 /* Evidence Viewer styling */
 .evidence-quote {

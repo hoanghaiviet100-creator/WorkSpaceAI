@@ -31,244 +31,81 @@ function moduleUrl(name) {
 const schema = await import(moduleUrl("schema"));
 const model = await import(moduleUrl("workflow-model"));
 const data = await import(moduleUrl("data"));
-const reports = await import(moduleUrl("report-model"));
 const api = await import(moduleUrl("api"));
 const home = await import(moduleUrl("home-model"));
-const kanban = await import(moduleUrl("kanban-model"));
-const kanbanService = await import(moduleUrl("kanban-service"));
+const study = await import(moduleUrl("study-model"));
+const samples = await import(moduleUrl("study-sample"));
+const generator = await import(moduleUrl("study-generator"));
 const fixtures = () => structuredClone(data.seedWorkspaces());
 
-test("Kanban preview is unsaved until confirmation; one board per workspace", async () => {
-  const workspace = fixtures()[0],
-    original = structuredClone(workspace);
-  const proposal = await kanbanService.suggestKanban(workspace, true);
-  assert.equal(proposal.cards.length, 8);
-  assert.deepEqual(workspace, original);
-  proposal.cards[0].selected = false;
-  proposal.columns[2].selected = false;
-  const saved = kanban.confirmProposal(workspace, proposal);
-  assert.equal(saved.kanban.cards.length, 5);
-  assert.equal(saved.kanban.columns.length, 2);
-  assert.equal(saved.threads[0].messages.at(-1).kanbanEvent.count, 5);
-  assert.throws(() => kanban.confirmProposal(saved, proposal), /đã có bảng/);
-  assert.equal(workspace.kanban, undefined);
-  assert.equal(fixtures()[1].kanban, undefined);
-});
-test("Kanban append preserves user edits and deduplicates against the latest board", async () => {
-  const initial = await kanbanService.suggestKanban(fixtures()[0], true);
-  let workspace = kanban.confirmProposal(fixtures()[0], initial);
-  const card = workspace.kanban.cards[0];
-  workspace = kanban.saveBoard(workspace, {
-    ...workspace.kanban,
-    cards: workspace.kanban.cards.map((c) =>
-      c.id === card.id
-        ? {
-            ...c,
-            title: "Tiêu đề đã sửa",
-            notes: "Giữ ghi chú",
-            checklist: [{ id: "check", text: "Xác minh", done: true }],
-          }
-        : c,
-    ),
-  });
-  const proposal = {
-    ...initial,
-    id: "more",
-    mode: "append",
-    boardId: workspace.kanban.id,
-    columns: workspace.kanban.columns.map((c) => ({ ...c, selected: true })),
-    cards: [
+test("study generation uses only configured sources and cites the extracted page", async () => {
+  const workspace = fixtures()[0];
+  const lines = [
+    "# Thuật toán",
+    "Tìm kiếm nhị phân yêu cầu dãy dữ liệu đã được sắp xếp.",
+    "Thuật toán cần mô tả các bước hữu hạn và xác định.",
+    "Tìm kiếm tuyến tính kiểm tra lần lượt các phần tử của dãy.",
+    "Ca kiểm thử có đầu vào và kết quả mong đợi.",
+  ];
+  workspace.sources = ["chosen", "ignored"].map((id, index) => ({
+    id,
+    name: id + ".txt",
+    kind: "txt",
+    detail: "",
+    status: "Processed",
+    origin: "local",
+    selected: index === 0,
+    pages: [
       {
-        ...kanban.newCard(card.columnId, "Công việc mới", "ai"),
-        selected: true,
+        page_number: 1,
+        raw_text: index
+          ? "Do not use this unrelated sentence."
+          : lines.join("\n"),
       },
     ],
-  };
-  const saved = kanban.confirmProposal(workspace, proposal);
-  assert.deepEqual(saved.kanban.cards.slice(0, -1), workspace.kanban.cards);
-  assert.equal(saved.threads[0].messages.at(-1).kanbanEvent.initial, false);
-  assert.throws(() => kanban.confirmProposal(saved, proposal), /đã tồn tại/);
-  assert.throws(
-    () =>
-      kanban.confirmProposal(workspace, { ...proposal, boardId: "different" }),
-    /đã thay đổi/,
-  );
-});
-test("Kanban card edits and moves keep legacy task fields and independent cards intact", async () => {
-  const workspace = fixtures()[0],
-    task = workspace.tasks[0];
-  const proposal = await kanbanService.suggestKanban(workspace);
-  const saved = kanban.confirmProposal(workspace, proposal),
-    board = kanban.workspaceBoard(saved);
-  const imported = board.cards.find((card) => card.taskId === task.id);
-  assert.ok(imported);
-  const done = board.columns.find((col) => col.status === "DONE");
-  const moved = kanban.saveBoard(
-    saved,
-    kanban.moveCard(board, imported.id, done.id),
-  );
-  const updated = moved.tasks.find((row) => row.id === task.id);
-  assert.equal(updated.status, "DONE");
-  assert.equal(updated.owner, task.owner);
-  assert.equal(updated.mappedReqId, task.mappedReqId);
-  assert.equal(updated.completionPct, 100);
-  const oldEdit = {
-    ...moved,
-    tasks: moved.tasks.map((row) =>
-      row.id === task.id
-        ? { ...row, title: "Sửa từ Tasks", due: "2026-12-19", status: "TODO" }
-        : row,
-    ),
-  };
-  const synced = kanban
-    .workspaceBoard(oldEdit)
-    .cards.find((card) => card.id === imported.id);
-  assert.equal(synced.title, "Sửa từ Tasks");
-  assert.equal(synced.dueDate, "2026-12-19");
-  assert.equal(synced.columnId, board.columns[0].id);
-});
-test("Kanban removal and targeted undo preserve changes made after deletion", async () => {
-  let workspace = kanban.confirmProposal(
-    fixtures()[0],
-    await kanbanService.suggestKanban(fixtures()[0], true),
-  );
-  const [deleted, other] = workspace.kanban.cards;
-  workspace = kanban.saveBoard(workspace, {
-    ...workspace.kanban,
-    cards: workspace.kanban.cards.filter((c) => c.id !== deleted.id),
-  });
-  assert.equal(
-    workspace.tasks.find((t) => t.id === deleted.taskId).archived,
-    true,
-  );
-  workspace = kanban.saveBoard(workspace, {
-    ...workspace.kanban,
-    cards: workspace.kanban.cards.map((c) =>
-      c.id === other.id ? { ...c, notes: "Sau khi xóa" } : c,
-    ),
-  });
-  const restored = kanban.saveBoard(workspace, {
-    ...workspace.kanban,
-    cards: [...workspace.kanban.cards, deleted],
-  });
-  assert.equal(
-    restored.tasks.find((t) => t.id === deleted.taskId).archived,
-    false,
-  );
-  assert.equal(
-    restored.kanban.cards.find((c) => c.id === other.id).notes,
-    "Sau khi xóa",
-  );
-});
-test("Kanban ordering is stable and column deletion cannot lose cards silently", async () => {
-  const workspace = kanban.confirmProposal(
-    fixtures()[0],
-    await kanbanService.suggestKanban(fixtures()[0], true),
-  );
-  const board = workspace.kanban,
-    [first, second] = board.cards;
-  const moved = kanban.moveCard(board, second.id, first.columnId, first.id);
-  assert.equal(moved.cards[0].id, second.id);
-  assert.equal(board.cards[0].id, first.id);
-  const reordered = kanban.reorderColumn(
-    board,
-    board.columns[2].id,
-    board.columns[0].id,
-  );
-  assert.equal(reordered.columns[0].id, board.columns[2].id);
-  assert.equal(reordered.cards.length, board.cards.length);
-  assert.throws(
-    () =>
-      kanban.saveBoard(workspace, {
-        ...board,
-        columns: board.columns.slice(1),
-      }),
-    /Kiểm tra/,
-  );
-  assert.throws(
-    () => kanban.saveBoard(workspace, { ...board, columns: [] }),
-    /ít nhất một cột/,
-  );
-});
-test("Offline Kanban reads selected source text and chat without a model call", async () => {
-  const workspace = {
-    ...fixtures()[0],
-    tasks: [],
-    sources: [
-      {
-        id: "local-text",
-        name: "Kế hoạch.txt",
-        kind: "txt",
-        status: "Processed",
-        selected: true,
-        origin: "local",
-        pages: [
-          {
-            raw_text:
-              "Cần hoàn thành báo cáo trước 2026-12-20.\nChuẩn bị bài thuyết trình cho buổi họp.",
-          },
-        ],
-      },
-    ],
-    threads: [
-      {
-        ...fixtures()[0].threads[0],
-        messages: [
-          {
-            id: "q",
-            request: "Cần rà soát kết luận trước khi nộp bài.",
-            answerText: "",
-            sourceIds: [],
-            mode: "Ask",
-            state: "answer",
-            at: "2026-11-09",
-          },
-        ],
-      },
-    ],
-  };
-  const result = await kanbanService.suggestKanban(workspace);
-  assert.equal(result.engine, "offline");
-  assert.ok(
-    result.cards.some(
-      (card) =>
-        card.dueDate === "2026-12-20" && card.sourceIds.includes("local-text"),
-    ),
-  );
-  assert.ok(
-    result.cards.some((card) => card.description.includes("rà soát kết luận")),
-  );
-  assert.ok(result.cards.some((card) => card.dueDate === ""));
-  assert.equal(workspace.kanban, undefined);
+  }));
+  const config = { ...study.studyConfig(workspace, "quiz"), count: 4 };
+  assert.deepEqual(config.sourceIds, ["chosen"]);
+  const items = await generator.createStudyItems(workspace, config);
+  assert.equal(items.length, 4);
+  for (const item of items) {
+    assert.equal(item.citation.docId, "chosen");
+    assert.equal(item.citation.quote, lines[item.citation.startLine - 1]);
+    assert.equal(item.topic, "Thuật toán");
+    assert.ok(item.answer.includes(item.options[item.correctIndex]));
+    assert.equal(item.options.length, new Set(item.options).size);
+  }
   await assert.rejects(
-    kanbanService.suggestKanban({
-      ...workspace,
-      tasks: [],
-      sources: [],
-      threads: [],
+    generator.createStudyItems(workspace, {
+      ...config,
+      sourceIds: ["different-workspace"],
     }),
-    /Chưa đủ nội dung/,
   );
+  const english = await generator.createStudyItems(workspace, {
+    ...config,
+    language: "en",
+  });
+  assert.match(english[0].question, /^Fill in the blank\./);
+  assert.equal(english[0].citation.quote, items[0].citation.quote);
 });
-test("Kanban validates real dates and never marks completed cards overdue", () => {
-  assert.equal(kanban.explicitDate("Nộp 20/12/2026"), "2026-12-20");
-  assert.equal(kanban.explicitDate("Due November 6, 2026"), "2026-11-06");
-  assert.equal(kanban.explicitDate("Ngày 6/11 chưa có năm"), "");
-  assert.equal(
-    kanban.explicitDate("Nộp 2026-02-31 hoặc 2026-12-19"),
-    "2026-12-19",
+
+test("quiz samples and retry review scores are calculated from answered questions", () => {
+  assert.equal(samples.sampleStudy("flashcard").items.length, 8);
+  const quiz = samples.sampleStudy("quiz");
+  assert.equal(quiz.items.length, 5);
+  const answers = Object.fromEntries(
+    quiz.items.map((item) => [item.id, item.correctIndex]),
   );
-  const card = {
-    ...kanban.newCard("todo", "Nộp báo cáo"),
-    dueDate: "2026-11-08",
-  };
-  assert.equal(kanban.dueState(card, false, "2026-11-09"), "overdue");
-  assert.equal(kanban.dueState(card, true, "2026-11-09"), "none");
-  assert.equal(
-    kanban.dueState({ ...card, dueDate: "2026-11-12" }, false, "2026-11-09"),
-    "soon",
-  );
-  assert.equal(kanban.dueState({ ...card, dueDate: "" }, false), "none");
+  answers[quiz.items[0].id] = 1;
+  assert.deepEqual(study.scoreQuiz(quiz.items, answers), {
+    correct: 4,
+    total: 5,
+  });
+  assert.equal(study.quizTopics(quiz.items, answers)[0].correct, 2);
+  const [review] = study.reviewCards([quiz.items[0]]);
+  assert.equal(review.options, undefined);
+  assert.equal(review.citation, quiz.items[0].citation);
+  assert.match(review.answer, /Break the problem into smaller parts/);
 });
 
 test("workspace identities are distinct before palette reuse and persist across reload/reorder", () => {
@@ -310,139 +147,11 @@ test("creating another workspace balances colors without changing existing ident
   assert.ok(home.isWorkspaceColor(invalid[0].color));
 });
 
-test("home history is chronological across workspaces instead of being grouped by the first project", () => {
-  const workspaces = fixtures();
-  workspaces[0].threads[0].updated = "2026-11-01T00:00:00Z";
-  workspaces[1].threads[0].updated = "2026-11-07T00:00:00Z";
-  const rows = home.conversationRows(workspaces);
-  assert.equal(rows[0].workspace.id, workspaces[1].id);
-  assert.equal(
-    rows.length,
-    workspaces.reduce((sum, workspace) => sum + workspace.threads.length, 0),
-  );
-  assert.ok(
-    rows.every(
-      (row, index) =>
-        index === 0 ||
-        Date.parse(rows[index - 1].thread.updated) >=
-          Date.parse(row.thread.updated),
-    ),
-  );
-});
-
-test("home filters combine workspace, feature and Vietnamese search including a saved question", () => {
-  const workspaces = fixtures();
-  const thread = workspaces[0].threads[0];
-  thread.title = "Nguồn tài liệu";
-  thread.mode = "Ask";
-  thread.messages = [{ request: "Đối chiếu thời hạn báo cáo", sourceIds: [] }];
-  assert.equal(
-    home.conversationRows(workspaces, workspaces[0].id, "Ask", "doi chieu")[0]
-      .thread.id,
-    thread.id,
-  );
-  assert.equal(
-    home.conversationRows(workspaces, workspaces[0].id, "Email", "doi chieu")
-      .length,
-    0,
-  );
-  assert.equal(
-    home.conversationRows(workspaces, workspaces[1].id, null, "Nguon tai lieu")
-      .length,
-    0,
-  );
-  const counts = ["Ask", "Tasks", "Email"].map(
-    (mode) => home.conversationRows(workspaces, null, mode).length,
-  );
-  assert.equal(
-    counts.reduce((sum, count) => sum + count, 0),
-    home.conversationRows(workspaces).length,
-  );
-});
-
-test("a home source trail retains historical provenance when checkboxes change or a file disappears", () => {
-  const workspace = fixtures()[0];
-  const [first, second] = workspace.sources;
-  workspace.sources = [
-    { ...first, selected: false },
-    { ...second, selected: true },
-  ];
-  const thread = {
-    ...workspace.threads[0],
-    messages: [{ sourceIds: [first.id, first.id, "removed-file"] }],
-  };
-  const trail = home.conversationSources(workspace, thread);
-  assert.deepEqual(
-    trail.sources.map((source) => source.id),
-    [first.id],
-  );
-  assert.equal(trail.missing, 1);
-  assert.deepEqual(
-    home.conversationSources(workspace, {
-      ...thread,
-      messages: [],
-      handoff: undefined,
-    }),
-    { sources: [], missing: 0 },
-  );
-});
-
 test("home recency uses Bangkok calendar days and treats missing dates honestly", () => {
   const now = new Date("2026-11-07T00:30:00+07:00");
   assert.equal(home.activityLabel("2026-11-06T18:00:00Z", now), "Today");
   assert.equal(home.activityLabel("2026-11-06T16:00:00Z", now), "Yesterday");
   assert.equal(home.activityLabel("invalid", now), "—");
-});
-
-test("dashboard scopes task metrics and excludes archived, completed and invalid dates from deadline alerts", () => {
-  const workspaces = fixtures();
-  const workspace = workspaces[0];
-  const base = workspace.tasks[0];
-  workspace.tasks = [
-    { ...base, id: "late", due: "2026-11-07", status: "TODO" },
-    { ...base, id: "today", due: "2026-11-08", status: "IN_PROGRESS" },
-    { ...base, id: "review", due: "", status: "REVIEW" },
-    { ...base, id: "done", due: "2026-11-06", status: "DONE" },
-    {
-      ...base,
-      id: "archived",
-      due: "2026-11-01",
-      status: "IN_PROGRESS",
-      archived: true,
-    },
-    { ...base, id: "invalid", due: "2026-02-30", status: "TODO" },
-  ];
-  const data = home.dashboardData(
-    workspaces,
-    workspace.id,
-    new Date("2026-11-07T18:30:00Z"),
-  );
-  assert.equal(data.today, "2026-11-08");
-  assert.equal(data.open, 4);
-  assert.equal(data.inProgress, 1);
-  assert.equal(data.done, 1);
-  assert.equal(data.overdue, 1);
-  assert.deepEqual(
-    data.deadlines.map(({ task }) => task.id),
-    ["late", "today"],
-  );
-  assert.equal(data.progress[0].total, 5);
-  assert.equal(data.progress[0].percent, 20);
-  assert.equal(data.documents, workspace.sources.length);
-  assert.ok(data.recent.every((row) => row.workspace.id === workspace.id));
-});
-
-test("an empty dashboard keeps honest zeros, missing progress and no invented activity", () => {
-  const workspace = { ...fixtures()[0], tasks: [], sources: [], threads: [] };
-  const data = home.dashboardData([workspace]);
-  assert.deepEqual(
-    [data.open, data.inProgress, data.done, data.documents, data.overdue],
-    [0, 0, 0, 0, 0],
-  );
-  assert.equal(data.progress[0].percent, null);
-  assert.equal(data.resume, undefined);
-  assert.deepEqual(data.deadlines, []);
-  assert.deepEqual(data.recent, []);
 });
 
 test("landing workspace history follows latest real activity and opens the latest thread without reordering stored records", () => {
@@ -488,9 +197,11 @@ test("all twelve database tables have explicit frontend contracts", () => {
 });
 test("migration preserves records, local labels, CC and all conversations", () => {
   const old = fixtures()[0];
-  old.tasks[0].status = "Blocked";
-  old.tasks[1].status = "Design Review";
-  old.tasks[2].status = "Archived";
+  old.tasks = ["Blocked", "Design Review", "Archived"].map((status, index) => ({
+    id: `legacy-task-${index}`,
+    title: "Archived workspace task",
+    status,
+  }));
   const migrated = model.migrateWorkspace(old);
   assert.equal(migrated.tasks[0].status, "IN_PROGRESS");
   assert.equal(migrated.tasks[0].localLabel, "Blocked");
@@ -516,54 +227,9 @@ test("custom workspaces do not receive academic sample requirements", () => {
   const w = data.emptyWorkspace("My project", "");
   assert.deepEqual(model.migrateWorkspace(w).requirements, []);
 });
-test("task rows omit local design labels, archive flag, description and avatar", () => {
-  const t = model.migrateWorkspace(fixtures()[0]).tasks[0];
-  const row = model.taskRow({
-    ...t,
-    localLabel: "Blocked",
-    archived: true,
-    completionPct: 47.5,
-  });
-  assert.equal(row.completion_pct, 47.5);
-  assert.equal(row.mapped_req_id, "R1");
-  assert.equal(row.localLabel, undefined);
-  assert.equal(row.archived, undefined);
-  assert.equal(row.description, undefined);
-  assert.equal(row.initials, undefined);
-  assert.deepEqual(
-    Object.keys(row).sort(),
-    [
-      "task_id",
-      "mapped_req_id",
-      "title",
-      "owner",
-      "status",
-      "logged_deadline",
-      "completion_pct",
-      "source_ref",
-      "created_at",
-      "updated_at",
-    ].sort(),
-  );
-});
-test("missing dates and owners map to SQL NULL, progress is bounded", () => {
-  const row = model.taskRow({
-    ...fixtures()[0].tasks[0],
-    mappedReqId: "",
-    owner: "",
-    due: "",
-    completionPct: 180,
-  });
-  assert.equal(row.owner, null);
-  assert.equal(row.logged_deadline, null);
-  assert.equal(row.mapped_req_id, null);
-  assert.equal(row.completion_pct, 100);
-  assert.equal(schema.clampProgress(-5), 0);
-  assert.equal(schema.clampProgress(undefined, 17), 17);
-});
 test("action routing and session engines remain independent", () => {
   assert.equal(schema.featureRoute("Ask"), "QA_FLOW");
-  assert.equal(schema.featureRoute("Tasks"), "RECONCILE_FLOW");
+  assert.equal(schema.featureRoute("Email"), "EMAIL_FLOW");
   const w = model.migrateWorkspace(fixtures()[0]);
   assert.equal(w.threads[0].engineMode, "offline");
   assert.equal(w.threads[0].mode, "Ask");
@@ -629,57 +295,6 @@ test("citation document aliases resolve uniquely and never guess between version
     undefined,
   );
   assert.equal(model.resolveCitedSource("nonexistent", sources), undefined);
-});
-test("R2 response names are adapted to SQL without recalculating reconciliation", () => {
-  assert.equal(reports.reportState("COMPLETED", true), "FULLY_COVERED");
-  assert.equal(reports.reportState("UNTRACKED_MISSING", false), "NOT_COVERED");
-  assert.equal(reports.reportState("UNASSIGNED", false), "PARTIALLY_COVERED");
-  assert.equal(reports.reportState("IN_PROGRESS", true), "DEADLINE_CONFLICT");
-  assert.equal(reports.reportState("OVERDUE", true), "OVERDUE");
-  assert.throws(() => reports.reportState("invented", false));
-});
-test("report snapshots retain source state, dates, owners and previous runs", () => {
-  const item = {
-    req_id: "R8",
-    title: "Report",
-    state: "COMPLETED",
-    risk_level: "LOW",
-    avg_completion: 100,
-    days_remaining: 2,
-    owners: ["Alex"],
-    date_conflicts: [],
-    citations: ["spec.pdf p.2"],
-  };
-  const report = {
-    coverage_ratio: 1,
-    overdue_count: 0,
-    conflict_count: 0,
-    item_reports: [item],
-  };
-  const w = model.migrateWorkspace(fixtures()[0]);
-  const one = reports.appendReport(w, report, "2026-11-06");
-  const two = reports.appendReport(one, report, "2026-11-07");
-  assert.equal(w.reconciliationRuns.length, 0);
-  assert.equal(two.reconciliationRuns.length, 2);
-  assert.equal(two.reconciledItems.length, 2);
-  assert.equal(two.reconciledItems[0].serverState, "COMPLETED");
-  assert.deepEqual(two.reconciledItems[0].owners, ["Alex"]);
-  assert.equal(two.reconciliationRuns[0].reference_date, "2026-11-06");
-  assert.notEqual(
-    two.reconciliationRuns[0].run_id,
-    two.reconciliationRuns[1].run_id,
-  );
-});
-test("invalid reports cannot replace previous data", () => {
-  const w = model.migrateWorkspace(fixtures()[0]);
-  assert.throws(() =>
-    reports.appendReport(
-      w,
-      { coverage_ratio: NaN, item_reports: [] },
-      "2026-11-06",
-    ),
-  );
-  assert.equal(w.reconciliationRuns.length, 0);
 });
 test("email snapshot covers attachments and full content, with stable attachment order", async () => {
   const d = {
@@ -780,7 +395,7 @@ test("indexing a device preview removes the duplicate and preserves its referenc
     ],
   };
   w.sources = [source];
-  w.requirements[0].doc_id = source.id;
+  w.requirements = [{ req_id: "legacy-req", doc_id: source.id }];
   const evidenceKey = Object.keys(w.evidence)[0];
   w.evidence[evidenceKey].id = source.id;
   w.draft.attachmentIds = [source.id];
@@ -893,7 +508,7 @@ test("all document and workflow requests retain the current workspace header", a
           : url === "/api/documents/upload"
             ? { document: row }
             : url === "/api/chat"
-              ? { reconciliation_report: { item_reports: [] } }
+              ? { route: "QA_FLOW", status: "ANSWER_VERIFIED" }
               : { status: "SELECTION_UPDATED" },
       ),
     );
@@ -922,9 +537,8 @@ test("all document and workflow requests retain the current workspace header", a
       "2026-11-06",
       wid,
     );
-    await api.reconcile("2026-11-06", wid);
     await api.approveAndSend(serverDraft(), wid);
-    assert.equal(captured.length, 7);
+    assert.equal(captured.length, 6);
     for (const { init } of captured)
       assert.equal(init.headers.get("X-Workspace-ID"), wid);
     assert.equal(
@@ -963,6 +577,7 @@ test("chat sends selected docs and history using the real endpoint contract", as
     assert.deepEqual(body.selected_doc_ids, ["d1"]);
     assert.equal(body.reference_date, "2026-11-06");
     assert.equal(body.conversation_history[0].content, "Before");
+    assert.equal(body.allow_reconciliation, false);
     assert.equal(body.active_mode, undefined);
   } finally {
     globalThis.fetch = original;
@@ -1004,25 +619,25 @@ test("network failure stays an unconfirmed API error", async () => {
   }
 });
 
-test("Gemini setup opts in only Feature 1 with a pinned model and supports returning offline", async () => {
+test("model selection sends a provider only; credentials stay on the server", async () => {
   const original = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url, init) => {
     calls.push({ url, init });
     return new Response(
-      JSON.stringify({ status: "ready", engine_mode: "offline" }),
+      JSON.stringify({ status: "ready", engine_mode: "ollama" }),
     );
   };
   try {
-    await api.configureGemini("synthetic-test-key-not-a-credential", false);
-    const body = JSON.parse(calls[0].init.body);
-    assert.equal(body.enable_feature1, true);
-    assert.equal(body.model, "gemini-3.5-flash-lite");
-    assert.equal(body.save_locally, false);
-    assert.equal(calls[0].init.headers.get("X-Workspace-ID"), null);
-    await api.useOffline(true);
-    assert.equal(calls[1].url, "/api/runtime/offline");
-    assert.deepEqual(JSON.parse(calls[1].init.body), { save_locally: true });
+    await api.selectProvider("ollama");
+    await api.selectProvider("gemini");
+    assert.equal(calls[0].url, "/api/runtime/provider");
+    assert.deepEqual(JSON.parse(calls[0].init.body), { provider: "ollama" });
+    assert.deepEqual(JSON.parse(calls[1].init.body), { provider: "gemini" });
+    const screen = readFileSync(resolve("src/AISettings.tsx"), "utf8");
+    assert.ok(!screen.includes('type="password"'));
+    assert.ok(!screen.includes("configureGemini"));
+    assert.ok(!screen.includes("saveLocally"));
   } finally {
     globalThis.fetch = original;
   }
@@ -1063,6 +678,43 @@ test("notebook migration retains original sessions and all distinct messages in 
   );
   assert.deepEqual(notebook.notebookWorkspace(migrated), migrated);
 });
+test("retired feature outputs are filtered from chat and Studio without rewriting history", () => {
+  const workspace = notebook.notebookWorkspace(fixtures()[0]);
+  const thread = workspace.threads[0];
+  const question = thread.messages.find(
+    (message) => message.state === "answer",
+  );
+  workspace.legacyThreads.push({
+    id: "legacy-tasks",
+    mode: "Tasks",
+    view: "tasks",
+  });
+  workspace.studioResults.push({ id: "legacy-plan", kind: "plan" });
+  const retired = [
+    { mode: "Tasks" },
+    { state: "suggestions" },
+    { routeType: "RECONCILE_FLOW" },
+    { kanbanEvent: { boardId: "old" } },
+    { legacyThreadId: "legacy-tasks" },
+    { studioResultId: "legacy-plan" },
+  ].map((fields, index) => ({
+    ...question,
+    ...fields,
+    id: `retired-${index}`,
+    saved: true,
+  }));
+  thread.messages.push(...retired);
+  const before = structuredClone(workspace);
+  const visible = notebook.visibleChatMessages(workspace, thread);
+  assert.ok(visible.some((message) => message.id === question.id));
+  assert.ok(visible.every((message) => !message.id.startsWith("retired-")));
+  assert.ok(
+    notebook
+      .visibleStudioResults(workspace)
+      .every((result) => result.kind === "email"),
+  );
+  assert.deepEqual(workspace, before);
+});
 test("message ID collisions with different source scope remain separate, and saved state survives", () => {
   const workspace = fixtures()[0],
     first = workspace.threads[0].messages[0];
@@ -1085,14 +737,18 @@ test("message ID collisions with different source scope remain separate, and sav
 });
 test("interrupted Studio jobs are recoverable on reload but remain running during storage sync", () => {
   const workspace = notebook.notebookWorkspace(fixtures()[0]);
-  workspace.studioResults.push({ id: "pending", status: "generating" });
+  workspace.studioResults.push({
+    id: "pending",
+    kind: "email",
+    status: "generating",
+  });
   assert.equal(
     notebook.notebookWorkspace(workspace, false).studioResults.at(-1).status,
     "generating",
   );
   const recovered = notebook.notebookWorkspace(workspace);
   assert.equal(recovered.studioResults.at(-1).status, "error");
-  assert.match(recovered.studioResults.at(-1).error, /gián đoạn/);
+  assert.match(recovered.studioResults.at(-1).error, /reloaded/);
 });
 test("chat output capture is idempotent, snapshots its sources and never adds a second conversation", () => {
   const workspace = notebook.notebookWorkspace(fixtures()[0]);

@@ -9,10 +9,12 @@ export default function DocumentInspector({
   source,
   evidence,
   workspaceId,
+  studyExcerpt = false,
 }: {
   source?: Source;
   evidence?: Evidence;
   workspaceId?: string;
+  studyExcerpt?: boolean;
 }) {
   const [pageNumber, setPageNumber] = useState(
     evidence?.page ?? source?.pages?.[0]?.page_number ?? 1,
@@ -21,28 +23,24 @@ export default function DocumentInspector({
   const [remotePage, setRemotePage] = useState<
     (DocumentPageRow & { doc_hash?: string }) | null
   >(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
   const currentVersion =
     !evidence?.docHash ||
     !source?.fileHash ||
     evidence.docHash === source.fileHash;
+  const needsRemotePage =
+    !localPage &&
+    source?.origin === "server" &&
+    !!workspaceId &&
+    currentVersion;
   const verified =
     evidence?.origin === "server" && isVerified(evidence.verificationStatus);
   useEffect(() => {
     setRemotePage(null);
     setError("");
-    if (
-      localPage ||
-      !source ||
-      source.origin !== "server" ||
-      !workspaceId ||
-      !currentVersion
-    )
-      return;
+    if (!needsRemotePage || !source || !workspaceId) return;
     let alive = true;
-    setLoading(true);
     getDocumentPage(source.id, pageNumber, workspaceId)
       .then((result) => {
         if (!alive) return;
@@ -52,7 +50,7 @@ export default function DocumentInspector({
           evidence.docHash !== result.doc_hash
         )
           throw new Error(
-            "Nguồn đã đổi phiên bản. Đoạn trích cũ vẫn được giữ, không thay bằng văn bản mới.",
+            "The source version changed. The original excerpt is still available.",
           );
         setRemotePage(result);
       })
@@ -61,11 +59,8 @@ export default function DocumentInspector({
           setError(
             failure instanceof Error
               ? failure.message
-              : "Không tải được văn bản nguồn.",
+              : "Could not load the source text.",
           );
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
       });
     return () => {
       alive = false;
@@ -74,12 +69,13 @@ export default function DocumentInspector({
     source?.id,
     pageNumber,
     workspaceId,
-    localPage,
-    currentVersion,
+    needsRemotePage,
     retry,
     evidence?.docHash,
   ]);
-  const page = localPage || remotePage;
+  const page =
+    localPage || (remotePage?.page_number === pageNumber ? remotePage : null);
+  const loading = needsRemotePage && !page && !error;
   return (
     <div className="document-inspector">
       {!currentVersion && (
@@ -100,8 +96,10 @@ export default function DocumentInspector({
       {evidence && (
         <>
           <Badge tone={verified ? "document" : "neutral"}>
-            {evidence.verificationStatus?.replaceAll("_", " ") ??
-              "Unverified sample excerpt"}
+            {studyExcerpt
+              ? "Study set excerpt"
+              : (evidence.verificationStatus?.replaceAll("_", " ") ??
+                "Unverified sample excerpt")}
           </Badge>
           <h3 className="evidence-title">{evidence.title}</h3>
           <blockquote>
@@ -115,7 +113,7 @@ export default function DocumentInspector({
         </>
       )}
       <details className="nb-source-technical">
-        <summary>Thông tin tài liệu và xác minh</summary>
+        <summary>Document details and verification</summary>
         <dl className="document-metadata">
           <dt>Version</dt>
           <dd>{evidence?.docVersion ?? source?.versionId ?? "Unavailable"}</dd>
@@ -145,7 +143,7 @@ export default function DocumentInspector({
       (source.totalPages || source.pages?.length) ? (
         <>
           <label className="document-page-select">
-            {source.kind.toLowerCase() === "pptx" ? "Slide" : "Trang văn bản"}
+            {source.kind.toLowerCase() === "pptx" ? "Slide" : "Document page"}
             <select
               aria-label="Document page"
               value={pageNumber}
@@ -162,11 +160,15 @@ export default function DocumentInspector({
             </select>
           </label>
           <p className="small muted">
-            Văn bản đã trích xuất từ tài liệu.{" "}
+            Text extracted from the document.{" "}
             {source.kind.toLowerCase() === "docx" &&
-              "Word được lưu thành một trang văn bản, không theo phân trang in."}
+              "Word documents are stored as one text page, regardless of print pagination."}
           </p>
-          {loading && <p role="status">Đang tải văn bản nguồn…</p>}
+          {loading && (
+            <p role="status" className="window-loading">
+              Loading source text…
+            </p>
+          )}
           {error && (
             <Notice tone="neutral">
               {error}{" "}
@@ -174,7 +176,7 @@ export default function DocumentInspector({
                 className="button"
                 onClick={() => setRetry((value) => value + 1)}
               >
-                Thử lại
+                Retry
               </button>
             </Notice>
           )}

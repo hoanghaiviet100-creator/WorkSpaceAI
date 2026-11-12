@@ -1,6 +1,14 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { createPortal } from "react-dom";
 import { MoreHorizontal } from "lucide-react";
+import { useEntrance, useExit } from "./useEntrance";
 
 export type MenuAction = {
   label: string;
@@ -12,17 +20,29 @@ export type MenuAction = {
 export default function ActionMenu({
   label,
   actions,
+  triggerContent,
+  exitDuration,
 }: {
   label: string;
   actions: MenuAction[];
+  triggerContent?: ReactNode;
+  exitDuration?: number;
 }) {
-  const [open, setOpen] = useState(false);
-  const [position, setPosition] = useState({ top: 0, left: 0 });
+  const [position, setPosition] = useState<{
+    top: number;
+    left: number;
+  } | null>(null);
+  const open = position !== null;
   const trigger = useRef<HTMLButtonElement>(null),
     menu = useRef<HTMLDivElement>(null);
+  const exit = useExit(exitDuration);
+  useEntrance(menu, open);
+  const close = useCallback(
+    () => exit(menu.current, () => setPosition(null)),
+    [exit],
+  );
   const id = useId();
-  useEffect(() => {
-    if (!open) return;
+  const show = () => {
     const rect = trigger.current!.getBoundingClientRect();
     setPosition({
       top: Math.max(
@@ -31,22 +51,25 @@ export default function ActionMenu({
       ),
       left: Math.max(8, Math.min(rect.right - 216, innerWidth - 224)),
     });
+  };
+  useEffect(() => {
+    if (!open) return;
     menu.current
       ?.querySelector<HTMLButtonElement>("button:not(:disabled)")
-      ?.focus();
+      ?.focus({ preventScroll: true });
     const outside = (event: PointerEvent) => {
       if (
         !menu.current?.contains(event.target as Node) &&
         !trigger.current?.contains(event.target as Node)
       )
-        setOpen(false);
+        close();
     };
     const keyboard = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        setOpen(false);
-        trigger.current?.focus();
+        close();
+        trigger.current?.focus({ preventScroll: true });
       }
       if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
         event.preventDefault();
@@ -65,9 +88,9 @@ export default function ActionMenu({
               ? items.length - 1
               : (current + (event.key === "ArrowUp" ? -1 : 1) + items.length) %
                 items.length;
-        items[index]?.focus();
+        items[index]?.focus({ preventScroll: true });
       }
-      if (event.key === "Tab") setOpen(false);
+      if (event.key === "Tab") setPosition(null);
     };
     document.addEventListener("pointerdown", outside);
     document.addEventListener("keydown", keyboard, true);
@@ -75,7 +98,7 @@ export default function ActionMenu({
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", keyboard, true);
     };
-  }, [open, actions.length]);
+  }, [open, close]);
   return (
     <>
       <button
@@ -86,11 +109,11 @@ export default function ActionMenu({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? id : undefined}
-        onClick={() => setOpen(!open)}
+        onClick={() => (open ? close() : show())}
       >
-        <MoreHorizontal size={18} />
+        {triggerContent ?? <MoreHorizontal size={18} />}
       </button>
-      {open &&
+      {position &&
         createPortal(
           <div
             className="nb-action-menu"
@@ -107,8 +130,8 @@ export default function ActionMenu({
                 disabled={action.disabled}
                 className={action.danger ? "is-danger" : ""}
                 onClick={() => {
-                  setOpen(false);
-                  trigger.current?.focus();
+                  setPosition(null);
+                  trigger.current?.focus({ preventScroll: true });
                   action.run();
                 }}
               >

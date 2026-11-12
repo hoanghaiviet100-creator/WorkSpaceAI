@@ -1,20 +1,28 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ChevronDown, SlidersHorizontal, Sun } from "lucide-react";
 import { ThemeControl } from "./components";
+import { useEntrance, useExit } from "./useEntrance";
 
 export default function AppTools({ compact = false }: { compact?: boolean }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const exit = useExit();
+  useEntrance(panel, open);
+  const close = useCallback(
+    () => exit(panel.current, () => setOpen(false)),
+    [exit],
+  );
   const id = useId();
   useEffect(() => {
     if (!open) return;
     const outside = (event: PointerEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
+      if (!root.current?.contains(event.target as Node)) close();
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setOpen(false);
+        close();
         trigger.current?.focus();
       }
     };
@@ -24,14 +32,13 @@ export default function AppTools({ compact = false }: { compact?: boolean }) {
       document.removeEventListener("pointerdown", outside);
       document.removeEventListener("keydown", escape);
     };
-  }, [open]);
+  }, [open, close]);
   return (
     <div
       className="display-tools"
       ref={root}
       onBlur={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node))
-          setOpen(false);
+        if (!event.currentTarget.contains(event.relatedTarget as Node)) close();
       }}
     >
       <button
@@ -40,13 +47,13 @@ export default function AppTools({ compact = false }: { compact?: boolean }) {
         aria-label="Display options"
         aria-expanded={open}
         aria-controls={id}
-        onClick={() => setOpen(!open)}
+        onClick={() => (open ? close() : setOpen(true))}
       >
         {compact ? <Sun size={16} /> : <SlidersHorizontal size={16} />}
         <span>Display</span>
         <ChevronDown size={13} />
       </button>
-      <div className="display-tools-panel" id={id} hidden={!open}>
+      <div className="display-tools-panel" id={id} hidden={!open} ref={panel}>
         <div className="display-theme-row">
           <span>Color theme</span>
           <ThemeControl />

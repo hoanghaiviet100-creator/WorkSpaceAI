@@ -1,8 +1,6 @@
 import type {
   CitationClaimRow,
   RouteType,
-  ReconciliationState,
-  RiskLevel,
   EmailState,
   DocumentPageRow,
 } from "./schema";
@@ -29,33 +27,16 @@ export type RuntimeStatus = {
   saved_locally?: boolean;
   offline_only?: boolean;
   gemini_scope?: "feature1";
-  feature_engines?: {
-    qa: "offline" | "ollama" | "gemini";
-    tasks: "offline";
-    email: "offline" | "ollama";
-  };
   model_options?: string[];
+  provider_options?: {
+    id: "ollama" | "gemini";
+    model: string;
+    configured: boolean;
+  }[];
 };
+export const selectProvider = (provider: "ollama" | "gemini") =>
+  request<RuntimeStatus>("/runtime/provider", json({ provider }));
 export const getRuntimeStatus = () => request<RuntimeStatus>("/runtime");
-export const configureGemini = (
-  key: string,
-  saveLocally: boolean,
-  model = "gemini-3.5-flash-lite",
-) =>
-  request<RuntimeStatus>(
-    "/runtime/gemini",
-    json({
-      ...(key ? { api_key: key } : {}),
-      save_locally: saveLocally,
-      model,
-      enable_feature1: true,
-    }),
-  );
-export const useOffline = (saveLocally: boolean) =>
-  request<RuntimeStatus>(
-    "/runtime/offline",
-    json({ save_locally: saveLocally }),
-  );
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -70,7 +51,10 @@ async function request<T>(
   workspaceId?: string,
 ): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), path === "/chat" ? 150_000 : 60_000);
+  const timeout = setTimeout(
+    () => controller.abort(),
+    path === "/chat" ? 150_000 : 60_000,
+  );
   try {
     const headers = new Headers(options.headers);
     if (workspaceId) headers.set("X-Workspace-ID", workspaceId);
@@ -110,27 +94,6 @@ export type ServerClaim = Partial<CitationClaimRow> & {
   cited_page: number;
   evidence_quote: string;
 };
-export type ServerReport = {
-  coverage_ratio: number;
-  overdue_count: number;
-  conflict_count: number;
-  item_reports: {
-    req_id: string;
-    title: string;
-    state: ReconciliationState;
-    risk_level: RiskLevel;
-    avg_completion: number;
-    days_remaining: number | null;
-    owners: string[];
-    date_conflicts: {
-      doc_a: string;
-      date_a: string;
-      doc_b: string;
-      date_b: string;
-    }[];
-    citations: string[];
-  }[];
-};
 export type ChatResponse = {
   route: RouteType;
   status: string;
@@ -139,7 +102,6 @@ export type ChatResponse = {
   grounding_score?: number;
   validated_claims?: ServerClaim[];
   hallucination_flags?: ServerClaim[];
-  reconciliation_report?: ServerReport;
   draft?: {
     draft_id: string;
     recipient_email: string;
@@ -203,7 +165,7 @@ export function chatRequest(
   recipient?: string,
   referenceDate = new Date().toLocaleDateString("en-CA"),
   workspaceId?: string,
-  studioTool?: "plan" | "email",
+  studioTool?: "email",
 ) {
   return request<ChatResponse>(
     "/chat",
@@ -212,6 +174,7 @@ export function chatRequest(
       selected_doc_ids: selectedDocIds,
       conversation_history: history,
       reference_date: referenceDate,
+      allow_reconciliation: false,
       ...(recipient ? { recipient_email: recipientAddress(recipient) } : {}),
       ...(studioTool ? { studio_tool: studioTool } : {}),
     }),
@@ -256,21 +219,6 @@ export function getDocumentPage(id: string, page: number, workspaceId: string) {
       partial: boolean;
     }
   >(`/documents/${encodeURIComponent(id)}/pages/${page}`, {}, workspaceId);
-}
-export async function reconcile(referenceDate: string, workspaceId?: string) {
-  const result = await chatRequest(
-    "Reconcile requirements and tasks, show coverage and deadline conflicts",
-    [],
-    [],
-    undefined,
-    referenceDate,
-    workspaceId,
-  );
-  if (!result.reconciliation_report)
-    throw new ApiError(
-      result.message || "The server did not return a reconciliation report.",
-    );
-  return result.reconciliation_report;
 }
 export function draftFromServer(
   row: NonNullable<ChatResponse["draft"]>,

@@ -220,7 +220,7 @@ try {
   await click('[aria-label="Clear selection"]');
   await click('[aria-label="Use Feature1_Live_Check.txt"]');
   await input(
-    '[aria-label="Message your workspace"]',
+    '[aria-label="Message this note"]',
     "What is the verification code in Feature1_Live_Check.txt?",
   );
   await click('[aria-label="Send message"]');
@@ -266,7 +266,7 @@ try {
   await click('.modal [aria-label="Close dialog"]');
   await click('[aria-label="Clear selection"]');
   await input(
-    '[aria-label="Message your workspace"]',
+    '[aria-label="Message this note"]',
     "What is the verification code?",
   );
   await click('[aria-label="Send message"]');
@@ -284,7 +284,7 @@ try {
         .querySelector(".abstention"),
   );
   await input(
-    '[aria-label="Message your workspace"]',
+    '[aria-label="Message this note"]',
     "Keep this unsent question",
   );
   await click('[aria-label="AI settings"]');
@@ -304,7 +304,7 @@ try {
     await check(
       "Closing offline settings preserves the unsent question",
       () =>
-        document.querySelector('[aria-label="Message your workspace"]')
+        document.querySelector('[aria-label="Message this note"]')
           .value === "Keep this unsent question",
     );
     const rejected = await fetch(backendBase + "/api/runtime/gemini", {
@@ -344,7 +344,7 @@ try {
     await check(
       "Saving AI settings preserves the unsent question",
       () =>
-        document.querySelector('[aria-label="Message your workspace"]')
+        document.querySelector('[aria-label="Message this note"]')
           .value === "Keep this unsent question",
     );
     if (apiQuestions !== 2)

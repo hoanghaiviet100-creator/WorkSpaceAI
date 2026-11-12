@@ -1,0 +1,107 @@
+/* Dark theme palette for the workspace and dialogs. */
+:root[data-theme="dark"] {
+  --bg: #000;
+  --dark-panel: #11151b;
+  --dark-card: #1b222b;
+  --canvas: var(--dark-panel);
+  --surface: var(--dark-card);
+  --raised: #232d38;
+  --subtle: #151a22;
+  --active: #2b3644;
+  --text: #f7f3ef;
+  --muted: #b8c0cc;
+  --faint: #9ca8b8;
+  --border: #334153;
+  --control: #788697;
+  --accent: #ffbd86;
+  --accent-ink: #ffd1ad;
+  --accent-soft: #35271f;
+  --on-accent: #23160f;
+  --menu-surface: var(--raised);
+  --dark-warm-surface: #29201e;
+}
+
+/* Borderless surfaces still use the existing keyboard focus indicators. */
+:root[data-theme="dark"] :where(:not(.workspace-landing, .workspace-landing *)),
+:root[data-theme="dark"]
+  :where(:not(.workspace-landing, .workspace-landing *))::before,
+:root[data-theme="dark"]
+  :where(:not(.workspace-landing, .workspace-landing *))::after {
+  border-color: transparent !important;
+}
+
+:root[data-theme="dark"] .application-shell:has(> .notebook) {
+  --bg: inherit;
+}
+
+:root[data-theme="dark"] .notebook {
+  --canvas: var(--dark-panel);
+  --surface: var(--dark-card);
+  --sidebar: var(--dark-panel);
+  --panel: var(--dark-panel);
+  --gradient-mid: #151416;
+  --peach: #241d1c;
+  --gradient-peach: var(--peach);
+  --coral-soft: #2b211f;
+  --coral-orange: #352520;
+  --panel-shadow: 0 6px 18px rgb(0 0 0 / 32%);
+  --nb-soft: var(--surface);
+  --nb-line: var(--border);
+  --nb-ink: var(--text);
+  --nb-muted: var(--muted);
+  --nb-teal: var(--accent-ink);
+}
+
+:root[data-theme="dark"] :is(.auth-card, .modal:not(.landing-dialog)) {
+  background: var(--canvas);
+}
+
+:root[data-theme="dark"]
+  :is(
+    .nb-source-row,
+    .nb-source-search,
+    .study-flip-face,
+    .study-create-sources summary,
+    .header-sign-in,
+    .display-tools-trigger.is-compact
+  ) {
+  background: var(--surface);
+}
+
+:root[data-theme="dark"]
+  :is(.nb-source-row:hover, .study-flip:hover .study-flip-face) {
+  background: var(--active);
+}
+
+:root[data-theme="dark"]
+  :is(
+    .nb-source-row.is-selected,
+    .study-flip-face[data-back="true"],
+    .study-question label:not([data-result]):has(input:checked)
+  ) {
+  background: var(--accent-soft);
+}
+:root[data-theme="dark"] .study-question label[data-result="correct"] {
+  border-color: #67b588;
+  background: #1a3528;
+}
+:root[data-theme="dark"] .study-question label[data-result="correct"] > svg {
+  color: #8fdbac;
+}
+
+:root[data-theme="dark"] .nb-source-open:not(:disabled):hover {
+  background-color: transparent;
+}
+
+:root[data-theme="dark"] .study-segments {
+  background: transparent;
+}
+
+:root[data-theme="dark"] .button.primary {
+  color: var(--on-accent);
+}
+
+:root[data-theme="dark"] .button.primary:not(:disabled):hover {
+  background: var(--accent-ink);
+  color: var(--on-accent);
+}

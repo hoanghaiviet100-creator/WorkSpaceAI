@@ -210,12 +210,8 @@ export const VERIFIED_STATUSES: readonly VerificationStatus[] = [
 ];
 export const isVerified = (status?: string): boolean =>
   VERIFIED_STATUSES.includes(status as VerificationStatus);
-export const featureRoute = (mode: "Ask" | "Tasks" | "Email"): RouteType =>
-  mode === "Ask"
-    ? "QA_FLOW"
-    : mode === "Tasks"
-      ? "RECONCILE_FLOW"
-      : "EMAIL_FLOW";
+export const featureRoute = (mode: "Ask" | "Email"): RouteType =>
+  mode === "Email" ? "EMAIL_FLOW" : "QA_FLOW";
 export function normalizeTaskStatus(value: string): TaskState {
   if (TASK_STATES.includes(value as TaskState)) return value as TaskState;
   if (["To do", "To-do", "Not Started"].includes(value)) return "TODO";

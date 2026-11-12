@@ -1,4 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import {
   ArrowDownAZ,
   Check,
@@ -18,7 +26,7 @@ import {
   Upload,
   X,
 } from "lucide-react";
-import { Modal, Notice } from "./components";
+import { DialogCancel, Modal, Notice } from "./components";
 import type { Source, Workspace } from "./data";
 import {
   apiFor,
@@ -47,11 +55,113 @@ function FileIcon({ source }: { source: Source }) {
     <FileText size={20} />
   );
 }
+type SourceAction = "inspect" | "rename" | "replace" | "delete";
+
+const SourceRow = memo(function SourceRow({
+  source,
+  usable,
+  connected,
+  busy,
+  pending,
+  onToggle,
+  onAction,
+}: {
+  source: Source;
+  usable: boolean;
+  connected: boolean;
+  busy: boolean;
+  pending: boolean;
+  onToggle: (ids: string[], checked: boolean) => void;
+  onAction: (action: SourceAction, source: Source) => void;
+}) {
+  return (
+    <div
+      className={`nb-source-row ${source.selected && usable ? "is-selected" : ""}`}
+    >
+      <button
+        className="nb-source-open"
+        title={source.name}
+        onClick={() => onAction("inspect", source)}
+      >
+        <span className={`nb-file-icon kind-${source.kind.toLowerCase()}`}>
+          <FileIcon source={source} />
+        </span>
+        <span>
+          <strong>{source.name}</strong>
+          <small>
+            {source.status === "Processed"
+              ? connected && source.origin !== "server"
+                ? "Original file needed"
+                : "Ready"
+              : source.status === "Processing"
+                ? "Processing"
+                : source.status === "Unreadable"
+                  ? "Unreadable file"
+                  : "Preview only"}
+            {source.totalPages
+              ? ` · ${source.totalPages} ${source.kind.toLowerCase() === "pptx" ? "slide" : "trang"}`
+              : ""}
+          </small>
+        </span>
+      </button>
+      <label
+        className="nb-source-check"
+        title={
+          !usable
+            ? source.limitation ||
+              "Upload the original file to the server to use this source."
+            : "Use this source for answers"
+        }
+      >
+        <input
+          type="checkbox"
+          aria-label={`Use ${source.name}`}
+          checked={source.selected && usable}
+          disabled={busy || pending || !usable}
+          onChange={(event) => onToggle([source.id], event.target.checked)}
+        />
+      </label>
+      <ActionMenu
+        label={`Options for ${source.name}`}
+        actions={[
+          {
+            label: "View source",
+            icon: <Info size={15} />,
+            run: () => onAction("inspect", source),
+          },
+          {
+            label: "Rename",
+            icon: <Pencil size={15} />,
+            disabled: busy,
+            run: () => onAction("rename", source),
+          },
+          {
+            label: "Re-upload original file",
+            icon: <RefreshCw size={15} />,
+            disabled: busy,
+            run: () => onAction("replace", source),
+          },
+          {
+            label: "Remove source",
+            icon: <Trash2 size={15} />,
+            danger: true,
+            disabled: busy,
+            run: () => onAction("delete", source),
+          },
+        ]}
+      />
+    </div>
+  );
+});
+
 export default function Sources({
   workspace,
   update,
   onClose,
   notify,
+  motionRef,
+  intakeFiles,
+  onIntakeComplete,
 }: {
   workspace: Workspace;
   update: (fn: (workspace: Workspace) => Workspace) => void;
@@ -59,12 +169,17 @@ export default function Sources({
   notify: (message: string) => void;
   isDrawer: boolean;
   notebook?: boolean;
+  motionRef?: RefObject<HTMLDivElement | null>;
+  intakeFiles?: File[];
+  onIntakeComplete: (ready: boolean) => void;
 }) {
   const connected = apiFor(workspace.id);
   const [search, setSearch] = useState("");
   const [kind, setKind] = useState("");
   const [alphabetical, setAlphabetical] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [pendingSelection, setPendingSelection] =
+    useState<ReadonlySet<string> | null>(null);
   const [dragging, setDragging] = useState(false);
   const [add, setAdd] = useState<"file" | "link" | "text" | null>(null);
   const [title, setTitle] = useState("");
@@ -84,12 +199,14 @@ export default function Sources({
   const lock = useRef(false);
   const dragDepth = useRef(0);
   const libraryRevision = useRef(0);
-  const commit = (fn: (current: Workspace) => Workspace) => {
-    libraryRevision.current++;
-    update(fn);
-  };
   const updateRef = useRef(update);
   updateRef.current = update;
+  const sourcesRef = useRef(workspace.sources);
+  sourcesRef.current = workspace.sources;
+  const commit = useCallback((fn: (current: Workspace) => Workspace) => {
+    libraryRevision.current++;
+    updateRef.current(fn);
+  }, []);
   useEffect(() => {
     if (!connected) return;
     let alive = true;
@@ -104,27 +221,33 @@ export default function Sources({
       .catch(() => {
         if (alive)
           setFailure(
-            "Chưa đồng bộ được thư viện. Kiểm tra backend và thử lại.",
+            "Could not sync the library. Check the server connection and try again.",
           );
       });
     return () => {
       alive = false;
     };
   }, [workspace.id, connected]);
-  const usable = (source: Source) =>
-    source.status === "Processed" && (!connected || source.origin === "server");
+  const usable = useCallback(
+    (source: Source) =>
+      source.status === "Processed" &&
+      (!connected || source.origin === "server"),
+    [connected],
+  );
   const selected = workspace.sources.filter(
     (source) => source.selected && usable(source),
   );
-  const visible = workspace.sources
-    .filter(
+  const visible = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase();
+    const rows = workspace.sources.filter(
       (source) =>
-        source.name
-          .toLocaleLowerCase()
-          .includes(search.trim().toLocaleLowerCase()) &&
+        source.name.toLocaleLowerCase().includes(query) &&
         (!kind || source.kind.toUpperCase() === kind),
-    )
-    .sort((a, b) => (alphabetical ? a.name.localeCompare(b.name) : 0));
+    );
+    return alphabetical
+      ? rows.sort((a, b) => a.name.localeCompare(b.name))
+      : rows;
+  }, [workspace.sources, search, kind, alphabetical]);
   const selectable = visible.filter(usable);
   const allSelected =
     !!selectable.length && selectable.every((source) => source.selected);
@@ -133,47 +256,61 @@ export default function Sources({
       selectAll.current.indeterminate =
         !allSelected && selectable.some((source) => source.selected);
   }, [allSelected, selectable]);
-  const toggle = async (ids: string[], checked: boolean) => {
-    if (lock.current) return;
-    lock.current = true;
-    setBusy(true);
-    setFailure("");
-    try {
-      if (
-        workspace.sources.some(
-          (source) => ids.includes(source.id) && source.origin === "server",
-        )
-      ) {
-        if (!connected)
-          throw new Error("Kết nối backend để thay đổi nguồn đang sử dụng.");
-        await selectDocuments(
-          workspace.sources
-            .filter(
-              (source) =>
-                source.origin === "server" &&
-                (ids.includes(source.id) ? checked : source.selected),
-            )
-            .map((source) => source.id),
-          workspace.id,
-        );
-      }
-      commit((current) => ({
-        ...current,
-        sources: current.sources.map((source) =>
-          ids.includes(source.id) ? { ...source, selected: checked } : source,
-        ),
-      }));
-    } catch (error) {
-      setFailure(
-        error instanceof Error
-          ? error.message
-          : "Chưa lưu được lựa chọn nguồn.",
+  const toggle = useCallback(
+    async (ids: string[], checked: boolean) => {
+      if (lock.current) return;
+      const sources = sourcesRef.current;
+      const requested = new Set(ids);
+      const changed = new Set(
+        sources
+          .filter(
+            (source) =>
+              requested.has(source.id) &&
+              source.selected !== checked &&
+              usable(source),
+          )
+          .map((source) => source.id),
       );
-    } finally {
-      lock.current = false;
-      setBusy(false);
-    }
-  };
+      if (!changed.size) return;
+
+      lock.current = true;
+      try {
+        if (
+          sources.some(
+            (source) => changed.has(source.id) && source.origin === "server",
+          )
+        ) {
+          setPendingSelection(changed);
+          await selectDocuments(
+            sources
+              .filter(
+                (source) =>
+                  source.origin === "server" &&
+                  (changed.has(source.id) ? checked : source.selected),
+              )
+              .map((source) => source.id),
+            workspace.id,
+          );
+        }
+        commit((current) => ({
+          ...current,
+          sources: current.sources.map((source) =>
+            changed.has(source.id) ? { ...source, selected: checked } : source,
+          ),
+        }));
+      } catch (error) {
+        notify(
+          error instanceof Error
+            ? error.message
+            : "Could not save source selection.",
+        );
+      } finally {
+        lock.current = false;
+        setPendingSelection(null);
+      }
+    },
+    [workspace.id, usable, commit, notify],
+  );
   const sync = async () => {
     if (lock.current) return;
     lock.current = true;
@@ -182,10 +319,10 @@ export default function Sources({
     try {
       const sources = await listDocuments(workspace.id);
       commit((current) => syncWorkspaceLibrary(current, sources));
-      notify("Đã đồng bộ thư viện nguồn.");
+      notify("Source library synced.");
     } catch (error) {
       setFailure(
-        error instanceof Error ? error.message : "Chưa đồng bộ được thư viện.",
+        error instanceof Error ? error.message : "Could not sync the library.",
       );
     } finally {
       lock.current = false;
@@ -196,16 +333,18 @@ export default function Sources({
     const extension = file.name.split(".").pop()?.toLowerCase() || "";
     if (!TYPES.includes(extension.toUpperCase()))
       throw new Error(
-        "Chọn PDF, Word (.docx), slide (.pptx), TXT, MD hoặc CSV.",
+        "Choose a PDF, Word (.docx), PowerPoint (.pptx), TXT, MD, or CSV file.",
       );
     if (!file.size || file.size > 25 * 1024 * 1024)
-      throw new Error("File cần có nội dung và không vượt quá 25 MB.");
+      throw new Error(
+        "The file must contain data and be no larger than 25 MB.",
+      );
     if (
       replacement &&
       file.name.toLowerCase() !== replacement.name.toLowerCase()
     )
       throw new Error(
-        `Chọn file gốc ${replacement.name}. Dùng Thêm nguồn để tải tài liệu khác.`,
+        `Choose the original file ${replacement.name}. Use Add source for a different document.`,
       );
     if (connected) {
       const source = await uploadDocument(file, workspace.id);
@@ -221,6 +360,7 @@ export default function Sources({
           replacement ? { [replacement.id]: source.id } : {},
         ),
       );
+      return source;
     } else {
       const bytes = await file.arrayBuffer();
       const hash = await sha256(bytes);
@@ -248,7 +388,7 @@ export default function Sources({
         totalPages: plain === undefined ? undefined : 1,
         totalLines: plain?.split(/\r?\n/).length,
         limitation:
-          "Bản xem trước trên thiết bị. Tải lại lên backend để sử dụng làm nguồn trả lời.",
+          "Local preview. Re-upload to the server to use it for answers.",
         pages:
           plain === undefined
             ? undefined
@@ -271,21 +411,29 @@ export default function Sources({
       );
     }
   };
-  const upload = async (files: File[], replacement?: Source) => {
-    if (!files.length || lock.current) return;
+  const upload = async (
+    files: File[],
+    replacement?: Source,
+    selectForChat = false,
+  ) => {
+    if (!files.length || lock.current) return false;
     lock.current = true;
     setBusy(true);
     setFailure("");
     setAdd(null);
+    let completed = true;
+    const uploaded: Source[] = [];
     for (const file of files) {
       const id = crypto.randomUUID();
       setJobs((current) => [...current, { id, file, replacement }]);
       try {
-        await ingest(file, replacement);
+        const source = await ingest(file, replacement);
+        if (source) uploaded.push(source);
         setJobs((current) => current.filter((job) => job.id !== id));
       } catch (error) {
+        completed = false;
         const message =
-          error instanceof Error ? error.message : "Tải lên chưa thành công.";
+          error instanceof Error ? error.message : "Upload failed.";
         setJobs((current) =>
           current.map((job) =>
             job.id === id ? { ...job, error: message } : job,
@@ -293,11 +441,53 @@ export default function Sources({
         );
       }
     }
+    if (selectForChat && uploaded.some((source) => !source.selected)) {
+      const ids = new Set([
+        ...sourcesRef.current
+          .filter((source) => source.origin === "server" && source.selected)
+          .map((source) => source.id),
+        ...uploaded.map((source) => source.id),
+      ]);
+      try {
+        await selectDocuments([...ids], workspace.id);
+        commit((current) => ({
+          ...current,
+          sources: current.sources.map((source) =>
+            ids.has(source.id) && !source.selected
+              ? { ...source, selected: true }
+              : source,
+          ),
+        }));
+      } catch {
+        completed = false;
+      }
+    }
     lock.current = false;
     setBusy(false);
     target.current = null;
     if (input.current) input.current.value = "";
+    return completed;
   };
+  const receivedFiles = useRef<File[] | undefined>(undefined);
+  const uploadRef = useRef(upload);
+  const intakeComplete = useRef(onIntakeComplete);
+  uploadRef.current = upload;
+  intakeComplete.current = onIntakeComplete;
+  useEffect(() => {
+    if (!intakeFiles?.length || receivedFiles.current === intakeFiles) return;
+    receivedFiles.current = intakeFiles;
+    void uploadRef.current(intakeFiles, undefined, true).then((completed) => {
+      if (!completed)
+        notify(
+          "Some files could not be prepared. Check Sources before sending.",
+        );
+      else if (!connected)
+        notify(
+          "Files added as local previews. The question is saved in the composer.",
+        );
+      intakeComplete.current(completed && connected);
+    });
+  }, [intakeFiles, connected, notify]);
   const importLink = async () => {
     if (lock.current) return;
     lock.current = true;
@@ -320,12 +510,12 @@ export default function Sources({
       setAdd(null);
       setUrl("");
       setTitle("");
-      notify("Đã thêm nội dung từ liên kết.");
+      notify("Source added from link.");
     } catch (error) {
       setFailure(
         error instanceof Error
           ? error.message
-          : "Không tải được nội dung từ liên kết.",
+          : "Could not load content from the link.",
       );
     } finally {
       lock.current = false;
@@ -359,7 +549,9 @@ export default function Sources({
       setRenaming(null);
     } catch (error) {
       setFailure(
-        error instanceof Error ? error.message : "Chưa đổi được tên tài liệu.",
+        error instanceof Error
+          ? error.message
+          : "Could not rename the document.",
       );
     } finally {
       setBusy(false);
@@ -384,293 +576,240 @@ export default function Sources({
       setDeleting(null);
     } catch (error) {
       setFailure(
-        error instanceof Error ? error.message : "Chưa xóa được tài liệu.",
+        error instanceof Error
+          ? error.message
+          : "Could not remove the document.",
       );
     } finally {
       setBusy(false);
     }
   };
+  const onSourceAction = useCallback((action: SourceAction, source: Source) => {
+    if (action === "inspect") {
+      setInspect(source);
+      return;
+    }
+    if (lock.current) return;
+    setFailure("");
+    if (action === "rename") {
+      setNewName(source.name);
+      setRenaming(source);
+    } else if (action === "replace") {
+      target.current = source;
+      setAdd("file");
+    } else {
+      setDeleting(source);
+    }
+  }, []);
+
   return (
     <>
-      <header className="nb-panel-header">
-        <h2>
-          Nguồn <span className="nb-count">{workspace.sources.length}</span>
-        </h2>
-        <button
-          className="icon-button"
-          aria-label="Thu gọn Nguồn"
-          title="Thu gọn Nguồn"
-          onClick={onClose}
-        >
-          <PanelLeftClose size={18} />
-        </button>
-      </header>
-      <div
-        className={`nb-sources-body ${dragging ? "is-dragging" : ""}`}
-        onDragEnter={(event) => {
-          if (!event.dataTransfer.types.includes("Files")) return;
-          event.preventDefault();
-          dragDepth.current++;
-          setDragging(true);
-        }}
-        onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("Files"))
-            event.preventDefault();
-        }}
-        onDragLeave={() => {
-          dragDepth.current--;
-          if (dragDepth.current <= 0) {
-            dragDepth.current = 0;
-            setDragging(false);
-          }
-        }}
-        onDrop={(event) => {
-          if (!event.dataTransfer.files.length) return;
-          event.preventDefault();
-          dragDepth.current = 0;
-          setDragging(false);
-          void upload(Array.from(event.dataTransfer.files));
-        }}
-      >
-        <button
-          className="button nb-add-source"
-          disabled={busy}
-          onClick={() => {
-            target.current = null;
-            setFailure("");
-            setAdd("file");
-          }}
-        >
-          <Plus size={18} />
-          Thêm nguồn
-        </button>
-        <label className="nb-source-search">
-          <Search size={16} />
-          <input
-            aria-label="Tìm nguồn"
-            placeholder="Tìm trong nguồn của bạn"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-          {search && (
-            <button aria-label="Xóa tìm kiếm" onClick={() => setSearch("")}>
-              <X size={14} />
-            </button>
-          )}
-        </label>
-        <div className="nb-source-filter">
-          <select
-            aria-label="Lọc loại nguồn"
-            value={kind}
-            onChange={(event) => setKind(event.target.value)}
-          >
-            <option value="">Tất cả loại file</option>
-            {TYPES.map((type) => (
-              <option key={type}>{type}</option>
-            ))}
-          </select>
+      <div className="nb-panel-content nb-rail-surface" ref={motionRef}>
+        <header className="nb-panel-header">
+          <h2>
+            Sources <span className="nb-count">{workspace.sources.length}</span>
+          </h2>
           <button
             className="icon-button"
-            aria-label="Sắp xếp nguồn theo tên"
-            aria-pressed={alphabetical}
-            onClick={() => setAlphabetical(!alphabetical)}
+            aria-label="Collapse Sources"
+            title="Collapse Sources"
+            onClick={onClose}
           >
-            <ArrowDownAZ size={16} />
+            <PanelLeftClose size={18} />
           </button>
-          {connected && (
+        </header>
+        <div
+          className={`nb-sources-body ${dragging ? "is-dragging" : ""}`}
+          onDragEnter={(event) => {
+            if (!event.dataTransfer.types.includes("Files")) return;
+            event.preventDefault();
+            dragDepth.current++;
+            setDragging(true);
+          }}
+          onDragOver={(event) => {
+            if (event.dataTransfer.types.includes("Files"))
+              event.preventDefault();
+          }}
+          onDragLeave={() => {
+            dragDepth.current--;
+            if (dragDepth.current <= 0) {
+              dragDepth.current = 0;
+              setDragging(false);
+            }
+          }}
+          onDrop={(event) => {
+            if (!event.dataTransfer.files.length) return;
+            event.preventDefault();
+            dragDepth.current = 0;
+            setDragging(false);
+            void upload(Array.from(event.dataTransfer.files));
+          }}
+        >
+          <button
+            className="button nb-add-source"
+            disabled={busy}
+            onClick={() => {
+              target.current = null;
+              setFailure("");
+              setAdd("file");
+            }}
+          >
+            <Plus size={18} />
+            Add source
+          </button>
+          <label className="nb-source-search">
+            <Search size={16} />
+            <input
+              aria-label="Search sources"
+              placeholder="Search your sources"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {search && (
+              <button aria-label="Clear search" onClick={() => setSearch("")}>
+                <X size={14} />
+              </button>
+            )}
+          </label>
+          <div className="nb-source-filter">
+            <select
+              aria-label="Filter by source type"
+              value={kind}
+              onChange={(event) => setKind(event.target.value)}
+            >
+              <option value="">All file types</option>
+              {TYPES.map((type) => (
+                <option key={type}>{type}</option>
+              ))}
+            </select>
             <button
               className="icon-button"
-              aria-label="Đồng bộ nguồn"
-              disabled={busy}
-              onClick={() => void sync()}
+              aria-label="Sort sources by name"
+              aria-pressed={alphabetical}
+              onClick={() => setAlphabetical(!alphabetical)}
             >
-              <RefreshCw size={16} />
+              <ArrowDownAZ size={16} />
             </button>
-          )}
-        </div>
-        <div className="nb-source-selection">
-          <span>{selected.length} đang dùng</span>
-          <label>
-            Chọn tất cả
-            <input
-              ref={selectAll}
-              type="checkbox"
-              aria-label="Chọn tất cả nguồn"
-              checked={allSelected}
-              disabled={busy || !selectable.length}
-              onChange={(event) =>
-                void toggle(
-                  selectable.map((source) => source.id),
-                  event.target.checked,
-                )
-              }
-            />
-          </label>
-        </div>
-        {failure && (
-          <div className="nb-source-error" role="alert">
-            {failure}
-          </div>
-        )}
-        <div className="nb-source-list">
-          {jobs.map((job) => (
-            <div className="nb-upload-job" key={job.id}>
-              <Upload size={18} />
-              <span>
-                <strong>{job.file.name}</strong>
-                <small>{job.error || "Đang tải và xử lý…"}</small>
-              </span>
-              {job.error ? (
-                <button
-                  className="icon-button"
-                  aria-label={`Thử tải lại ${job.file.name}`}
-                  disabled={busy}
-                  onClick={() => {
-                    setJobs((current) =>
-                      current.filter((item) => item.id !== job.id),
-                    );
-                    void upload([job.file], job.replacement);
-                  }}
-                >
-                  <RefreshCw size={16} />
-                </button>
-              ) : (
-                <LoaderCircle size={16} className="nb-spin" />
-              )}
-            </div>
-          ))}
-          {visible.map((source) => (
-            <div
-              className={`nb-source-row ${source.selected && usable(source) ? "is-selected" : ""}`}
-              key={source.id}
-            >
+            {connected && (
               <button
-                className="nb-source-open"
-                title={source.name}
-                onClick={() => setInspect(source)}
+                className="icon-button"
+                aria-label="Sync sources"
+                disabled={busy}
+                onClick={() => void sync()}
               >
-                <span
-                  className={`nb-file-icon kind-${source.kind.toLowerCase()}`}
-                >
-                  <FileIcon source={source} />
-                </span>
-                <span>
-                  <strong>{source.name}</strong>
-                  <small>
-                    {source.status === "Processed"
-                      ? connected && source.origin !== "server"
-                        ? "Cần tải file gốc"
-                        : "Sẵn sàng"
-                      : source.status === "Processing"
-                        ? "Đang xử lý"
-                        : source.status === "Unreadable"
-                          ? "Không đọc được file"
-                          : "Chỉ xem trước"}
-                    {source.totalPages
-                      ? ` · ${source.totalPages} ${source.kind.toLowerCase() === "pptx" ? "slide" : "trang"}`
-                      : ""}
-                  </small>
-                </span>
+                <RefreshCw size={16} />
               </button>
-              <label
-                className="nb-source-check"
-                title={
-                  !usable(source)
-                    ? source.limitation ||
-                      "Tải file gốc lên backend để dùng nguồn này."
-                    : "Bật/tắt nguồn cho câu trả lời"
+            )}
+          </div>
+          <div className="nb-source-selection">
+            <span
+              className="nb-source-count"
+              title={`${selected.length} in use`}
+            >
+              {selected.length} in use
+            </span>
+            <label>
+              Select all
+              <input
+                ref={selectAll}
+                type="checkbox"
+                aria-label="Select all sources"
+                checked={allSelected}
+                disabled={busy || !!pendingSelection || !selectable.length}
+                onChange={(event) =>
+                  void toggle(
+                    selectable.map((source) => source.id),
+                    event.target.checked,
+                  )
                 }
-              >
-                <input
-                  type="checkbox"
-                  aria-label={`Dùng ${source.name}`}
-                  checked={source.selected && usable(source)}
-                  disabled={busy || !usable(source)}
-                  onChange={(event) =>
-                    void toggle([source.id], event.target.checked)
-                  }
-                />
-              </label>
-              <ActionMenu
-                label={`Tùy chọn ${source.name}`}
-                actions={[
-                  {
-                    label: "Xem nguồn",
-                    icon: <Info size={15} />,
-                    run: () => setInspect(source),
-                  },
-                  {
-                    label: "Đổi tên",
-                    icon: <Pencil size={15} />,
-                    disabled: busy,
-                    run: () => {
-                      setFailure("");
-                      setNewName(source.name);
-                      setRenaming(source);
-                    },
-                  },
-                  {
-                    label: "Tải lại file gốc",
-                    icon: <RefreshCw size={15} />,
-                    disabled: busy,
-                    run: () => {
-                      target.current = source;
-                      setFailure("");
-                      setAdd("file");
-                    },
-                  },
-                  {
-                    label: "Xóa nguồn",
-                    icon: <Trash2 size={15} />,
-                    danger: true,
-                    disabled: busy,
-                    run: () => {
-                      setFailure("");
-                      setDeleting(source);
-                    },
-                  },
-                ]}
               />
+            </label>
+          </div>
+          {failure && (
+            <div className="nb-source-error" role="alert">
+              {failure}
             </div>
-          ))}
-          {!visible.length && !jobs.length && (
-            <div className="nb-sources-empty">
-              <div className="nb-empty-illustration">
-                <FileText size={32} />
-                <span />
-                <span />
+          )}
+          <div className="nb-source-list" aria-busy={!!pendingSelection}>
+            {jobs.map((job) => (
+              <div className="nb-upload-job" key={job.id}>
+                <Upload size={18} />
+                <span>
+                  <strong>{job.file.name}</strong>
+                  <small>{job.error || "Uploading and processing…"}</small>
+                </span>
+                {job.error ? (
+                  <button
+                    className="icon-button"
+                    aria-label={`Retry upload for ${job.file.name}`}
+                    disabled={busy}
+                    onClick={() => {
+                      setJobs((current) =>
+                        current.filter((item) => item.id !== job.id),
+                      );
+                      void upload([job.file], job.replacement);
+                    }}
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                ) : (
+                  <LoaderCircle size={16} />
+                )}
               </div>
-              <h3>
-                {workspace.sources.length
-                  ? "Không tìm thấy nguồn"
-                  : "Tải tài liệu đầu tiên của bạn"}
-              </h3>
-              <p>
-                {workspace.sources.length
-                  ? "Thử một tên khác hoặc thay đổi bộ lọc."
-                  : "Thả file vào đây, dán liên kết hoặc thêm văn bản để bắt đầu."}
-              </p>
+            ))}
+            {visible.map((source) => (
+              <SourceRow
+                key={source.id}
+                source={source}
+                usable={usable(source)}
+                connected={connected}
+                busy={busy}
+                pending={pendingSelection?.has(source.id) ?? false}
+                onToggle={toggle}
+                onAction={onSourceAction}
+              />
+            ))}
+            {!visible.length && !jobs.length && (
+              <div className="nb-sources-empty">
+                <div className="nb-empty-illustration">
+                  <FileText size={32} />
+                  <span />
+                  <span />
+                </div>
+                <h3>
+                  {workspace.sources.length
+                    ? "No sources found"
+                    : "Upload your first document"}
+                </h3>
+                <p>
+                  {workspace.sources.length
+                    ? "Try a different name or change the filter."
+                    : "Drop a file, paste a link, or add text to get started."}
+                </p>
+              </div>
+            )}
+          </div>
+          <div className="nb-source-footer">
+            <span>
+              <Check size={13} />
+              Answers use selected sources only
+            </span>
+            <span>PDF · Word · PowerPoint · up to 25 MB per file</span>
+          </div>
+          {dragging && (
+            <div className="nb-drop-overlay">
+              <Upload size={28} />
+              <strong>Drop documents to add them</strong>
             </div>
           )}
         </div>
-        <div className="nb-source-footer">
-          <span>
-            <Check size={13} />
-            Chỉ nguồn được chọn mới dùng để trả lời
-          </span>
-          <span>PDF · Word · Slide · tối đa 25 MB/file</span>
-        </div>
-        {dragging && (
-          <div className="nb-drop-overlay">
-            <Upload size={28} />
-            <strong>Thả tài liệu để thêm nguồn</strong>
-          </div>
-        )}
       </div>
       {add && (
         <Modal
           title={
-            target.current ? "Tải lại file gốc" : "Thêm nguồn vào workspace"
+            target.current
+              ? "Re-upload original file"
+              : "Add a source to this note"
           }
           onClose={() => {
             if (!busy) {
@@ -682,13 +821,13 @@ export default function Sources({
           <div
             className="nb-import-tabs"
             role="group"
-            aria-label="Cách thêm nguồn"
+            aria-label="Add source method"
           >
             {(
               [
-                { id: "file", label: "Tải file", icon: Upload },
-                { id: "link", label: "Liên kết", icon: Link },
-                { id: "text", label: "Văn bản", icon: FileText },
+                { id: "file", label: "Upload file", icon: Upload },
+                { id: "link", label: "Link", icon: Link },
+                { id: "text", label: "Text", icon: FileText },
               ] as const
             ).map((tab) => (
               <button
@@ -708,15 +847,15 @@ export default function Sources({
           {add === "file" ? (
             <div className="nb-import-file">
               <Upload size={32} />
-              <h3>Tài liệu của bạn, trong một nơi</h3>
+              <h3>Upload documents</h3>
               <p>
-                PDF có văn bản, Word (.docx), PowerPoint (.pptx), TXT, MD, CSV.
-                Tối đa 25 MB/file.
+                Text-based PDF, Word (.docx), PowerPoint (.pptx), TXT, MD, and
+                CSV. Up to 25 MB per file.
               </p>
               {target.current && (
                 <p>
-                  Chọn tệp gốc <strong>{target.current.name}</strong> để khôi
-                  phục nguồn này.
+                  Choose the original file{" "}
+                  <strong>{target.current.name}</strong> to restore this source.
                 </p>
               )}
               {/* A real file control receives the trusted user gesture inside the dialog.
@@ -725,14 +864,14 @@ export default function Sources({
                 className="button primary nb-native-file-picker"
                 data-disabled={busy}
               >
-                <span aria-hidden="true">Chọn file từ thiết bị</span>
+                <span aria-hidden="true">Choose files from your device</span>
                 <input
                   ref={input}
                   type="file"
                   accept={ACCEPT}
                   multiple={!target.current}
                   disabled={busy}
-                  aria-label="Chọn file từ thiết bị"
+                  aria-label="Choose files from your device"
                   onChange={(event) =>
                     void upload(
                       Array.from(event.target.files || []),
@@ -742,7 +881,7 @@ export default function Sources({
                 />
               </label>
               <p className="small muted">
-                Bạn cũng có thể kéo file vào cột Nguồn.
+                You can also drag files into the Sources panel.
               </p>
             </div>
           ) : (
@@ -752,7 +891,7 @@ export default function Sources({
                 event.preventDefault();
                 if (add === "link") void importLink();
                 else if (text.trim()) {
-                  const filename = (title.trim() || "Văn bản đã dán").replace(
+                  const filename = (title.trim() || "Pasted text").replace(
                     /[<>:"/\\|?*]/g,
                     "-",
                   );
@@ -765,7 +904,7 @@ export default function Sources({
               }}
             >
               <label>
-                Tên nguồn (không bắt buộc)
+                Source name (optional)
                 <input
                   maxLength={120}
                   value={title}
@@ -775,7 +914,7 @@ export default function Sources({
               {add === "link" ? (
                 <>
                   <label>
-                    Liên kết công khai
+                    Public link
                     <input
                       autoFocus
                       type="url"
@@ -786,14 +925,14 @@ export default function Sources({
                     />
                   </label>
                   <p className="small muted">
-                    Tải nội dung trang web hoặc file công khai. Không truy cập
-                    trang cần đăng nhập hay liên kết nội bộ. Thao tác này cần
-                    Internet.
+                    Import a public web page or file. An internet connection is
+                    required. Private links and pages that require sign-in are
+                    unsupported.
                   </p>
                 </>
               ) : (
                 <label>
-                  Nội dung
+                  Content
                   <textarea
                     autoFocus
                     required
@@ -801,25 +940,18 @@ export default function Sources({
                     maxLength={1000000}
                     value={text}
                     onChange={(event) => setText(event.target.value)}
-                    placeholder="Dán nội dung tài liệu tại đây…"
+                    placeholder="Paste document text here…"
                   />
                 </label>
               )}
               {failure && <Notice>{failure}</Notice>}
               <div className="modal-actions">
-                <button
-                  type="button"
-                  className="button"
-                  onClick={() => setAdd(null)}
-                  disabled={busy}
-                >
-                  Hủy
-                </button>
+                <DialogCancel disabled={busy} />
                 <button
                   className="button primary"
                   disabled={busy || (add === "link" && !connected)}
                 >
-                  {busy ? "Đang thêm…" : "Thêm nguồn"}
+                  {busy ? "Adding…" : "Add source"}
                 </button>
               </div>
             </form>
@@ -827,12 +959,17 @@ export default function Sources({
         </Modal>
       )}
       {inspect && (
-        <Modal title="Chi tiết nguồn" onClose={() => setInspect(null)} wide>
+        <Modal
+          title="Source details"
+          onClose={() => setInspect(null)}
+          wide
+          deferContent
+        >
           <DocumentInspector source={inspect} workspaceId={workspace.id} />
         </Modal>
       )}
       {renaming && (
-        <Modal title="Đổi tên nguồn" onClose={() => !busy && setRenaming(null)}>
+        <Modal title="Rename source" onClose={() => !busy && setRenaming(null)}>
           <form
             className="form-stack"
             onSubmit={(event) => {
@@ -841,7 +978,7 @@ export default function Sources({
             }}
           >
             <label>
-              Tên file
+              File name
               <input
                 autoFocus
                 required
@@ -851,24 +988,17 @@ export default function Sources({
               />
             </label>
             <p className="small muted">
-              Giữ nguyên phần mở rộng của file. Nội dung và lựa chọn nguồn được
-              giữ nguyên.
+              Keep the existing file extension. The contents and source
+              selection stay the same.
             </p>
             {failure && <Notice>{failure}</Notice>}
             <div className="modal-actions">
-              <button
-                type="button"
-                className="button"
-                disabled={busy}
-                onClick={() => setRenaming(null)}
-              >
-                Hủy
-              </button>
+              <DialogCancel disabled={busy} />
               <button
                 className="button primary"
                 disabled={busy || !newName.trim()}
               >
-                Lưu tên
+                Save name
               </button>
             </div>
           </form>
@@ -876,28 +1006,22 @@ export default function Sources({
       )}
       {deleting && (
         <Modal
-          title="Xóa nguồn khỏi workspace?"
+          title="Remove source from this note?"
           onClose={() => !busy && setDeleting(null)}
         >
           <p>
-            “{deleting.name}” sẽ không còn được dùng cho câu trả lời mới. Các
-            đoạn trích đã có trong hội thoại vẫn được giữ.
+            “{deleting.name}” will be removed from future answers. Excerpts
+            already in the conversation are retained.
           </p>
           {failure && <Notice>{failure}</Notice>}
           <div className="modal-actions">
-            <button
-              className="button"
-              disabled={busy}
-              onClick={() => setDeleting(null)}
-            >
-              Hủy
-            </button>
+            <DialogCancel disabled={busy} />
             <button
               className="button nb-danger"
               disabled={busy}
               onClick={() => void remove()}
             >
-              Xóa nguồn
+              Remove source
             </button>
           </div>
         </Modal>
