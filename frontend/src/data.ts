@@ -132,7 +132,6 @@ export type Message = {
   errorText?: string;
   origin?: "sample" | "server";
   studioResultId?: string;
-  kanbanEvent?: { boardId: string; count: number; initial: boolean };
   feedback?: "helpful" | "unhelpful";
   legacyThreadId?: string;
 };

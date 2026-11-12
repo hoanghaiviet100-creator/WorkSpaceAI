@@ -67,7 +67,7 @@ export function visibleChatMessages(workspace: Workspace, thread: Thread) {
       message.mode !== "Tasks" &&
       message.state !== "suggestions" &&
       message.routeType !== "RECONCILE_FLOW" &&
-      !message.kanbanEvent &&
+      !("kanbanEvent" in message && message.kanbanEvent) &&
       !retiredThreads.has(message.legacyThreadId ?? "") &&
       !retiredResults.has(message.studioResultId ?? "") &&
       !(
