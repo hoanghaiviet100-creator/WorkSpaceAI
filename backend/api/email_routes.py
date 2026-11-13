@@ -6,21 +6,25 @@ Endpoints:
 - POST /api/email/draft: Creates draft (DRAFT state)
 - POST /api/email/{draft_id}/approve: Approves snapshot, computes SHA-256 (APPROVED state)
 - POST /api/email/{draft_id}/send: Dispatches email via mock/SMTP (SENT/FAILED/DELIVERY_UNKNOWN)
-- GET  /api/email/audit-log: Queries transmission audit trail (filterable by workspace_id)
+- GET  /api/email/audit-log: Queries transmission audit trail (PII-redacted, filterable by workspace_id)
 - POST /api/email/approve/{draft_id}: Legacy combined approve & send endpoint
 """
-from typing import Optional
+from __future__ import annotations
+
+import smtplib
+import socket
+from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, HTTPException
 
 from backend.algorithms.email_state_machine import FSMStateError, SecurityError
-from backend.core.schemas import ApproveDraftRequest, CreateDraftRequest
+from backend.core.schemas import ApproveDraftRequest, CreateDraftRequest, EmailDraftRecord
 from backend.services.email_service import email_service
 
 router = APIRouter(prefix="/api/email", tags=["Email Reporting & FSM Send Gate"])
 
 
-@router.post("/draft")
-def create_draft_endpoint(req: CreateDraftRequest):
+@router.post("/draft", response_model=Union[EmailDraftRecord, Dict[str, Any]])
+def create_draft_endpoint(req: CreateDraftRequest) -> Union[EmailDraftRecord, Dict[str, Any]]:
     """
     POST /api/email/draft
     Creates a new email draft in DRAFT state. Validates recipient format per RFC-5322.
@@ -37,7 +41,7 @@ def create_draft_endpoint(req: CreateDraftRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/{draft_id}/approve")
+@router.post("/{draft_id}/approve", response_model=EmailDraftRecord)
 def approve_snapshot_endpoint(
     draft_id: str,
     req: Optional[ApproveDraftRequest] = None,
@@ -45,7 +49,7 @@ def approve_snapshot_endpoint(
     subject: Optional[str] = None,
     body: Optional[str] = None,
     user_confirmed: bool = True,
-):
+) -> EmailDraftRecord:
     """
     POST /api/email/{draft_id}/approve
     UC-08: Review and Approve Email Snapshot.
@@ -72,8 +76,8 @@ def approve_snapshot_endpoint(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/{draft_id}/send")
-def send_email_endpoint(draft_id: str):
+@router.post("/{draft_id}/send", response_model=Dict[str, Any])
+def send_email_endpoint(draft_id: str) -> Dict[str, Any]:
     """
     POST /api/email/{draft_id}/send
     UC-09: Send Email and Track Outcome.
@@ -86,29 +90,45 @@ def send_email_endpoint(draft_id: str):
         raise HTTPException(status_code=404, detail=str(exc))
     except (FSMStateError, SecurityError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
+    except (smtplib.SMTPAuthenticationError, smtplib.SMTPException, socket.timeout, TimeoutError, OSError, RuntimeError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.get("/audit-log")
-def get_audit_log_endpoint(workspace_id: Optional[str] = None):
+@router.get("/audit-log", response_model=List[Dict[str, Any]])
+def get_audit_log_endpoint(workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     GET /api/email/audit-log?workspace_id=...
     Retrieves transmission audit trail with snapshot hashes, timestamps, and delivery states.
+    PII-protected: Excludes plaintext recipient email addresses and body content.
     """
     if workspace_id:
-        return email_service.draft_repo.list_by_workspace(workspace_id)
-    return email_service.draft_repo.list_all()
+        records = email_service.draft_repo.list_by_workspace(workspace_id)
+    else:
+        records = email_service.draft_repo.list_all()
+
+    sanitized: List[Dict[str, Any]] = []
+    for r in records:
+        entry = {
+            "id": getattr(r, "id", None) or getattr(r, "draft_id", ""),
+            "draft_id": str(getattr(r, "id", None) or getattr(r, "draft_id", "")),
+            "workspace_id": getattr(r, "workspace_id", None),
+            "fsm_state": getattr(r, "fsm_state", None) or getattr(r, "state", ""),
+            "state": getattr(r, "fsm_state", None) or getattr(r, "state", ""),
+            "sha256_digest": getattr(r, "sha256_digest", None) or getattr(r, "payload_hash", None),
+            "audit_timestamp": getattr(r, "audit_timestamp", None),
+        }
+        sanitized.append(entry)
+    return sanitized
 
 
-@router.post("/approve/{draft_id}")
+@router.post("/approve/{draft_id}", response_model=Dict[str, Any])
 def approve_email(
     draft_id: str,
     recipient_email: str,
     subject: str,
     body: str,
     user_confirmed: bool = True,
-):
+) -> Dict[str, Any]:
     """
     Legacy POST /api/email/approve/{draft_id}
     Maintained for backward compatibility: coordinates snapshot approval and dispatch.
