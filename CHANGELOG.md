@@ -11,6 +11,39 @@ Tất cả các thay đổi và nâng cấp quan trọng của dự án **Worksp
 
 ---
 
+## [2.7.1] - 2026-11-11 — Feature 3: Backend Refinements, Security Hardening & Pure-Python Test Suite ("Tinh Tế")
+### Added
+- **Bộ Kiểm Thử Độc Lập Feature 3 Backend (`tests/test_feature3_email_backend.py`)**:
+  - 11 test cases bao phủ toàn diện: RFC-5322 regex validation, băm mật mã SHA-256 canonical digest và tamper detection, FSM enforcement (DRAFT -> APPROVED -> SENT), chặn gửi trùng lặp (duplicate-send protection), giả lập SMTP bằng `unittest.mock.patch` (thành công, lỗi xác thực `SMTPAuthenticationError`, mạng chập chờn timeout `socket.timeout` tuân thủ NFR-04 không tự động retry), và tích hợp FastAPI endpoints (`/draft`, `/approve`, `/send`, `/audit-log`) thông qua `TestClient`.
+  - Hỗ trợ chạy kiểm thử 1-lệnh duy nhất: `python -m unittest tests/test_feature3_email_backend.py` (hoặc `make test`).
+- **Makefile Hỗ trợ DevOps**:
+  - Bổ sung target `test` chạy bộ test FSM backend và target `verify` chạy toàn bộ `verify.py`.
+- **Tài liệu Hướng dẫn Toàn diện (`README.md`)**:
+  - Sơ đồ máy trạng thái FSM chi tiết (5 trạng thái: `DRAFT`, `APPROVED`, `SENT`, `FAILED`, `DELIVERY_UNKNOWN`).
+  - Mẫu gọi API thực tế qua `curl` và cấu trúc JSON phản hồi chuẩn cho cả 4 endpoints email.
+  - Hướng dẫn thực thi kiểm thử cục bộ chi tiết.
+
+### Changed
+- **Chuẩn hóa Ghi log Có cấu trúc (Structured Logging)**:
+  - Tích hợp `logger.info`, `logger.warning`, `logger.error` với trường `extra={...}` chuẩn hóa trong `email_service.py` cho mọi bước chuyển trạng thái FSM, khóa mã băm SHA-256, và kết quả gửi qua SMTP / Mock mode.
+  - Bảo đảm an toàn tuyệt đối (Security Rule 2 & 7): Không bao giờ ghi log thông tin nhạy cảm (`password`, `secret`, `api_key`, `token`) và ẩn hoàn toàn PII người nhận.
+- **Bổ sung Type Hints Đầy đủ**:
+  - Khai báo kiểu dữ liệu rõ ràng (type annotations) cho tất cả các phương thức public trong `backend/services/email_service.py` và các route handlers trong `backend/api/email_routes.py`, `backend/api/chat_routes.py`.
+- **Thay thế Khối `except Exception` Bằng Exception Cụ thể**:
+  - Bắt chính xác `smtplib.SMTPAuthenticationError`, `socket.timeout`, `smtplib.SMTPServerDisconnected`, `smtplib.SMTPException`, `SecurityError`, `FSMStateError`, `KeyError`, `ValueError`, `PermissionError`, `OSError`.
+- **Bảo mật Dockerfile & .dockerignore**:
+  - Bổ sung `tests/`, `*.env*`, `*.pyc`, `__pycache__/` vào `.dockerignore`.
+  - Cập nhật `Dockerfile` chỉ sao chép mã nguồn runtime (`backend/`, `frontend/`), loại bỏ hoàn toàn mã test khỏi image sản phẩm (Security Checklist item 6).
+- **Lọc Dữ liệu Nhạy cảm tại Endpoint Audit Log (`GET /api/email/audit-log`)**:
+  - Khử bỏ PII (không trả về email hoặc nội dung body thô), chỉ cung cấp `id`, `draft_id`, `workspace_id`, `fsm_state`, `sha256_digest`, `audit_timestamp`.
+
+### Removed
+- **Xóa bỏ Hàm Legacy Helper Dư thừa**:
+  - Loại bỏ hoàn toàn `prepare_draft_for_approval` và `approve_and_verify_email_send` khỏi `backend/algorithms/email_state_machine.py` và `backend/algorithms/__init__.py`.
+  - Khai báo danh sách `__all__` minh bạch, chỉ công khai các ký hiệu public chuẩn của Feature 3 FSM và các thuật toán R2 stdlib.
+
+---
+
 ## [2.7.0] - 2026-11-10 — Feature 3: Context-Aware Email Reporting & Cryptographic FSM Send Gate
 ### Added
 - **100% Pure-Stdlib Finite State Machine (`backend/algorithms/email_state_machine.py`)**:
