@@ -25,7 +25,7 @@ import {
   Share2,
   UserRound,
 } from "lucide-react";
-import { DialogCancel, Citation, EvidenceContext, Modal } from "./components";
+import { Citation, EvidenceContext, Modal } from "./components";
 import type { Handoff, View, Workspace } from "./data";
 import Chat from "./Chat";
 import Sources from "./Sources";
@@ -33,7 +33,7 @@ import Studio from "./Studio";
 import EmailWorkspace from "./EmailWorkspace";
 import { PanelDivider, usePanelWidths } from "./panel-resize";
 import DocumentInspector from "./DocumentInspector";
-import { useEntrance } from "./useEntrance";
+import { noteTransitionDuration, useEntrance } from "./useEntrance";
 import {
   captureChatOutputs,
   defaultStudioConfig,
@@ -57,7 +57,6 @@ type RailExit = {
   frame: CSSProperties;
   direction: "left" | "right";
 };
-const paneEntranceDuration = 200;
 const SourcesPanel = memo(Sources);
 const ChatPanel = memo(Chat);
 const StudioPanel = memo(Studio);
@@ -70,6 +69,53 @@ function useViewport(query: string) {
     return () => media.removeEventListener("change", changed);
   }, [query]);
   return matches;
+}
+
+function NoteTitle({
+  name,
+  rename,
+}: {
+  name: string;
+  rename: (name: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const finish = (value: string) => {
+    const next = value.trim();
+    if (next && next !== name) rename(next);
+    setEditing(false);
+  };
+  if (editing)
+    return (
+      <input
+        className="nb-workspace-name nb-workspace-name-input"
+        aria-label="Note name"
+        autoFocus
+        defaultValue={name}
+        maxLength={120}
+        onFocus={(event) => event.currentTarget.select()}
+        onBlur={(event) => finish(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing) return;
+          if (event.key !== "Enter" && event.key !== "Escape") return;
+          event.preventDefault();
+          if (event.key === "Enter") finish(event.currentTarget.value);
+          else setEditing(false);
+          requestAnimationFrame(() => trigger.current?.focus());
+        }}
+      />
+    );
+  return (
+    <button
+      ref={trigger}
+      className="nb-workspace-name"
+      onClick={() => setEditing(true)}
+      title="Rename note"
+    >
+      <span>{name}</span>
+      <Pencil size={14} aria-hidden="true" />
+    </button>
+  );
 }
 
 export default function NotebookWorkspace({
@@ -108,10 +154,9 @@ export default function NotebookWorkspace({
   const [leftClosed, setLeftClosed] = useState(false);
   const [rightClosed, setRightClosed] = useState(false);
   const [sideHidden, setSideHidden] = useState(false);
-  const [dialog, setDialog] = useState<
-    "rename" | "share" | "settings" | "notes" | null
-  >(null);
-  const [name, setName] = useState(workspace.name);
+  const [dialog, setDialog] = useState<"share" | "settings" | "notes" | null>(
+    null,
+  );
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const [resultId, setResultId] = useState<string | null>(null);
   const [launch, setLaunch] = useState<StudioConfig | null>(null);
@@ -146,20 +191,20 @@ export default function NotebookWorkspace({
     motion: sourcesMotion,
     revealOnly: true,
     mountMotion: animateEntry ? sourcesMotion : undefined,
-    duration: paneEntranceDuration,
+    duration: noteTransitionDuration,
   });
   useEntrance(studioPanel, !studioHidden && !(desktop && rightClosed), {
     revision: studyExpanded,
     motion: "right",
     revealOnly: true,
     mountMotion: animateEntry ? "right" : undefined,
-    duration: paneEntranceDuration,
+    duration: noteTransitionDuration,
   });
   useEntrance(chatPanel, !chatHidden, {
     motion: "fade",
     revealOnly: true,
     mountMotion: animateEntry ? "rise" : undefined,
-    duration: paneEntranceDuration,
+    duration: noteTransitionDuration,
   });
   const widths = usePanelWidths({
     desktop,
@@ -328,17 +373,10 @@ export default function NotebookWorkspace({
               <ArrowLeft size={20} />
             </button>
             <BookOpen className="nb-brand-mark" size={22} />
-            <button
-              className="nb-workspace-name"
-              onClick={() => {
-                setName(workspace.name);
-                setDialog("rename");
-              }}
-              title="Rename note"
-            >
-              <span>{workspace.name}</span>
-              <Pencil size={14} />
-            </button>
+            <NoteTitle
+              name={workspace.name}
+              rename={(name) => update((current) => ({ ...current, name }))}
+            />
           </div>
           <div className="nb-header-actions">
             <button
@@ -552,36 +590,6 @@ export default function NotebookWorkspace({
           </nav>
         )}
       </div>
-      {dialog === "rename" && (
-        <Modal title="Rename note" onClose={() => setDialog(null)}>
-          <form
-            className="form-stack"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (name.trim()) {
-                update((current) => ({ ...current, name: name.trim() }));
-                setDialog(null);
-              }
-            }}
-          >
-            <label>
-              Note name
-              <input
-                autoFocus
-                maxLength={120}
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-            <div className="modal-actions">
-              <DialogCancel />
-              <button className="button primary" disabled={!name.trim()}>
-                Save name
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
       {dialog === "share" && (
         <Modal title="Note link" onClose={() => setDialog(null)}>
           <div className="form-stack">

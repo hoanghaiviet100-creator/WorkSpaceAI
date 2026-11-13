@@ -9,7 +9,9 @@
   --landing-soft-coral: #e6ab98;
   --landing-coral: #fc8a6e;
   min-height: 100svh;
-  padding: clamp(12px, 2.4vw, 36px);
+  display: flex;
+  flex-direction: column;
+  padding: 16px;
   background: var(--landing-bg);
   color: var(--landing-ink);
   font:
@@ -18,13 +20,17 @@
   color-scheme: light;
 }
 .landing-frame {
-  max-width: 1328px;
-  margin-inline: auto;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
   border-radius: 24px;
   background: var(--landing-paper);
   box-shadow:
     0 22px 68px rgb(16 22 29 / 14%),
     0 0 0 1px rgb(255 255 255 / 45%);
+}
+.landing-frame > main {
+  flex: 1;
 }
 .workspace-landing :is(input, textarea) {
   font-family: Inter, system-ui, sans-serif;
@@ -134,6 +140,8 @@
 .landing-hero-atmosphere {
   position: absolute;
   inset: 2px 0 0;
+  max-width: 1328px;
+  margin-inline: auto;
   z-index: -1;
   pointer-events: none;
   background: radial-gradient(

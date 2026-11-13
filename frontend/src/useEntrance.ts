@@ -3,6 +3,7 @@ import { useCallback, useLayoutEffect, useRef, type RefObject } from "react";
 const reducedMotion = "(prefers-reduced-motion: reduce)";
 const windows = new WeakMap<HTMLElement, Animation>();
 type Motion = "vertical" | "rise" | "fade" | "left" | "right";
+export const noteTransitionDuration = 240;
 
 function clearMotion(target: HTMLElement) {
   windows.get(target)?.cancel();

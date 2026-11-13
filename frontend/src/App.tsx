@@ -36,6 +36,7 @@ type Route = {
   view: View;
   auth?: AuthMode;
   fromHome?: boolean;
+  fromNote?: boolean;
 };
 function readRoute(hash = location.hash): Route {
   const p = hash.slice(1).split("/");
@@ -256,6 +257,7 @@ export default function App() {
       setRoute({
         ...next,
         fromHome: !!next.workspace && !previous.workspace && !previous.auth,
+        fromNote: !!previous.workspace && !next.workspace && !next.auth,
       });
     };
     addEventListener("hashchange", onHash);
@@ -270,7 +272,7 @@ export default function App() {
   const goHome = () => {
     setIntake(undefined);
     location.hash = "home";
-    setRoute({ view: "chat" });
+    setRoute({ view: "chat", fromNote: !!route.workspace });
   };
   const enter = (
     id: string,
@@ -412,6 +414,7 @@ export default function App() {
         </a>
         {!contentRoute.workspace ? (
           <Home
+            fromNote={contentRoute.fromNote === true}
             workspaces={workspaces}
             open={open}
             create={create}

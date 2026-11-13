@@ -23,7 +23,7 @@ function Choice({
 }) {
   return (
     <button type="button" aria-pressed={selected} onClick={onClick}>
-      {selected && <Check size={15} aria-hidden="true" />}
+      <Check size={15} className="study-segment-check" aria-hidden="true" />
       {children}
     </button>
   );

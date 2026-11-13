@@ -90,6 +90,7 @@ const json = (body: unknown): RequestInit => ({
 });
 export type ServerClaim = Partial<CitationClaimRow> & {
   claim_text: string;
+  section?: string | null;
   cited_doc_id: string;
   cited_page: number;
   evidence_quote: string;
