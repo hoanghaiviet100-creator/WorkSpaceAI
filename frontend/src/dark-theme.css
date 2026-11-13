@@ -93,10 +93,6 @@
   background-color: transparent;
 }
 
-:root[data-theme="dark"] .study-segments {
-  background: transparent;
-}
-
 :root[data-theme="dark"] .button.primary {
   color: var(--on-accent);
 }

@@ -1,23 +1,123 @@
 /* Functional additions reuse the established palette, typography and app shell. */
-.ai-settings-trigger {
+.ai-settings-trigger,
+.ai-model-preview select {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   min-height: 32px;
-  padding: 4px 7px;
-  border: 1px solid var(--control);
-  border-radius: 5px;
-  font-size: 11px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
   white-space: nowrap;
+}
+.ai-settings-trigger {
+  anchor-name: --workspace-ai-model;
+  max-inline-size: min(48vw, 200px);
+}
+.ai-settings-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-settings-trigger svg,
+.ai-model-preview svg {
+  color: var(--muted);
+}
+.ai-model-preview {
+  position: relative;
+}
+.ai-model-preview select {
+  appearance: none;
+  padding-inline-end: 25px;
+}
+.ai-model-preview svg {
+  position: absolute;
+  inset-inline-end: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.ai-model-picker {
+  position: fixed;
+  inset: auto 12px 70px auto;
+  margin: 0;
+  width: min(284px, calc(100vw - 24px));
+  max-height: min(360px, 65dvh);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--canvas);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgb(16 22 29 / 18%);
+  font-family: var(--font-chat);
+}
+@supports (bottom: anchor(top)) {
+  .ai-model-picker {
+    position-anchor: --workspace-ai-model;
+    bottom: calc(anchor(top) + 8px);
+    right: max(12px, anchor(right));
+    position-try-fallbacks: flip-block;
+  }
+}
+.ai-model-picker:popover-open {
+  animation: ai-model-picker-in 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes ai-model-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.ai-model-picker-heading,
+.ai-model-feedback {
+  margin: 0;
+  padding: 7px 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ai-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+}
+.ai-model-option[aria-pressed="true"] {
+  background: var(--active);
+}
+.ai-model-option strong,
+.ai-model-option small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.ai-model-option small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ai-model-feedback button {
+  display: block;
+  min-height: 32px;
+  text-decoration: underline;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-model-picker:popover-open {
+    animation: none;
+  }
 }
 .ai-key-link {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   color: var(--accent-ink);
-}
-.ai-settings-form {
-  margin-top: 18px;
 }
 .offline-steps {
   padding-left: 22px;
@@ -26,9 +126,6 @@
 }
 .offline-steps li {
   padding: 5px 0;
-}
-.ai-settings-form input[type="password"] {
-  font-family: inherit;
 }
 .schema-meta {
   display: flex;
@@ -181,7 +278,7 @@
     min-height: 40px;
   }
   .email-attachments summary,
-.email-audit summary {
+  .email-audit summary {
     min-height: 44px;
   }
   .review-intro {

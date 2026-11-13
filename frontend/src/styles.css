@@ -1450,27 +1450,43 @@ h3 {
 .loading-answer {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 12px;
+  gap: 10px;
+  font-size: 13px;
   color: var(--muted);
   padding: 12px 0 24px;
 }
-.loading-bars {
-  flex-basis: 100%;
-  display: grid;
-  gap: 8px;
-  margin-top: 9px;
+.loading-answer-dots {
+  display: inline-flex;
+  gap: 4px;
 }
-.loading-bars span {
-  display: block;
-  height: 10px;
-  border-radius: 3px;
-  background: var(--raised);
-  width: 70%;
+.loading-answer-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
 }
-.loading-bars span:last-child {
-  width: 45%;
+@media (prefers-reduced-motion: no-preference) {
+  .loading-answer-dots span {
+    animation: chat-thinking 1.2s ease-in-out infinite;
+  }
+  .loading-answer-dots span:nth-child(2) {
+    animation-delay: 120ms;
+  }
+  .loading-answer-dots span:nth-child(3) {
+    animation-delay: 240ms;
+  }
+}
+@keyframes chat-thinking {
+  0%,
+  55%,
+  100% {
+    opacity: 0.45;
+    transform: translateY(0);
+  }
+  25% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
 }
 .repository-panel {
   border-left: 1px solid var(--border);

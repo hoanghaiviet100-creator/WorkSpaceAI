@@ -23,6 +23,12 @@
   );
   --panel-shadow: 0 6px 18px rgb(16 22 29 / 10%);
   --action-ink: #fff;
+  --action-fill: radial-gradient(
+    ellipse at center,
+    #0b1117 30%,
+    var(--accent-dark) 70%,
+    #26323d
+  );
   --action-highlight:
     inset 0 1px 3px rgb(244 249 255 / 54%),
     inset 0 0 7px 1px rgb(195 215 235 / 56%),
@@ -95,6 +101,12 @@
 }
 .nb-workspace-name svg {
   color: var(--nb-muted);
+}
+.nb-workspace-name-input {
+  width: min(36ch, 100%);
+  border: 0;
+  background: var(--nb-panel);
+  color: var(--nb-ink);
 }
 .nb-share-button {
   display: flex;
@@ -273,12 +285,7 @@
   position: relative;
   isolation: isolate;
   border: 2px solid transparent;
-  background: radial-gradient(
-    ellipse at center,
-    #0b1117 30%,
-    var(--accent-dark) 70%,
-    #26323d
-  );
+  background: var(--action-fill);
   color: var(--action-ink);
   box-shadow: var(--action-shadow);
 }
@@ -1086,6 +1093,17 @@
   font-size: 13px;
   font-weight: 500;
 }
+.notebook .summary-finding h3 {
+  font-size: 16px;
+  font-weight: 650;
+}
+.notebook .summary-finding:has(+ .summary-continuation) {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.notebook .summary-continuation {
+  padding-top: 4px;
+}
 .notebook .finding > p {
   font-size: 16px;
   line-height: 1.6;
@@ -1782,7 +1800,7 @@
   background: var(--nb-panel);
   box-shadow: var(--panel-shadow);
   --nb-exit-offset: calc(100% + 16px);
-  animation: nb-rail-exit 150ms cubic-bezier(0.4, 0, 0.6, 1) both;
+  animation: nb-rail-exit 180ms cubic-bezier(0.4, 0, 0.6, 1) both;
 }
 .nb-rail-body[data-exiting="left"] {
   --nb-exit-offset: calc(-100% - 16px);

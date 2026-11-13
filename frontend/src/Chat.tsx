@@ -19,12 +19,15 @@ import {
   Check,
   BookOpen,
   AlertTriangle,
-  LoaderCircle,
   Copy,
   ThumbsUp,
   ThumbsDown,
   FileText,
   GraduationCap,
+  Target,
+  Layers,
+  ChartNoAxesColumnIncreasing,
+  CalendarDays,
 } from "lucide-react";
 import { apiFor, chatRequest, draftFromServer, selectDocuments } from "./api";
 import { isVerified, featureRoute, type EngineMode } from "./schema";
@@ -46,6 +49,15 @@ import {
   type Evidence,
   type Draft,
 } from "./data";
+
+const summarySectionIcons = [
+  [/rủi ro|thách thức|\brisk\b/i, AlertTriangle],
+  [/đánh giá|kết quả|số liệu|\bevaluation\b|\bresults\b/i, ChartNoAxesColumnIncreasing],
+  [/kiến trúc|thiết kế|\barchitecture\b|\bdesign\b/i, Layers],
+  [/kế hoạch|lộ trình|tiến độ|\broadmap\b|\btimeline\b/i, CalendarDays],
+  [/mục tiêu|phạm vi|\bobjectives?\b|\bscope\b/i, Target],
+] as const;
+
 export default function Chat({
   workspace,
   thread,
@@ -285,8 +297,9 @@ export default function Chat({
           claims[id] = {
             id: source.id,
             file: source.name,
-            title: "Supported finding",
+            title: c.section || "Supported finding",
             finding: c.claim_text,
+            section: c.section || undefined,
             quote: c.evidence_quote,
             locator: `p. ${c.cited_page}${c.cited_start_line ? ` · lines ${c.cited_start_line}–${c.cited_end_line ?? c.cited_start_line}` : ""}`,
             context: "Server-verified citation",
@@ -592,22 +605,29 @@ export default function Chat({
                       )}
                       {m.evidenceIds.map((id, index) => {
                         const e = workspace.evidence[id];
+                        const section = e?.section;
+                        const continuesSection = !!section &&
+                          workspace.evidence[m.evidenceIds[index - 1]]?.section === section;
+                        const SectionIcon = section && !continuesSection
+                          ? summarySectionIcons.find(([pattern]) => pattern.test(section))?.[1]
+                          : undefined;
                         return e &&
                           !(
                             e.origin === "server" &&
                             !isVerified(e.verificationStatus)
                           ) ? (
                           <section
-                            className={`finding${id === "conflict" ? " finding-conflict" : ""}`}
+                            className={`finding${id === "conflict" ? " finding-conflict" : ""}${e.section ? " summary-finding" : ""}${continuesSection ? " summary-continuation" : ""}`}
                             key={id}
                           >
                             <div
                               className="finding-heading"
                               hidden={
-                                notebook && e.title === "Supported finding"
+                                continuesSection || (notebook && !e.section && e.title === "Supported finding")
                               }
                             >
                               {id === "conflict" && <AlertTriangle size={16} />}
+                              {SectionIcon && <SectionIcon size={15} aria-hidden="true" />}
                               <h3>{e.title}</h3>
                             </div>
                             <p>{e.finding}</p>
@@ -839,12 +859,12 @@ export default function Chat({
             <article className="exchange pending-exchange">
               <UserMessage message={pending} />
               <div className="loading-answer" role="status">
-                <LoaderCircle size={16} />
-                <span>Reading the selected context…</span>
-                <div className="loading-bars">
+                <span className="loading-answer-dots" aria-hidden="true">
                   <span />
                   <span />
-                </div>
+                  <span />
+                </span>
+                <span>Thinking…</span>
               </div>
             </article>
           )}
@@ -971,32 +991,38 @@ export default function Chat({
                     }
                   />
                 ) : (
-                  <select
-                    id="engine-mode"
-                    aria-label="Session engine preference"
-                    title={
-                      live
-                        ? "The live engine is managed by the server."
-                        : "Saved preference only. This standalone preview uses sample responses."
-                    }
-                    disabled={live || loading}
-                    value={live ? "server" : (thread.engineMode ?? "offline")}
-                    onChange={(e) =>
-                      update((w) => ({
-                        ...w,
-                        threads: w.threads.map((t) =>
-                          t.id === thread.id
-                            ? { ...t, engineMode: e.target.value as EngineMode }
-                            : t,
-                        ),
-                      }))
-                    }
-                  >
-                    <option value="offline">Offline</option>
-                    <option value="ollama">Ollama</option>
-                    <option value="gemini">Gemini</option>
-                    {live && <option value="server">Server managed</option>}
-                  </select>
+                  <span className="ai-model-preview">
+                    <select
+                      id="engine-mode"
+                      aria-label="Session engine preference"
+                      title={
+                        live
+                          ? "The live engine is managed by the server."
+                          : "Saved preference only. This standalone preview uses sample responses."
+                      }
+                      disabled={live || loading}
+                      value={live ? "server" : (thread.engineMode ?? "offline")}
+                      onChange={(e) =>
+                        update((w) => ({
+                          ...w,
+                          threads: w.threads.map((t) =>
+                            t.id === thread.id
+                              ? {
+                                  ...t,
+                                  engineMode: e.target.value as EngineMode,
+                                }
+                              : t,
+                          ),
+                        }))
+                      }
+                    >
+                      <option value="offline">Offline</option>
+                      <option value="ollama">Ollama</option>
+                      <option value="gemini">Gemini</option>
+                      {live && <option value="server">Server managed</option>}
+                    </select>
+                    <ChevronDown size={13} aria-hidden="true" />
+                  </span>
                 )}
               </div>
               <div className="composer-source-tools">

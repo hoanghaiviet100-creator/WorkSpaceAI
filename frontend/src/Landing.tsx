@@ -17,6 +17,7 @@ import ActionMenu from "./ActionMenu";
 import { Brand, DialogCancel, Modal, ThemeControl } from "./components";
 import { activityLabel, workspaceColor, workspaceHistory } from "./home-model";
 import type { Workspace } from "./data";
+import { noteTransitionDuration, useEntrance } from "./useEntrance";
 import flashcardIcon from "./flashcard-icon.svg";
 import quizIcon from "./quiz-icon.svg";
 
@@ -148,6 +149,7 @@ type Dialog =
   | "privacy";
 
 export default function Landing({
+  fromNote,
   workspaces,
   open,
   create,
@@ -155,6 +157,7 @@ export default function Landing({
   rename,
   remove,
 }: {
+  fromNote: boolean;
   workspaces: Workspace[];
   open: (id: string) => void;
   create: (name: string, description: string) => void;
@@ -162,6 +165,11 @@ export default function Landing({
   rename: (id: string, name: string) => void;
   remove: (id: string) => void;
 }) {
+  const frame = useRef<HTMLDivElement>(null);
+  useEntrance(frame, fromNote, {
+    motion: "rise",
+    duration: noteTransitionDuration,
+  });
   const [profile, setProfile] = useState(() => readSession(sessionKey));
   const [prompt, setPrompt] = useState(() => readSession(draftKey));
   const [displayName, setDisplayName] = useState("");
@@ -281,7 +289,7 @@ export default function Landing({
 
   return (
     <div className="workspace-landing">
-      <div className="landing-frame" data-signed-in={signedIn}>
+      <div ref={frame} className="landing-frame" data-signed-in={signedIn}>
         <header className="landing-header">
           <Brand onClick={() => navigate("home")} />
           <nav

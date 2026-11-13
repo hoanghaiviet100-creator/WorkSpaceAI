@@ -42,6 +42,7 @@ export type Evidence = {
   context: string;
   id: string;
   finding: string;
+  section?: string;
   claimId?: string;
   messageId?: string;
   page?: number;
