@@ -21,6 +21,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import logging
 import re
 import smtplib
 import socket
@@ -37,10 +38,8 @@ from backend.algorithms.email_state_machine import (
     FSMStateError,
     SecurityError,
     _normalize_recipients,
-    approve_and_verify_email_send,
     approve_snapshot,
     compute_draft_hash,
-    prepare_draft_for_approval,
     validate_rfc5322_email,
     verify_and_lock_for_send,
 )
@@ -57,6 +56,8 @@ from backend.core.schemas import (
 from backend.providers.llm_provider import LLMProvider, llm_provider
 from backend.repositories.draft_repository import DraftRepository, draft_repository
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
+
+logger = logging.getLogger("workspaceai.email_service")
 
 
 def send_real_email_via_smtp(to_email: str, subject: str, body_text: str) -> Dict[str, Any]:
@@ -80,7 +81,6 @@ def send_real_email_via_smtp(to_email: str, subject: str, body_text: str) -> Dic
     if not validate_email_address(clean_recipient):
         raise ValueError(f"Địa chỉ email người nhận không hợp lệ theo chuẩn RFC-5322: '{clean_recipient}'")
 
-    # Construct standard multipart MIME message for robust UTF-8 encoding
     msg = MIMEMultipart()
     msg["From"] = sender
     msg["To"] = clean_recipient
@@ -90,14 +90,21 @@ def send_real_email_via_smtp(to_email: str, subject: str, body_text: str) -> Dic
     host = settings.smtp_host or "smtp.gmail.com"
     port = settings.smtp_port or 587
 
-    # Connect to Gmail SMTP server
-    with smtplib.SMTP(host, port, timeout=20) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(sender, password)
-        server.sendmail(sender, [clean_recipient], msg.as_string())
+    try:
+        with smtplib.SMTP(host, port, timeout=20) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(sender, password)
+            server.sendmail(sender, [clean_recipient], msg.as_string())
+    except (smtplib.SMTPException, socket.timeout, TimeoutError, OSError) as exc:
+        logger.error(
+            "send_real_email_via_smtp failed",
+            extra={"error_type": exc.__class__.__name__},
+        )
+        raise
 
+    logger.info("Real email successfully transmitted via SMTP", extra={"outcome": "SENT"})
     return {
         "status": "SENT",
         "sender": sender,
@@ -115,9 +122,9 @@ class EmailService:
         workspace_repo: Optional[WorkspaceRepository] = None,
         provider: Optional[LLMProvider] = None,
     ) -> None:
-        self.draft_repo = draft_repo or draft_repository
-        self.workspace_repo = workspace_repo or workspace_repository
-        self.provider = provider or llm_provider
+        self.draft_repo: DraftRepository = draft_repo or draft_repository
+        self.workspace_repo: WorkspaceRepository = workspace_repo or workspace_repository
+        self.provider: LLMProvider = provider or llm_provider
 
     def create_draft(
         self,
@@ -156,13 +163,18 @@ class EmailService:
                 subject=gen_subject,
                 body=gen_body,
                 citations=found_citations,
+                state=EmailState.PENDING_APPROVAL,
+                payload_hash=compute_draft_hash(recipient, gen_subject, gen_body),
             )
-            staged = prepare_draft_for_approval(draft_payload)
-            self.draft_repo.save(staged)
+            self.draft_repo.save(draft_payload)
+            logger.info(
+                "Context-aware email draft generated from user request",
+                extra={"draft_id": draft_payload.draft_id, "route": RouteType.EMAIL_FLOW.value},
+            )
             return {
                 "route": RouteType.EMAIL_FLOW,
-                "status": staged.state,
-                "draft": staged,
+                "status": draft_payload.state,
+                "draft": draft_payload,
             }
 
         # Feature 3 Direct Specification: (workspace_id, recipients, subject, body, citations)
@@ -170,7 +182,6 @@ class EmailService:
             try:
                 ws_uuid = UUID(workspace_id)
             except ValueError:
-                # Deterministic uuid from name or fallback
                 ws_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, workspace_id)
         elif isinstance(workspace_id, UUID):
             ws_uuid = workspace_id
@@ -200,6 +211,14 @@ class EmailService:
             citations=citations or [],
         )
         self.draft_repo.save(new_draft)
+        logger.info(
+            "Email draft record created in DRAFT state",
+            extra={
+                "draft_id": str(new_draft.id),
+                "workspace_id": str(ws_uuid),
+                "fsm_state": EmailFSMState.DRAFT.value,
+            },
+        )
         return new_draft
 
     def approve_draft_snapshot(
@@ -219,7 +238,6 @@ class EmailService:
         if stored is None:
             raise KeyError(f"Draft with ID '{draft_id}' not found.")
 
-        # Fall back to existing draft content if not overridden
         final_recipients = (
             recipients
             if recipients is not None
@@ -235,7 +253,6 @@ class EmailService:
             user_confirmed=user_confirmed,
         )
 
-        # Update fields conditionally based on model type (EmailDraftRecord vs legacy EmailDraftPayload)
         if hasattr(stored, "recipients"):
             stored.recipients = final_recipients
         if hasattr(stored, "recipient_email"):
@@ -256,11 +273,20 @@ class EmailService:
             stored.audit_timestamp = datetime.now(timezone.utc)
 
         self.draft_repo.save(stored)
+        logger.info(
+            "Draft snapshot approved and locked with SHA-256 digest",
+            extra={
+                "draft_id": str(draft_id),
+                "fsm_state": EmailFSMState.APPROVED.value,
+                "sha256_digest": digest,
+            },
+        )
         return stored
 
     def _set_draft_state(self, stored: Any, fsm_state: EmailFSMState) -> str:
         """Safely updates state and audit timestamp across EmailDraftRecord and EmailDraftPayload."""
         now_ts = datetime.now(timezone.utc)
+        prev_state = getattr(stored, "fsm_state", None) or getattr(stored, "state", "UNKNOWN")
         if hasattr(stored, "fsm_state"):
             stored.fsm_state = fsm_state
         if hasattr(stored, "state"):
@@ -274,6 +300,15 @@ class EmailService:
                 stored.state = EmailState.PENDING_APPROVAL
         if hasattr(stored, "audit_timestamp"):
             stored.audit_timestamp = now_ts
+
+        logger.info(
+            "FSM state transition recorded",
+            extra={
+                "draft_id": str(getattr(stored, "id", None) or getattr(stored, "draft_id", "")),
+                "previous_state": getattr(prev_state, "value", str(prev_state)),
+                "new_state": fsm_state.value,
+            },
+        )
         return now_ts.isoformat()
 
     def dispatch_email(self, draft_id: Union[UUID, str]) -> Dict[str, Any]:
@@ -309,10 +344,24 @@ class EmailService:
             body=body,
         )
 
+        logger.info(
+            "Pre-dispatch integrity check verified successfully",
+            extra={"draft_id": str(draft_id), "sha256_digest": expected_digest},
+        )
+
         # 1. Mock Send Mode
         if settings.email_dispatch_mode != "gmail_real":
             ts_str = self._set_draft_state(stored, EmailFSMState.SENT)
             self.draft_repo.save(stored)
+            logger.info(
+                "Email dispatched in mock mode",
+                extra={
+                    "draft_id": str(draft_id),
+                    "dispatch_mode": "local_mock",
+                    "fsm_state": EmailFSMState.SENT.value,
+                    "sha256_digest": expected_digest,
+                },
+            )
             return {
                 "status": EmailFSMState.SENT.value,
                 "draft_id": str(draft_id),
@@ -328,6 +377,10 @@ class EmailService:
         if not sender or not password:
             ts_str = self._set_draft_state(stored, EmailFSMState.FAILED)
             self.draft_repo.save(stored)
+            logger.error(
+                "Gmail SMTP credentials missing in environment",
+                extra={"draft_id": str(draft_id), "fsm_state": EmailFSMState.FAILED.value},
+            )
             return {
                 "status": EmailFSMState.FAILED.value,
                 "draft_id": str(draft_id),
@@ -357,6 +410,15 @@ class EmailService:
 
             ts_str = self._set_draft_state(stored, EmailFSMState.SENT)
             self.draft_repo.save(stored)
+            logger.info(
+                "Email dispatched successfully via Gmail SMTP",
+                extra={
+                    "draft_id": str(draft_id),
+                    "dispatch_mode": "gmail_real",
+                    "fsm_state": EmailFSMState.SENT.value,
+                    "sha256_digest": expected_digest,
+                },
+            )
             return {
                 "status": EmailFSMState.SENT.value,
                 "draft_id": str(draft_id),
@@ -368,25 +430,57 @@ class EmailService:
         except smtplib.SMTPAuthenticationError as exc:
             ts_str = self._set_draft_state(stored, EmailFSMState.FAILED)
             self.draft_repo.save(stored)
+            logger.warning(
+                "SMTP authentication failed during dispatch",
+                extra={
+                    "draft_id": str(draft_id),
+                    "fsm_state": EmailFSMState.FAILED.value,
+                    "error_type": "SMTPAuthenticationError",
+                },
+            )
             return {
                 "status": EmailFSMState.FAILED.value,
                 "draft_id": str(draft_id),
                 "error": f"SMTP Authentication Error: {str(exc)}",
                 "audit_timestamp": ts_str,
             }
-        except (socket.timeout, smtplib.SMTPServerDisconnected) as exc:
+        except (socket.timeout, smtplib.SMTPServerDisconnected, TimeoutError) as exc:
             # CRITICAL NFR-04: Mark DELIVERY_UNKNOWN without auto-retries
             ts_str = self._set_draft_state(stored, EmailFSMState.DELIVERY_UNKNOWN)
             self.draft_repo.save(stored)
+            logger.error(
+                "SMTP timeout or disconnect during dispatch; marked DELIVERY_UNKNOWN (NFR-04)",
+                extra={
+                    "draft_id": str(draft_id),
+                    "fsm_state": EmailFSMState.DELIVERY_UNKNOWN.value,
+                    "error_type": exc.__class__.__name__,
+                },
+            )
             return {
                 "status": EmailFSMState.DELIVERY_UNKNOWN.value,
                 "draft_id": str(draft_id),
                 "error": f"SMTP timeout or server disconnected. State marked DELIVERY_UNKNOWN. Automatic retries prohibited: {str(exc)}",
                 "audit_timestamp": ts_str,
             }
-        except Exception as exc:
+        except (
+            smtplib.SMTPConnectError,
+            smtplib.SMTPRecipientsRefused,
+            smtplib.SMTPSenderRefused,
+            smtplib.SMTPDataError,
+            smtplib.SMTPResponseException,
+            smtplib.SMTPException,
+            OSError,
+        ) as exc:
             ts_str = self._set_draft_state(stored, EmailFSMState.FAILED)
             self.draft_repo.save(stored)
+            logger.error(
+                "SMTP transmission failure during dispatch",
+                extra={
+                    "draft_id": str(draft_id),
+                    "fsm_state": EmailFSMState.FAILED.value,
+                    "error_type": exc.__class__.__name__,
+                },
+            )
             return {
                 "status": EmailFSMState.FAILED.value,
                 "draft_id": str(draft_id),
@@ -396,14 +490,14 @@ class EmailService:
 
     def approve_and_send(
         self,
-        draft_id: str,
-        recipient_email: str,
+        draft_id: Union[UUID, str],
+        recipient_email: Union[List[str], str],
         subject: str,
         body: str,
         user_confirmed: bool = True,
     ) -> Dict[str, Any]:
         """
-        Backward-compatibility convenience method:
+        Convenience method:
         Approves draft snapshot and dispatches in one coordinated invocation.
         """
         self.approve_draft_snapshot(
@@ -425,8 +519,8 @@ def handle_email_draft_request(req: UserRequest) -> Dict[str, Any]:
 
 
 def handle_email_approve_request(
-    draft_id: str,
-    recipient_email: str,
+    draft_id: Union[UUID, str],
+    recipient_email: Union[List[str], str],
     subject: str,
     body: str,
     user_confirmed: bool = True,
