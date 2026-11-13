@@ -5,7 +5,6 @@ Column 3 (Tab 3): Human-in-the-Loop Email Assistant with Cryptographic Verificat
 from __future__ import annotations
 
 import streamlit as st
-from backend.algorithms.email_state_machine import prepare_draft_for_approval
 from backend.api.email_routes import approve_email
 from backend.core.config import settings
 from backend.services.email_service import email_service
@@ -21,18 +20,6 @@ from frontend.state import (
 
 def send_draft(draft_id: str, recipient: str, subject: str, body: str) -> None:
     """Verifies and executes sending of an approved email draft."""
-    stored = email_service.draft_repo.get(draft_id)
-    if stored and (
-        stored.recipient_email != recipient
-        or stored.subject != subject
-        or stored.body != body
-    ):
-        stored.recipient_email = recipient
-        stored.subject = subject
-        stored.body = body
-        prepare_draft_for_approval(stored)
-        email_service.draft_repo.save(stored)
-
     result = approve_email(
         draft_id=draft_id,
         recipient_email=recipient,
