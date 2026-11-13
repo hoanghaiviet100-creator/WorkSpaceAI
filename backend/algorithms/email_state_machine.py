@@ -36,6 +36,21 @@ import hashlib
 import re
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
+__all__ = [
+    "DRAFT",
+    "APPROVED",
+    "SENT",
+    "FAILED",
+    "DELIVERY_UNKNOWN",
+    "ALL_FSM_STATES",
+    "SecurityError",
+    "FSMStateError",
+    "validate_rfc5322_email",
+    "compute_draft_hash",
+    "approve_snapshot",
+    "verify_and_lock_for_send",
+]
+
 # ---------------------------------------------------------------------------
 # FSM State Constants
 # ---------------------------------------------------------------------------
@@ -260,95 +275,4 @@ def verify_and_lock_for_send(
     return True
 
 
-# ---------------------------------------------------------------------------
-# Backward-Compatibility Helpers (Preserving Existing Test Contracts)
-# ---------------------------------------------------------------------------
-def prepare_draft_for_approval(draft: Any) -> Any:
-    """
-    Legacy helper: Stages a draft for approval, sets payload_hash and transitions state.
-    Maintained for backward compatibility with existing tests and verify.py purity gate.
-    """
-    recipient = getattr(draft, "recipient_email", None) or (
-        draft.get("recipient_email") if isinstance(draft, dict) else ""
-    )
-    if not recipient:
-        recipient = getattr(draft, "recipients", None) or (
-            draft.get("recipients") if isinstance(draft, dict) else ""
-        )
-    subject = getattr(draft, "subject", None) or (draft.get("subject") if isinstance(draft, dict) else "")
-    body = getattr(draft, "body", None) or (draft.get("body") if isinstance(draft, dict) else "")
-    attachments = getattr(draft, "attachment_ids", None) or (
-        draft.get("attachment_ids") if isinstance(draft, dict) else []
-    )
-    if attachments is None:
-        attachments = []
 
-    norm_r = _normalize_recipients(recipient)
-    first_recipient = norm_r.split(",")[0] if norm_r else ""
-    if not validate_rfc5322_email(first_recipient):
-        raise ValueError(f"Invalid RFC-5322 recipient email: {recipient}")
-
-    payload_hash = compute_draft_hash(recipient, subject, body, attachments)
-
-    if isinstance(draft, dict):
-        draft["state"] = "PENDING_APPROVAL"
-        draft["payload_hash"] = payload_hash
-    else:
-        state_attr = getattr(draft, "state", None)
-        if state_attr is not None and hasattr(state_attr, "__class__") and hasattr(state_attr.__class__, "PENDING_APPROVAL"):
-            draft.state = state_attr.__class__.PENDING_APPROVAL
-        else:
-            draft.state = "PENDING_APPROVAL"
-        draft.payload_hash = payload_hash
-
-    return draft
-
-
-def approve_and_verify_email_send(
-    stored_draft: Any,
-    approved_recipient: str,
-    approved_subject: str,
-    approved_body: str,
-    approved_attachments: Optional[List[str]] = None,
-    user_confirmed: bool = True,
-) -> Any:
-    """
-    Legacy helper: Verifies approval and SHA-256 integrity for previous pipeline version.
-    """
-    if not user_confirmed:
-        raise PermissionError("Email send blocked: explicit human approval flag is False.")
-
-    draft_state = getattr(stored_draft, "state", None) or (
-        stored_draft.get("state") if isinstance(stored_draft, dict) else ""
-    )
-    state_str = getattr(draft_state, "value", str(draft_state))
-
-    if state_str not in ("PENDING_APPROVAL", APPROVED):
-        raise RuntimeError(f"Invalid FSM transition from state {state_str} to APPROVED.")
-
-    if not validate_rfc5322_email(approved_recipient):
-        raise ValueError(f"Invalid recipient email address: {approved_recipient}")
-
-    incoming_hash = compute_draft_hash(
-        approved_recipient,
-        approved_subject,
-        approved_body,
-        approved_attachments or [],
-    )
-    expected_hash = getattr(stored_draft, "payload_hash", None) or (
-        stored_draft.get("payload_hash") if isinstance(stored_draft, dict) else ""
-    )
-
-    if incoming_hash != expected_hash:
-        raise SecurityError("Payload hash mismatch! Draft was modified without re-staging approval.")
-
-    if isinstance(stored_draft, dict):
-        stored_draft["state"] = "APPROVED"
-    else:
-        state_attr = getattr(stored_draft, "state", None)
-        if state_attr is not None and hasattr(state_attr, "__class__") and hasattr(state_attr.__class__, "APPROVED"):
-            stored_draft.state = state_attr.__class__.APPROVED
-        else:
-            stored_draft.state = "APPROVED"
-
-    return stored_draft
