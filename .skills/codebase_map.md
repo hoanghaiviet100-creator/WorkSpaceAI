@@ -44,8 +44,6 @@
 - `email_state_machine.compute_draft_hash(recipients: Any, subject: str = "", body: str = "", attachments: Optional[Sequence[str]] = None) -> str`
 - `email_state_machine.approve_snapshot(recipients: Any, subject: str, body: str, user_confirmed: bool = True) -> Tuple[str, str]`
 - `email_state_machine.verify_and_lock_for_send(current_state: str, expected_digest: str, recipients: Any, subject: str, body: str) -> bool`
-- `email_state_machine.prepare_draft_for_approval(draft: Any) -> Any`
-- `email_state_machine.approve_and_verify_email_send(stored_draft: Any, approved_recipient: str, approved_subject: str, approved_body: str, approved_attachments: Optional[List[str]] = None, user_confirmed: bool = True) -> Any`
 
 ### Repositories (`backend/repositories/`)
 - `workspace_repository.WorkspaceRepository`:
