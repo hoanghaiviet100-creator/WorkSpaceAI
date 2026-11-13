@@ -238,7 +238,7 @@ def verify_and_lock_for_send(
 
     # Invariant: Duplicate-send protection
     if state_str == SENT:
-        raise FSMStateError("Duplicate send rejected: Email draft has already been sent.")
+        raise FSMStateError("Duplicate dispatch blocked: email draft has already been sent.")
 
     # Invariant: Send allowed only from APPROVED state
     if state_str != APPROVED:

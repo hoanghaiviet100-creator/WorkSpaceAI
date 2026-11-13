@@ -315,6 +315,7 @@ class EmailService:
             self.draft_repo.save(stored)
             return {
                 "status": EmailFSMState.SENT.value,
+                "fsm_state": EmailFSMState.SENT.value,
                 "draft_id": str(draft_id),
                 "dispatch_mode": "local_mock",
                 "sha256_digest": expected_digest,
@@ -359,6 +360,7 @@ class EmailService:
             self.draft_repo.save(stored)
             return {
                 "status": EmailFSMState.SENT.value,
+                "fsm_state": EmailFSMState.SENT.value,
                 "draft_id": str(draft_id),
                 "dispatch_mode": "gmail_real",
                 "sha256_digest": expected_digest,

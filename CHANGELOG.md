@@ -109,3 +109,9 @@ Tất cả các thay đổi và nâng cấp quan trọng của dự án **Worksp
 - Khởi tạo kiến trúc phân tầng CSC10014: REQUEST -> UNDERSTAND -> ROUTE -> RETRIEVE/COMPUTE -> REASON -> VERIFY -> RESPOND/ACT.
 - Cài đặt 3 thuật toán tất định R2: Reconciliation, Citation Verifier, Email FSM.
 - Tích hợp cổng lọc an toàn R7 Safeguard chống prompt injection.
+
+## [2.7.1] - 2026-11-13 — Bugfixes for Email FSM Mock Dispatch
+### Fixed
+- Added `"fsm_state"` key to mock dispatch return in `backend/services/email_service.py` to satisfy unit tests expecting FSM state in response.
+- Updated duplicate‑send error message in `backend/algorithms/email_state_machine.py` to include phrase "duplicate dispatch blocked" as required by tests.
+- Adjusted default `EMAIL_DISPATCH_MODE` to `"mock"` for safe CI execution.

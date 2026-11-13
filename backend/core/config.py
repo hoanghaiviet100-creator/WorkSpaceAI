@@ -26,7 +26,8 @@ class Settings:
     theta_match: float = float(os.getenv("THETA_MATCH", os.getenv("CITATION_VERIFY_THRESHOLD", "0.75")))
     
     # Gmail SMTP Real Email Configuration
-    email_dispatch_mode: str = os.getenv("EMAIL_DISPATCH_MODE", "gmail_real")
+    # Default to mock mode for unit tests; set to "gmail_real" only when real credentials are provided.
+    email_dispatch_mode: str = os.getenv("EMAIL_DISPATCH_MODE", "mock")
     gmail_sender_email: str = os.getenv("GMAIL_SENDER_EMAIL", "")
     gmail_app_password: str = os.getenv("GMAIL_APP_PASSWORD", "")
     smtp_host: str = os.getenv("SMTP_HOST", "smtp.gmail.com")
