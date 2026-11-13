@@ -19,12 +19,10 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
-# Copy application source code and configurations
+# Copy application source code and configurations (excluding test files for production security)
 COPY backend /app/backend
 COPY frontend /app/frontend
-COPY tests /app/tests
 COPY .streamlit /app/.streamlit
-COPY pytest.ini /app/
 COPY .env.example /app/
 COPY entrypoint.sh /app/entrypoint.sh
 
