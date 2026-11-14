@@ -1,9 +1,9 @@
 from urllib.parse import urlsplit
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, SecretStr, ConfigDict
 from typing import Literal, Optional
 
-from backend.services.runtime_service import configure_gemini, runtime_status, use_offline
+from backend.services.runtime_service import configure_gemini, runtime_status, use_offline, select_provider
 
 router = APIRouter(prefix="/api/runtime", tags=["Local AI configuration"])
 
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/api/runtime", tags=["Local AI configuration"])
 class GeminiConfigurationRequest(BaseModel):
     api_key: Optional[SecretStr] = None
     save_locally: bool = True
-    model: Optional[Literal["gemini-3.5-flash-lite", "gemini-3.8-flash"]] = None
+    model: Optional[Literal["gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash"]] = None
     enable_feature1: bool = False
 
 
@@ -51,3 +51,21 @@ def switch_to_offline(payload: OfflineConfigurationRequest, request: Request):
         return use_offline(payload.save_locally)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
+
+
+class ProviderSelectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    provider: Literal["ollama", "gemini"]
+
+
+@router.post("/provider")
+def switch_provider(payload: ProviderSelectionRequest, request: Request):
+    # Selecting a prepared engine is a user action, unlike editing dev credentials.
+    # Accept local UI origins behind the Docker proxy; retain the stricter admin gate above.
+    origin = request.headers.get("origin")
+    if origin and urlsplit(origin).hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise HTTPException(status_code=403, detail="Open model selection from the local application.")
+    try:
+        return select_provider(payload.provider)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None

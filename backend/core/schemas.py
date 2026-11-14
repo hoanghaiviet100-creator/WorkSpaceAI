@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 import uuid
@@ -8,7 +8,6 @@ from pydantic import BaseModel, Field
 
 class RouteType(str, Enum):
     QA_FLOW = "QA_FLOW"
-    RECONCILE_FLOW = "RECONCILE_FLOW"
     EMAIL_FLOW = "EMAIL_FLOW"
     CLARIFICATION_FLOW = "CLARIFICATION_FLOW"
     REJECTED_SAFEGUARD = "REJECTED_SAFEGUARD"
@@ -46,58 +45,9 @@ class DocumentMetadata(BaseModel):
     source_url: Optional[str] = None
 
 
-class RequirementItem(BaseModel):
-    req_id: str
-    title: str
-    keywords: List[str] = Field(default_factory=list)
-    official_deadline: Optional[date] = None
-    mandatory_flag: bool = True
-    source_ref: str
-
-
-# Alias for backward and forward compatibility
-RequirementRecord = RequirementItem
-
-
-class TaskRecord(BaseModel):
-    task_id: str
-    mapped_req_id: Optional[str] = None
-    title: str
-    owner: Optional[str] = None
-    status: str = "IN_PROGRESS"
-    logged_deadline: Optional[date] = None
-    completion_pct: float = Field(default=0.0, ge=0.0, le=100.0)
-    source_ref: str
-
-
-class DateConflict(BaseModel):
-    doc_a: str
-    date_a: date
-    doc_b: str
-    date_b: date
-
-
-class ReconciledItemReport(BaseModel):
-    req_id: str
-    title: str
-    state: str
-    risk_level: str
-    avg_completion: float
-    days_remaining: Optional[int]
-    owners: List[str]
-    date_conflicts: List[DateConflict]
-    citations: List[str]
-
-
-class ReconciliationSummary(BaseModel):
-    coverage_ratio: float
-    overdue_count: int
-    conflict_count: int
-    item_reports: List[ReconciledItemReport]
-
-
 class GeneratedClaim(BaseModel):
     claim_text: str
+    section: Optional[str] = None
     cited_doc_id: str
     cited_page: int
     evidence_quote: str
@@ -197,9 +147,9 @@ class UserRequest(BaseModel):
     query: str
     selected_doc_ids: Optional[List[str]] = None
     recipient_email: Optional[str] = None
-    reference_date: date = Field(default_factory=lambda: date(2026, 10, 26))
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
-    studio_tool: Optional[Literal["plan", "email"]] = None
+    studio_tool: Optional[Literal["email"]] = None
+    studio_delivery: bool = False
 
 
 class DocumentSelectRequest(BaseModel):
