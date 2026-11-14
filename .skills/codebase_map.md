@@ -125,6 +125,7 @@
 
 ## 2. Core Pydantic Schemas (`backend/core/schemas.py`)
 - `RouteType(str, Enum)`: `QA_FLOW`, `RECONCILE_FLOW`, `EMAIL_FLOW`, `CLARIFICATION_FLOW`, `REJECTED_SAFEGUARD`
+- `EmailFSMState(str, Enum)`: `DRAFT`, `APPROVED`, `SENT`, `FAILED`, `DELIVERY_UNKNOWN`
 - `EmailState(str, Enum)`: `IDLE`, `AWAITING_CLARIFICATION`, `PENDING_APPROVAL`, `APPROVED`, `SENT`, `FAILED_RETRYABLE`
 - `DocumentChunk`: `chunk_id: str, doc_id: str, doc_name: str, page_number: int, start_line: int, end_line: int, section_header: str, text: str, score: float, bm25_score: float, dense_score: float, rrf_score: float, pinpoint_score: float, doc_version: str, doc_hash: str`
 - `DocumentMetadata`: `doc_id: str, doc_name: str, file_type: str, page_count: int, chunk_count: int, total_lines: int, file_hash: str, version_id: str, uploaded_at: str, is_selected: bool`
@@ -135,7 +136,10 @@
 - `ReconciliationSummary`: `coverage_ratio: float, overdue_count: int, conflict_count: int, item_reports: List[ReconciledItemReport]`
 - `GeneratedClaim`: `claim_text: str, cited_doc_id: str, cited_page: int, evidence_quote: str, verification_status: str, cited_start_line: Optional[int], cited_end_line: Optional[int], doc_version: Optional[str], doc_hash: Optional[str], match_score: float, matched_span: Optional[str], evidence_span: Optional[Dict[str, Any]]`
 - `CitationVerificationResult`: `validated_claims: List[GeneratedClaim], hallucination_flags: List[GeneratedClaim], grounding_score: float`
-- `EmailDraftPayload`: `draft_id: str, recipient_email: str, subject: str, body: str, attachment_ids: List[str], citations: List[str], state: EmailState, payload_hash: str`
+- `EmailDraftRecord`: `id: UUID, workspace_id: UUID, recipients: Union[List[str], str], subject: str, body: str, fsm_state: EmailFSMState, sha256_digest: Optional[str], audit_timestamp: datetime, citations: List[str]`
+- `CreateDraftRequest`: `workspace_id: UUID, recipients: Union[List[str], str], subject: str, body: str, citations: Optional[List[str]]`
+- `ApproveDraftRequest`: `recipients: Optional[Union[List[str], str]], subject: Optional[str], body: Optional[str], user_confirmed: bool`
+- `EmailDraftPayload`: `draft_id: str, recipient_email: str, subject: str, body: str, attachment_ids: List[str], citations: List[str], state: EmailState, payload_hash: str, fsm_state: Optional[EmailFSMState], audit_timestamp: Optional[datetime]`
 - `EmailApproveRequest`: `recipient_email: str, subject: str, body: str, user_confirmed: bool`
 - `UserRequest`: `query: str, selected_doc_ids: Optional[List[str]], recipient_email: Optional[str], reference_date: date, conversation_history: List[Dict[str, str]]`
 - `DocumentSelectRequest`: `selected_doc_ids: List[str]`
@@ -147,9 +151,10 @@
 ### Algorithms (`backend/algorithms/`) — 100% Pure Stdlib
 - `citation_verifier.verify_citations(claims: Sequence[Union[CitationClaim, Any]], chunk_lookup: Dict[Any, Any], theta_match: float = 0.75) -> CitationVerificationResult`
 - `reconciliation.reconcile_requirements_and_tasks(requirements: List[Any], tasks: List[Any], t_now: date) -> ReconciliationSummary`
-- `email_state_machine.compute_draft_hash(draft: Any) -> str`
-- `email_state_machine.prepare_draft_for_approval(draft: Any) -> Any`
-- `email_state_machine.approve_and_verify_email_send(stored_draft: Any, approved_recipient: str, approved_subject: str, approved_body: str, approved_attachments: List[str], user_confirmed: bool) -> Any`
+- `email_state_machine.validate_rfc5322_email(email: str) -> bool`
+- `email_state_machine.compute_draft_hash(recipients: Any, subject: str = "", body: str = "", attachments: Optional[Sequence[str]] = None) -> str`
+- `email_state_machine.approve_snapshot(recipients: Any, subject: str, body: str, user_confirmed: bool = True) -> Tuple[str, str]`
+- `email_state_machine.verify_and_lock_for_send(current_state: str, expected_digest: str, recipients: Any, subject: str, body: str) -> bool`
 
 ### Repositories (`backend/repositories/`)
 - `workspace_repository.WorkspaceRepository`:
@@ -167,9 +172,12 @@
   - `build_page_lookup() -> Dict[Tuple[str, int], Dict[str, Any]]`
   - `seed_demo_workspace() -> None`
 - `draft_repository.DraftRepository`:
-  - `save(draft: EmailDraftPayload) -> EmailDraftPayload`
-  - `get(draft_id: str) -> Optional[EmailDraftPayload]`
-  - `list_all() -> List[EmailDraftPayload]`
+  - `save(draft: Union[EmailDraftRecord, EmailDraftPayload, Any]) -> Any`
+  - `get(draft_id: Union[UUID, str]) -> Optional[Any]`
+  - `list_by_workspace(workspace_id: Union[UUID, str]) -> List[Any]`
+  - `list_all() -> List[Any]`
+  - `delete(draft_id: Union[UUID, str]) -> bool`
+  - `clear() -> None`
 
 ### Providers (`backend/providers/`)
 - `embedding_provider.EmbeddingProvider`:
@@ -213,8 +221,10 @@
   - `extract_requirements_from_workspace(doc_ids: Optional[List[str]] = None) -> List[RequirementItem]`
   - `reconcile(reference_date: date, requirements: Optional[List[RequirementItem]] = None, tasks: Optional[List[TaskRecord]] = None) -> Dict[str, Any]`
 - `email_service.EmailService`:
-  - `prepare_draft(query: str, chunks: List[DocumentChunk], recipient_email: str) -> EmailDraftPayload`
-  - `send_email(draft_id: str, recipient_email: str, subject: str, body: str, user_confirmed: bool) -> Dict[str, Any]`
+  - `create_draft(workspace_id=..., recipients=..., subject=..., body=..., citations=...) -> EmailDraftRecord`
+  - `approve_draft_snapshot(draft_id, recipients=..., subject=..., body=..., user_confirmed=True) -> EmailDraftRecord`
+  - `dispatch_email(draft_id) -> Dict[str, Any]`
+  - `approve_and_send(draft_id, recipient_email, subject, body, user_confirmed=True) -> Dict[str, Any]`
 - `router_service`:
   - `route_user_request(req: UserRequest) -> Tuple[RouteType, List[str]]`
 

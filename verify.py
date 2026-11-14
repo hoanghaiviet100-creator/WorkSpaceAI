@@ -64,6 +64,25 @@ def run_ast_check(root_dir: Path) -> bool:
     return True
 
 
+def get_test_executable() -> str:
+    """Finds a Python interpreter that has the required test dependencies (pytest) installed."""
+    check = subprocess.run([sys.executable, "-c", "import pytest"], capture_output=True)
+    if check.returncode == 0:
+        return sys.executable
+    import shutil
+    candidates = [
+        shutil.which("python3.12"),
+        "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3",
+        shutil.which("python3"),
+    ]
+    for c in candidates:
+        if c and Path(c).is_file():
+            chk = subprocess.run([c, "-c", "import pytest"], capture_output=True)
+            if chk.returncode == 0:
+                return c
+    return sys.executable
+
+
 def run_r2_purity_gate() -> bool:
     """Step 2: Subprocess verification of R2 algorithm purity (Pure Python Stdlib Only)."""
     print_step("BUOC 2: R2 STDLIB PURITY GATE (Kiem tra co lap thu vien ben ngoai)")
@@ -75,14 +94,14 @@ def run_r2_purity_gate() -> bool:
         "import backend.algorithms\n"
         "from backend.algorithms.citation_verifier import verify_citations, CitationClaim\n"
         "from backend.algorithms.reconciliation import reconcile_requirements_and_tasks\n"
-        "from backend.algorithms.email_state_machine import prepare_draft_for_approval\n"
+        "from backend.algorithms.email_state_machine import approve_snapshot, verify_and_lock_for_send\n"
         "\n"
         "# Trigger all 3 algorithms to ensure no lazy third-party import triggers\n"
         "c = CitationClaim(claim_text='test', cited_doc_id='doc', cited_page=1, evidence_quote='q')\n"
         "verify_citations([c], {('doc', 1): 'q'})\n"
         "reconcile_requirements_and_tasks([], [], date(2026, 10, 26))\n"
-        "draft = SimpleNamespace(draft_id='d1', recipient_email='a@b.com', subject='s', body='b', attachment_ids=[])\n"
-        "prepare_draft_for_approval(draft)\n"
+        "state, digest = approve_snapshot('a@b.com', 's', 'b', user_confirmed=True)\n"
+        "verify_and_lock_for_send(state, digest, 'a@b.com', 's', 'b')\n"
         "\n"
         "forbidden = ['pydantic', 'fastapi', 'starlette', 'numpy', 'streamlit', 'rank_bm25', 'httpx']\n"
         "leaked = [mod for mod in sys.modules if any(f in mod for f in forbidden)]\n"
@@ -92,8 +111,9 @@ def run_r2_purity_gate() -> bool:
         "print('R2_PURITY_VERIFIED_OK')\n"
     )
 
+    py_exe = get_test_executable()
     res = subprocess.run(
-        [sys.executable, "-c", check_code],
+        [py_exe, "-c", check_code],
         capture_output=True,
         text=True,
     )
@@ -111,7 +131,8 @@ def run_r2_purity_gate() -> bool:
 def run_pytest_suite() -> bool:
     """Step 3: Test suite execution via pytest."""
     print_step("BUOC 3: TEST SUITE EXECUTION (Chay toan bo kiem thu he thong)")
-    res = subprocess.run([sys.executable, "-m", "pytest", "-v"])
+    py_exe = get_test_executable()
+    res = subprocess.run([py_exe, "-m", "pytest", "-v"])
     return res.returncode == 0
 
 

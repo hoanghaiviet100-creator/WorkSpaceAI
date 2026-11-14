@@ -1,6 +1,8 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Literal, Optional, Union
+import uuid
+from uuid import UUID
 from pydantic import BaseModel, Field
 
 
@@ -115,6 +117,53 @@ class CitationVerificationResult(BaseModel):
     grounding_score: float
 
 
+class EmailFSMState(str, Enum):
+    """
+    Feature 3 FSM States according to WorkspaceAI Database Schema and Computational Thinking Report:
+    - DRAFT: Initial mutable draft state.
+    - APPROVED: Human-approved snapshot locked with SHA-256 digest.
+    - SENT: Dispatched via SMTP and accepted by server.
+    - FAILED: Transmission failed (e.g. SMTPAuthenticationError).
+    - DELIVERY_UNKNOWN: Connection timed out or dropped; no automatic retry (NFR-04).
+    """
+    DRAFT = "DRAFT"
+    APPROVED = "APPROVED"
+    SENT = "SENT"
+    FAILED = "FAILED"
+    DELIVERY_UNKNOWN = "DELIVERY_UNKNOWN"
+
+
+class EmailDraftRecord(BaseModel):
+    """
+    Feature 3: Table EmailDraft in WorkspaceAI Database Schema.
+    Stores email draft with SHA-256 integrity hash, FSM state, and audit timestamp.
+    """
+    id: UUID = Field(default_factory=uuid.uuid4)
+    workspace_id: UUID
+    recipients: Union[List[str], str]
+    subject: str
+    body: str
+    fsm_state: EmailFSMState = EmailFSMState.DRAFT
+    sha256_digest: Optional[str] = None
+    audit_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    citations: List[str] = Field(default_factory=list)
+
+
+class CreateDraftRequest(BaseModel):
+    workspace_id: UUID
+    recipients: Union[List[str], str]
+    subject: str
+    body: str
+    citations: Optional[List[str]] = None
+
+
+class ApproveDraftRequest(BaseModel):
+    recipients: Optional[Union[List[str], str]] = None
+    subject: Optional[str] = None
+    body: Optional[str] = None
+    user_confirmed: bool = True
+
+
 class EmailState(str, Enum):
     IDLE = "IDLE"
     AWAITING_CLARIFICATION = "AWAITING_CLARIFICATION"
@@ -133,6 +182,8 @@ class EmailDraftPayload(BaseModel):
     citations: List[str] = Field(default_factory=list)
     state: EmailState = EmailState.PENDING_APPROVAL
     payload_hash: str = ""
+    fsm_state: Optional[EmailFSMState] = None
+    audit_timestamp: Optional[datetime] = None
 
 
 class EmailApproveRequest(BaseModel):
