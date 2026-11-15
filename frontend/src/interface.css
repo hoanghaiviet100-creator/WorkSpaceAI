@@ -1,4 +1,4 @@
-/* Workspace identity and task status use flat, semantic tints.
+/* Workspace identity uses flat, semantic tints.
    Orange remains the brand accent; dense working content never uses gradients. */
 :root {
   --course-bg: #fff3eb;
@@ -10,15 +10,6 @@
   --personal-bg: #eef3fc;
   --personal-border: #d2ddef;
   --personal-ink: #415d8d;
-  --todo-bg: #f1f5fc;
-  --todo-line: #d9e2f1;
-  --todo-ink: #455f87;
-  --progress-bg: #fff4eb;
-  --progress-line: #efd6c1;
-  --progress-ink: #985019;
-  --done-bg: #eef7f0;
-  --done-line: #cfe3d4;
-  --done-ink: #346245;
   --menu-surface: #ffffff;
 }
 
@@ -32,15 +23,6 @@
   --personal-bg: #1b273a;
   --personal-border: #334764;
   --personal-ink: #b1c6ea;
-  --todo-bg: #1c2839;
-  --todo-line: #334764;
-  --todo-ink: #b1c6ea;
-  --progress-bg: #302116;
-  --progress-line: #513922;
-  --progress-ink: #f1b88b;
-  --done-bg: #182d21;
-  --done-line: #2d4e39;
-  --done-ink: #a6d5b3;
   --menu-surface: #242424;
 }
 
@@ -123,8 +105,7 @@ select,
   font-size: 12px;
   min-height: 44px;
 }
-.mode-field select,
-.board-toolbar select {
+.mode-field select {
   color: var(--text);
   background-color: var(--canvas);
   border: 1px solid var(--control);
@@ -226,10 +207,6 @@ select,
     min-height: 44px;
     font-size: 12px;
   }
-  .board-toolbar select {
-    min-height: 40px;
-    max-width: 148px;
-  }
   .history-filters select {
     min-height: 42px;
   }
@@ -246,19 +223,6 @@ select,
   }
 }
 
-/* Requested workflow tags. Color is backed by an icon and a written label.
-   Flat pill fills keep the reference's identity without glow on working UI. */
-.board-filter-controls {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.board-filter-controls label {
-  min-width: 0;
-}
-.board-filter-controls select {
-  max-width: 170px;
-}
 @media (max-width: 1100px) {
   .header-right .account-avatar {
     display: none;
@@ -280,25 +244,5 @@ select,
   }
   .brand {
     font-size: 16px;
-  }
-  .board-toolbar {
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-  .board-toolbar > .small {
-    max-width: none;
-  }
-  .board-filter-controls {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
-    width: 100%;
-  }
-  .board-filter-controls select {
-    width: 100%;
-    max-width: 100%;
-  }
-  .board-filter-controls label:first-child {
-    gap: 5px;
   }
 }

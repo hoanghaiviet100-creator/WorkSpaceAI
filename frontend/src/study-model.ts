@@ -1,6 +1,7 @@
 import type { Evidence, Message, Source, Workspace } from "./data";
 
 export type StudyKind = "flashcard" | "quiz";
+export type QuestionType = "single" | "multiple" | "blank" | "short";
 export type StudyConfig = {
   kind: StudyKind;
   sourceIds: string[];
@@ -8,6 +9,7 @@ export type StudyConfig = {
   difficulty: "easy" | "medium" | "hard";
   focus: string;
   language?: "auto" | "vi" | "en";
+  questionTypes?: QuestionType[];
 };
 export type StudyCitation = {
   docId: string;
@@ -36,10 +38,13 @@ export type StudySet = {
   id: string;
   title: string;
   createdAt: string;
-  status: "generating" | "ready" | "error";
+  status: "generating" | "ready" | "error" | "planned";
   config: StudyConfig;
   items: StudyItem[];
-  engine?: "extractive" | "sample" | "review";
+  engine?: "extractive" | "sample" | "review" | "f2";
+  sessionId?: string;
+  draft?: boolean;
+  actualCount?: number;
   error?: string;
   mastered?: Record<string, boolean>;
   quiz?: QuizProgress;
@@ -56,13 +61,17 @@ export function studySources(workspace: Workspace): Source[] {
   );
 }
 
+export function serverStudySources(workspace: Workspace): Source[] {
+  return studySources(workspace).filter((source) => source.origin === "server");
+}
+
 export function studyConfig(
   workspace: Workspace,
   kind: StudyKind,
 ): StudyConfig {
   return {
     kind,
-    sourceIds: studySources(workspace)
+    sourceIds: serverStudySources(workspace)
       .filter((source) => source.selected)
       .map((source) => source.id),
     count: kind === "flashcard" ? 8 : 5,

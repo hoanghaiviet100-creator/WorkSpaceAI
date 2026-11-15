@@ -1,7 +1,12 @@
 # Virtual environment
 .venv/
+.venv-schema-audit/
 venv/
 env/
+
+# Local tool installations and package cache
+/.codex/tools/
+/.pnpm-store/
 
 # Python cache
 __pycache__/

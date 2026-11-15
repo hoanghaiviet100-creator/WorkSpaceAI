@@ -8,9 +8,9 @@ import httpx
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from backend.algorithms.f2_content_support import CARD_CLOZE_PREFIX, QUIZ_CLOZE_PREFIX
+from backend.algorithms.feature2.f2_content_support import CARD_CLOZE_PREFIX, QUIZ_CLOZE_PREFIX
 from backend.core.config import settings
-from backend.providers.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
+from backend.providers.feature2.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
 
 
 APP = Path(__file__).resolve().parents[1] / "frontend/f2_manual_app.py"

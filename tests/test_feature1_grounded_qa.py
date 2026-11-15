@@ -23,8 +23,8 @@ from backend.core.config import settings
 from backend.core.schemas import DocumentSelectRequest, UserRequest
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
 from backend.services.document_service import DocumentService, document_service
-from backend.services.qa_service import QAService, expand_contextual_query, qa_service
-from backend.algorithms.citation_verifier import (
+from backend.services.feature1.qa_service import QAService, expand_contextual_query, qa_service
+from backend.algorithms.feature1.citation_verifier import (
     CitationClaim,
     verify_citations,
 )
@@ -37,10 +37,10 @@ class TestFeature1GroundedQA(unittest.TestCase):
         self.client = TestClient(app)
 
     def test_01_pure_stdlib_isolation(self):
-        """Assures backend.algorithms.citation_verifier uses ONLY standard library."""
+        """Assures backend.algorithms.feature1.citation_verifier uses ONLY standard library."""
         code = (
             "import sys\n"
-            "import backend.algorithms.citation_verifier\n"
+            "import backend.algorithms.feature1.citation_verifier\n"
             "pydantic_modules = [m for m in sys.modules if 'pydantic' in m]\n"
             "fastapi_modules = [m for m in sys.modules if 'fastapi' in m or 'starlette' in m]\n"
             "assert not pydantic_modules, f'Pydantic leaked into stdlib verifier: {pydantic_modules}'\n"
@@ -370,7 +370,7 @@ class TestFeature1GroundedQA(unittest.TestCase):
 
     def test_13_resolve_summary_target_stem_and_selection(self):
         """Verifies resolve_summary_target handles natural language stems, missing extensions, and selected_doc_ids."""
-        from backend.services.qa_service import resolve_summary_target
+        from backend.services.feature1.qa_service import resolve_summary_target
         from backend.core.schemas import DocumentMetadata, DocumentChunk
 
         # Add a simulated Team_8_Proposal.pdf document

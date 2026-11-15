@@ -1,4 +1,4 @@
-from backend.providers.embedding_provider import EmbeddingProvider, embedding_provider
+from backend.providers.feature1.embedding_provider import EmbeddingProvider, embedding_provider
 from backend.providers.llm_provider import LLMProvider, llm_provider
 
 __all__ = [

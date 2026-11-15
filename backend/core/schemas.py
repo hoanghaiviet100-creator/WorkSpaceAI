@@ -48,6 +48,7 @@ class DocumentMetadata(BaseModel):
 class GeneratedClaim(BaseModel):
     claim_text: str
     section: Optional[str] = None
+    subsection: Optional[str] = None
     cited_doc_id: str
     cited_page: int
     evidence_quote: str
@@ -150,6 +151,7 @@ class UserRequest(BaseModel):
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
     studio_tool: Optional[Literal["email"]] = None
     studio_delivery: bool = False
+    quiz_explanation: bool = False
 
 
 class DocumentSelectRequest(BaseModel):

@@ -1,16 +1,11 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { Check, ChevronDown, Plus } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { DialogCancel, Modal } from "./components";
 import type { Source } from "./data";
-import type { StudyConfig } from "./study-model";
+import type { QuestionType, StudyConfig } from "./study-model";
+import type { RuntimeStatus } from "./api";
 import flashcardIcon from "./flashcard-icon.svg";
 import quizIcon from "./quiz-icon.svg";
-
-const levels = [
-  ["easy", "Easy"],
-  ["medium", "Medium"],
-  ["hard", "Hard"],
-] as const;
 
 function Choice({
   selected,
@@ -33,9 +28,12 @@ type StudyCreateProps = {
   config: StudyConfig;
   sources: Source[];
   working: boolean;
+  runtime: RuntimeStatus | null;
+  runtimeError: boolean;
   onChange: (value: StudyConfig) => void;
   onClose: () => void;
   onCreate: () => void;
+  onSave: () => void;
 };
 
 export default function StudyCreateDialog(props: StudyCreateProps) {
@@ -64,10 +62,14 @@ function StudyCreateForm({
   config,
   sources,
   working,
+  runtime,
+  runtimeError,
   onChange,
   onCreate,
+  onSave,
 }: StudyCreateProps) {
   const isQuiz = config.kind === "quiz";
+  const engine = runtime?.engine_mode;
   const standard = isQuiz ? 5 : 8;
   const fewer = isQuiz ? 3 : 4;
   const [quantity, setQuantity] = useState(
@@ -78,6 +80,8 @@ function StudyCreateForm({
         : "custom",
   );
   const label = isQuiz ? "Quiz" : "Flashcard";
+  const maxCount = isQuiz ? 50 : 30;
+  const questionTypes = config.questionTypes ?? ["single"];
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const selectedIds = useMemo(
     () => new Set(config.sourceIds),
@@ -87,22 +91,9 @@ function StudyCreateForm({
     () => sources.filter((source) => selectedIds.has(source.id)),
     [sources, selectedIds],
   );
-  const topics = useMemo(
-    () =>
-      [
-        ...new Set(
-          selected.map((source) =>
-            source.name
-              .replace(/\.[^.]+$/, "")
-              .replace(/[_-]+/g, " ")
-              .trim(),
-          ),
-        ),
-      ]
-        .filter((name) => name.length >= 3 && name.length <= 48)
-        .slice(0, 3),
-    [selected],
-  );
+  const invalid = working || !selected.length || !Number.isInteger(config.count)
+    || config.count < 1 || config.count > maxCount
+    || (isQuiz && (!questionTypes.length || new Set(questionTypes).size > config.count));
   const useQuantity = (choice: string, count: number) => {
     setQuantity(choice);
     onChange({ ...config, count });
@@ -143,11 +134,11 @@ function StudyCreateForm({
             </div>
             {quantity === "custom" && (
               <label className="study-custom-count">
-                {isQuiz ? "Questions (3–12)" : "Cards (3–12)"}
+                {isQuiz ? "Questions" : "Cards"} (1–{maxCount})
                 <input
                   type="number"
-                  min={3}
-                  max={12}
+                  min={1}
+                  max={maxCount}
                   required
                   value={config.count || ""}
                   onChange={(event) =>
@@ -160,29 +151,42 @@ function StudyCreateForm({
           <fieldset>
             <legend>Difficulty</legend>
             <div className="study-segments">
-              {levels.map(([id, name]) => (
-                <Choice
-                  key={id}
-                  selected={config.difficulty === id}
-                  onClick={() => onChange({ ...config, difficulty: id })}
-                >
-                  {name}
+              {(["easy", "medium", "hard"] as const).map((difficulty) => (
+                <Choice key={difficulty} selected={config.difficulty === difficulty}
+                  onClick={() => onChange({ ...config, difficulty })}>
+                  {{ easy: "Easy", medium: "Medium", hard: "Hard" }[difficulty]}
                 </Choice>
               ))}
             </div>
           </fieldset>
+          {isQuiz && (
+            <fieldset className="study-create-types">
+              <legend>Question types</legend>
+              <div className="study-type-options">
+                {([
+                  ["single", "Single choice"],
+                  ["multiple", "Multiple answers"],
+                  ["blank", "Fill in the blank"],
+                  ["short", "Short answer"],
+                ] as const).map(([type, name]) => (
+                  <label key={type}>
+                    <input type="checkbox" checked={questionTypes.includes(type)}
+                      onChange={(event) => onChange({ ...config, questionTypes: event.target.checked
+                        ? [...questionTypes, type] as QuestionType[]
+                        : questionTypes.filter((value) => value !== type) as QuestionType[],
+                      })}
+                    />
+                    {name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          )}
           <label className="study-language">
-            Prompt language
-            <select
-              value={config.language ?? "auto"}
-              onChange={(event) =>
-                onChange({
-                  ...config,
-                  language: event.target.value as StudyConfig["language"],
-                })
-              }
-            >
-              <option value="auto">Match the documents</option>
+            Language
+            <select value={config.language ?? "auto"}
+              onChange={(event) => onChange({ ...config, language: event.target.value as StudyConfig["language"] })}>
+              <option value="auto">Match the sources</option>
               <option value="vi">Vietnamese</option>
               <option value="en">English</option>
             </select>
@@ -196,8 +200,9 @@ function StudyCreateForm({
                 {selected.length} {selected.length === 1 ? "source" : "sources"}{" "}
                 <ChevronDown size={16} />
               </summary>
+              {!sources.length && <p>Add documents to the workspace library to create a study set.</p>}
               {sourcesOpen &&
-                (sources.length ? (
+                sources.length > 0 && (
                   <div className="study-source-list">
                     {sources.map((source) => (
                       <label key={source.id}>
@@ -219,73 +224,37 @@ function StudyCreateForm({
                       </label>
                     ))}
                   </div>
-                ) : (
-                  <p>Add documents in Sources to create a study set.</p>
-                ))}
+                )}
             </details>
           </fieldset>
         </div>
         <label className="study-focus">
-          What should this cover?{" "}
-          <textarea
-            value={config.focus}
-            maxLength={160}
-            rows={4}
-            onChange={(event) =>
-              onChange({ ...config, focus: event.target.value })
-            }
-            placeholder={
-              isQuiz
-                ? "Example: Test my understanding of algorithm complexity."
-                : "Example: Review binary search definitions and examples."
-            }
+          Topic or instructions
+          <textarea rows={3} maxLength={500} value={config.focus}
+            onChange={(event) => onChange({ ...config, focus: event.target.value })}
+            placeholder={isQuiz ? "Example: Focus on when each protocol is used." : "Example: Keep the front short and explain key differences on the back."}
           />
         </label>
-        {!!topics.length && (
-          <div
-            className="study-topic-chips"
-            aria-label="Suggestions from source names"
-          >
-            {topics.map((topic) => {
-              const active = config.focus
-                .split(",")
-                .some((value) => value.trim() === topic);
-              return (
-                <button
-                  type="button"
-                  key={topic}
-                  aria-pressed={active}
-                  onClick={() => {
-                    const values = config.focus
-                      .split(",")
-                      .map((value) => value.trim())
-                      .filter(Boolean);
-                    onChange({
-                      ...config,
-                      focus: (active
-                        ? values.filter((value) => value !== topic)
-                        : [...values, topic]
-                      )
-                        .join(", ")
-                        .slice(0, 160),
-                    });
-                  }}
-                >
-                  {active ? <Check size={14} /> : <Plus size={14} />}
-                  {topic}
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
+      <p className="study-model-status" role="status">
+        {runtimeError
+          ? "Could not check the AI model. Reopen this dialog to try again."
+          : engine === "gemini"
+            ? `${runtime?.model ?? "Gemini"} will receive excerpts from the selected sources.`
+            : engine === "ollama"
+              ? `Generates locally with ${runtime?.model ?? "Ollama"}.`
+              : engine === "offline"
+                ? "Select Gemini or Ollama in Chat to generate a study set."
+                : "Checking the AI model…"}
+      </p>
       <div className="study-create-footer">
         <DialogCancel />
+        <button className="button" type="button" onClick={onSave} disabled={invalid}>Save for later</button>
         <button
           type="submit"
           className="button study-primary"
           disabled={
-            working || !selected.length || config.count < 3 || config.count > 12
+            !engine || engine === "offline" || invalid
           }
         >
           {working ? "Creating another set…" : "Create"}

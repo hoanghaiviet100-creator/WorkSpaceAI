@@ -8,16 +8,16 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from backend.algorithms.f2_study_validation import validate_flashcard_support, validate_quiz_support
-from backend.core.f2_study_schemas import FlashcardDeck, QuizSet, StudySourceSelection
-from backend.core.f2_validation_schemas import StudyValidationResult
+from backend.algorithms.feature2.f2_study_validation import validate_flashcard_support, validate_quiz_support
+from backend.core.feature2.f2_study_schemas import FlashcardDeck, QuizSet, StudySourceSelection
+from backend.core.feature2.f2_validation_schemas import StudyValidationResult
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_flashcard_service import F2FlashcardService
-from backend.services.f2_quiz_service import F2QuizService
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext
-from backend.services.f2_study_validation_service import (
+from backend.services.feature2.f2_flashcard_service import F2FlashcardService
+from backend.services.feature2.f2_quiz_service import F2QuizService
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext
+from backend.services.feature2.f2_study_validation_service import (
     F2StudyValidationService, StudyValidationError, study_resource_digest,
 )
 
@@ -461,7 +461,7 @@ def test_unknown_repository_exception_fails_closed_without_exposing_exception_de
 
 
 def test_algorithm_has_no_third_party_import_or_io_dependency():
-    path = Path("backend/algorithms/f2_study_validation.py")
+    path = Path("backend/algorithms/feature2/f2_study_validation.py")
     tree = ast.parse(path.read_text(encoding="utf-8"))
     roots = {node.module.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
     roots |= {alias.name.split(".")[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
@@ -469,7 +469,7 @@ def test_algorithm_has_no_third_party_import_or_io_dependency():
     assert not roots & {"os", "socket", "subprocess", "pathlib", "urllib", "http"}
     code = """
 import sys
-from backend.algorithms.f2_study_validation import validate_flashcard_support
+from backend.algorithms.feature2.f2_study_validation import validate_flashcard_support
 sources = (("S1", "Cache: Fast memory."),)
 assert validate_flashcard_support("Cache là gì?", "Fast memory.", sources, sources).status == "SUPPORTED"
 assert not any(n in sys.modules for n in ('pydantic', 'fastapi', 'httpx', 'numpy'))

@@ -25,7 +25,7 @@ import uuid
 
 from fastapi.testclient import TestClient
 
-from backend.algorithms.email_state_machine import (
+from backend.algorithms.feature3.email_state_machine import (
     APPROVED,
     DELIVERY_UNKNOWN,
     DRAFT,
@@ -44,8 +44,8 @@ from backend.core.schemas import (
     EmailFSMState,
 )
 from backend.main import app
-from backend.repositories.draft_repository import draft_repository
-from backend.services.email_service import email_service
+from backend.repositories.feature3.draft_repository import draft_repository
+from backend.services.feature3.email_service import email_service
 
 
 class TestFeature3EmailReporting(unittest.TestCase):
@@ -62,11 +62,11 @@ class TestFeature3EmailReporting(unittest.TestCase):
     # 1. Pure stdlib isolation check
     # -----------------------------------------------------------------------
     def test_01_pure_stdlib_isolation(self):
-        """Assures backend.algorithms.email_state_machine uses ONLY Python standard library."""
+        """Assures backend.algorithms.feature3.email_state_machine uses ONLY Python standard library."""
         import sys
         forbidden = ["pydantic", "fastapi", "starlette", "numpy", "streamlit", "rank_bm25", "httpx"]
         # Reloading in isolated context
-        import backend.algorithms.email_state_machine as esm
+        import backend.algorithms.feature3.email_state_machine as esm
         for mod in sys.modules:
             for f in forbidden:
                 if f in mod and "backend.algorithms" in getattr(sys.modules[mod], "__file__", ""):

@@ -4,10 +4,11 @@
 The frontend of WorkspaceAI is built with Streamlit (>= 1.41) using a strictly modular 3-column desktop layout:
 - **Column 1 (`frontend/components/sidebar_library.py`)**: Document Library & Ingestion (PDF, TXT, MD, CSV), Document selection checkboxes for scope-filtered QA, document versioning badges, and runtime engine health indicators (Ollama / Gemini / Offline).
 - **Column 2 (`frontend/components/chat_panel.py`)**: Multi-turn conversational Q&A, query expansion display, grounding verification score ($S_{verify}$), clickable citation pills (`[Doc • Page • Lines]`), and Hallucination Alert flags.
-- **Column 3 (`frontend/components/evidence_viewer.py`, `reconciliation_board.py`, `email_assistant.py`)**:
+- **Column 3 (`frontend/components/evidence_viewer.py`, `email_assistant.py`)**:
   - **Tab 1: Evidence Viewer**: Deep-dive original source page viewer with line-by-line numbering, full-span yellow highlighting (`mark.cite-mark`), and SHA-256 integrity indicator.
-  - **Tab 2: Cross-Document Reconciliation Board (Feature 2)**: Project Brief vs. Taskboard reconciliation with progress ribbons and conflict flags.
-  - **Tab 3: Email Assistant (Feature 3)**: Human-in-the-loop email staging, draft review, and SHA-256 tamper-proof approval gate.
+  - **Tab 2: Email Assistant (Feature 3)**: Human-in-the-loop email staging, draft review, and SHA-256 tamper-proof approval gate.
+
+Feature 2, source-based flashcards and quizzes, is available in the React Studio. See the [workspace guide](../frontend/README.md#feature-2--tạo-quiz-và-flashcard-từ-nguồn-đã-tải-lên).
 
 ## Modular Component Structure
 ```text
@@ -19,8 +20,7 @@ frontend/
     ├── sidebar_library.py         # Column 1: Document management & engine settings
     ├── chat_panel.py              # Column 2: Conversational UI & citation badges
     ├── evidence_viewer.py         # Column 3 (Tab 1): Interactive line-numbered evidence viewer
-    ├── reconciliation_board.py    # Column 3 (Tab 2): Kanban taskboard & cross-doc reconciliation
-    └── email_assistant.py         # Column 3 (Tab 3): HITL email review & cryptographic dispatch
+    └── email_assistant.py         # Column 3 (Tab 2): HITL email review & cryptographic dispatch
 ```
 
 ## Academic Teal Design System (`frontend/styles.py`)

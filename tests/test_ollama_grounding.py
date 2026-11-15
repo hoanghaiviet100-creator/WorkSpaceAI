@@ -21,7 +21,7 @@ def test_ollama_never_invents_citations(monkeypatch, response):
     chunk = DocumentChunk(chunk_id='c', doc_id='d', doc_name='d', text='Real source text')
     assert provider.generate_grounded_qa('Question', [chunk]) == []
 
-from backend.services.qa_service import expand_contextual_query, is_detail_followup, QAService
+from backend.services.feature1.qa_service import expand_contextual_query, is_detail_followup, QAService
 
 @pytest.mark.parametrize('followup', ['mô tả một cách chi tiết', 'hãy giải thích chi tiết hơn', 'chi tiết hơn', 'explain in detail'])
 def test_elaboration_keeps_original_topic_across_followups(followup):
@@ -35,10 +35,40 @@ def test_elaboration_keeps_original_topic_across_followups(followup):
     assert 'Thư viện socket' in result
     assert followup in result
 
-@pytest.mark.parametrize('query', ['Mô tả chi tiết HTTP và HTTPS', 'Giải thích chi tiết thư viện asyncio', 'Hạn nộp báo cáo là ngày nào?'])
+@pytest.mark.parametrize('query', [
+    'Mô tả chi tiết HTTP và HTTPS', 'Giải thích chi tiết thư viện asyncio',
+    'Hạn nộp báo cáo là ngày nào?', 'Ăn cơm chưa?', 'UDP?', 'Hôm nay trên phố có mưa không?',
+    'Thế giới có bao nhiêu nước?', 'Vậy thủ đô nước Pháp là gì?',
+])
 def test_new_subject_is_not_replaced(query):
     assert not is_detail_followup(query)
     assert expand_contextual_query(query, [{'role': 'user', 'content': 'Socket là gì?'}]) == query
+
+
+def test_unrelated_questions_never_send_ftp_evidence_to_ollama():
+    from unittest.mock import Mock
+    from backend.repositories.workspace_repository import WorkspaceRepository
+
+    repo = WorkspaceRepository()
+    repo.ingest_text_document("ftp.txt", "ftp.txt", [
+        (1, "FTP uses TCP for the control channel. RETR downloads the specified file."),
+        (2, "The data channel uses UDP. The server supports uploading a single file."),
+    ])
+    provider = Mock()
+    provider.generate_grounded_qa.return_value = []
+    service = QAService(repository=repo, provider=provider)
+    history = [{"role": "user", "content": "Lệnh RETR dùng để làm gì?"}]
+    selected = ["ftp.txt"]
+
+    for question in ("Ăn cơm chưa", "Đá bóng không?", "What is the capital of France?"):
+        result = service.answer_question(question, selected_doc_ids=selected, conversation_history=history)
+        assert result["status"] == "ABSTAINED_INSUFFICIENT_EVIDENCE"
+        assert result["validated_claims"] == []
+    provider.generate_grounded_qa.assert_not_called()
+
+    service.answer_question("UDP?", selected_doc_ids=selected, conversation_history=history)
+    assert "UDP" in provider.generate_grounded_qa.call_args.args[1][0].text
+    assert provider.generate_grounded_qa.call_args.kwargs["conversation_history"] is None
 
 def test_retrieval_and_generation_both_receive_followup_topic():
     class Repo:
@@ -87,3 +117,96 @@ def test_ollama_detail_budget_keeps_context_and_cpu_limits(monkeypatch, query, b
     assert captured['json']['options']['num_predict'] == budget
     assert captured['json']['options']['num_ctx'] == 4096
     assert captured['json']['options']['num_thread'] == 4
+
+@pytest.mark.parametrize('query', ['alo', 'xin chào!', 'hello'])
+def test_greeting_does_not_retrieve_or_repeat_document(query):
+    class Repo:
+        def set_embed_fn(self, fn): pass
+        def search(self, *args, **kwargs): raise AssertionError('Greeting must not search documents')
+    result = QAService(repository=Repo()).answer_question(query, selected_doc_ids=[], conversation_history=[{'role':'user','content':'Socket là gì?'}])
+    assert result['status'] == 'CONVERSATION'
+    assert not result['validated_claims']
+
+@pytest.mark.parametrize('query', ['hãy nêu giúp tôi file trên đang nói về chủ đề gì', 'hãy nêu cho tôi biết những gì có trong file'])
+def test_document_overview_uses_summary_instead_of_random_top_snippets(query, monkeypatch):
+    service = QAService()
+    import importlib
+    monkeypatch.setattr(importlib.import_module('backend.services.feature1.qa_service'), 'resolve_summary_target', lambda *args: 'selected.pdf')
+    monkeypatch.setattr(service, 'summarize_document', lambda doc_id, **kwargs: {'status':'SUMMARY_GENERATED','doc_name':doc_id})
+    assert service.answer_question(query, selected_doc_ids=['selected.pdf'])['doc_name'] == 'selected.pdf'
+
+
+@pytest.mark.parametrize("query", [
+    "Hãy miêu tả chi tiết toàn bộ những thông tin trong file giúp tôi",
+    "Hãy nêu chi tiết những gì có ở trong file",
+    "Hãy nêu chi tiết những gì có trong file",
+    "Cho tôi biết chi tiết tài liệu này có những gì",
+])
+def test_whole_document_description_uses_detailed_summary(monkeypatch, query):
+    from unittest.mock import Mock
+    import importlib
+
+    service = QAService()
+    monkeypatch.setattr(importlib.import_module('backend.services.feature1.qa_service'), 'resolve_summary_target', lambda *args: 'selected.pdf')
+    summarize = Mock(return_value={'status': 'SUMMARY_GENERATED'})
+    monkeypatch.setattr(service, 'summarize_document', summarize)
+    service.answer_question(query, selected_doc_ids=['selected.pdf'])
+    summarize.assert_called_once_with('selected.pdf', detailed=True)
+
+
+def test_specific_question_in_file_uses_retrieval(monkeypatch):
+    from unittest.mock import Mock
+
+    service = QAService()
+    search = Mock(return_value=[])
+    monkeypatch.setattr(service.repository, "search", search)
+    service.answer_question("Hãy nêu chi tiết lệnh RETR trong file", selected_doc_ids=["selected.docx"])
+    search.assert_called_once()
+
+
+def test_ollama_detailed_summary_receives_more_context_than_chat(monkeypatch):
+    from unittest.mock import Mock
+    import httpx
+
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "offline_only", False)
+    provider = LLMProvider()
+    monkeypatch.setattr(provider, "is_ollama_online", lambda: True)
+    monkeypatch.setattr(provider, "get_effective_ollama_model", lambda: "qwen2.5:7b")
+    post = Mock(return_value=httpx.Response(200, json={"response": '{"answer":"ok","citations":[]}'}))
+    monkeypatch.setattr(httpx, "post", post)
+    chunk = DocumentChunk(chunk_id="c", doc_id="d", doc_name="d", text="The TCP channel carries commands.")
+
+    provider.generate_grounded_qa("Hãy mô tả chi tiết các phần chính.", [chunk], document_summary=True)
+
+    options = post.call_args.kwargs["json"]["options"]
+    assert options["num_ctx"] == 16384
+    assert options["num_predict"] == 4096
+
+
+@pytest.mark.parametrize('query', ['feat2', 'Tóm tắt tính năng 2', 'Hãy mô tả chi tiết giúp tôi'])
+def test_numbered_feature_question_uses_only_its_section(query):
+    from unittest.mock import Mock
+    from backend.repositories.workspace_repository import WorkspaceRepository
+
+    repo = WorkspaceRepository()
+    pages = [
+        '2.1.2 Feature 2 — Adaptive Revision . . . . . 9',
+        'Feature 1 planner text\n2.1.2 Feature 2 — Adaptive Revision\nGrades verified quiz answers.',
+        'Ranks topics by error rate.\n2.1.3 Feature 3 — Copilot\nFeature 3 chatbot text',
+    ]
+    repo.chunks = [DocumentChunk(chunk_id=str(page), doc_id='report.pdf', doc_name='report.pdf',
+                                 page_number=page, start_line=1, end_line=len(text.splitlines()), text=text)
+                   for page, text in enumerate(pages, 1)]
+    provider = Mock()
+    provider.generate_grounded_qa.return_value = []
+    previous = 'feat2' if 'chi tiết' in query else 'Tóm tắt toàn bộ tài liệu'
+    QAService(repository=repo, provider=provider).answer_question(
+        query, selected_doc_ids=['report.pdf'], conversation_history=[{'role': 'user', 'content': previous}],
+    )
+    question, chunks = provider.generate_grounded_qa.call_args.args
+    assert 'Tóm tắt toàn bộ tài liệu' not in question
+    assert [(chunk.page_number, chunk.start_line) for chunk in chunks] == [(2, 2), (3, 1)]
+    assert [chunk.text for chunk in chunks] == [
+        '2.1.2 Feature 2 — Adaptive Revision\nGrades verified quiz answers.', 'Ranks topics by error rate.',
+    ]

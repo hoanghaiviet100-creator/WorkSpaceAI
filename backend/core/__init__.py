@@ -8,17 +8,12 @@ from backend.core.guardrails import (
 )
 from backend.core.schemas import (
     CitationVerificationResult,
-    DateConflict,
     DocumentChunk,
     DocumentMetadata,
     EmailDraftPayload,
     EmailState,
     GeneratedClaim,
-    ReconciledItemReport,
-    ReconciliationSummary,
-    RequirementItem,
     RouteType,
-    TaskRecord,
     UserRequest,
 )
 
@@ -28,11 +23,6 @@ __all__ = [
     "RouteType",
     "DocumentChunk",
     "DocumentMetadata",
-    "RequirementItem",
-    "TaskRecord",
-    "DateConflict",
-    "ReconciledItemReport",
-    "ReconciliationSummary",
     "GeneratedClaim",
     "CitationVerificationResult",
     "EmailState",

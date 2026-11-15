@@ -302,7 +302,7 @@ class DocumentService:
             file_type = "docx" if lower.endswith(".docx") else "pptx"
         elif lower.endswith(".csv"):
             csv_text = content_bytes.decode("utf-8-sig", errors="ignore")
-            added_count = self.repository.ingest_csv_tasks(
+            added_count = self.repository.ingest_csv(
                 doc_id=doc_id,
                 doc_name=clean_name,
                 csv_content=csv_text,

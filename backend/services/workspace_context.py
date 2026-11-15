@@ -1,15 +1,16 @@
 """Separate local document libraries for the workspace IDs used by the React app."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 from threading import RLock
 from typing import Dict, Optional
 
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
-from backend.repositories.draft_repository import DraftRepository, draft_repository
+from backend.repositories.feature3.draft_repository import DraftRepository, draft_repository
 from backend.services.document_service import DocumentService, document_service
-from backend.services.qa_service import QAService, qa_service
-from backend.services.email_service import EmailService, email_service
+from backend.services.feature1.qa_service import QAService, qa_service
+from backend.services.feature3.email_service import EmailService, email_service
+from backend.services.feature2.f2_practice_service import F2PracticeService
 
 
 @dataclass
@@ -20,6 +21,10 @@ class WorkspaceServices:
     drafts: DraftRepository
     email: EmailService
     is_default: bool = False
+    study: F2PracticeService = field(init=False)
+
+    def __post_init__(self):
+        self.study = F2PracticeService(self.repository)
 
 
 _contexts: Dict[str, WorkspaceServices] = {}

@@ -13,7 +13,7 @@ from backend.providers.llm_provider import llm_provider
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 _settings_lock = threading.RLock()
-GEMINI_QA_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash")
+GEMINI_QA_MODELS = ("gemini-3.5-flash-lite", "gemini-3.8-flash", "gemini-3.1-flash-lite", "gemini-3.5-flash")
 
 
 def runtime_status() -> Dict[str, Any]:
@@ -24,9 +24,17 @@ def runtime_status() -> Dict[str, Any]:
         "offline_only": settings.offline_only,
         "model": settings.gemini_model if mode == "gemini" else settings.ollama_model if mode == "ollama" else None,
         "supported_formats": ["pdf", "txt", "md", "csv"],
-        "gemini_scope": "feature1",
-        "feature_engines": {"qa": mode, "tasks": "offline", "email": "ollama" if mode == "ollama" else "offline"},
+        "gemini_scope": "feature1_and_study",
+        "feature_engines": {
+            "qa": mode,
+            "study": mode,
+            "email": "ollama" if mode == "ollama" else "offline",
+        },
         "model_options": list(GEMINI_QA_MODELS),
+        "provider_options": [
+            {"id": "ollama", "model": settings.ollama_model, "configured": True},
+            {"id": "gemini", "model": settings.gemini_model, "configured": configured},
+        ],
     }
 
 
@@ -114,3 +122,43 @@ def use_offline(save_locally: bool = True) -> Dict[str, Any]:
         settings.offline_only = True
         settings.llm_provider = "mock"
     return {**runtime_status(), "saved_locally": save_locally}
+
+
+def select_provider(provider: str) -> Dict[str, Any]:
+    """Select a dev-configured provider. Never accept credentials from an end user."""
+    if provider == "gemini":
+        if not llm_provider.is_gemini_configured():
+            raise ValueError("Gemini chưa sẵn sàng. Quản trị viên cần cấu hình khóa API trên máy chủ.")
+        # Only use the model and credential supplied by the developer.
+        try:
+            response = httpx.get("https://generativelanguage.googleapis.com/v1beta/models",
+                headers={"x-goog-api-key": settings.gemini_api_key}, params={"pageSize": 1000},
+                timeout=httpx.Timeout(15.0, connect=3.0))
+            if response.status_code != 200:
+                raise ValueError("Không xác thực được Gemini. Quản trị viên cần kiểm tra khóa và hạn mức máy chủ.")
+            available = response.json().get("models", [])
+            if not any(item.get("name") == f"models/{settings.gemini_model}" and "generateContent" in item.get("supportedGenerationMethods", []) for item in available):
+                raise ValueError("Model Gemini do quản trị viên cấu hình chưa khả dụng với tài khoản máy chủ.")
+        except httpx.HTTPError:
+            raise ValueError("Không xác thực được Gemini. Quản trị viên cần kiểm tra khóa, kết nối và hạn mức máy chủ.") from None
+        except (TypeError, AttributeError):
+            raise ValueError("Gemini trả về dữ liệu không hợp lệ. Vui lòng thử lại.") from None
+        with _settings_lock:
+            settings.llm_provider = "gemini"
+            settings.offline_only = False
+        return runtime_status()
+    if provider != "ollama":
+        raise ValueError("Choose Ollama or Gemini.")
+    try:
+        response = httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=httpx.Timeout(5.0, connect=2.0))
+        if response.status_code != 200:
+            raise ValueError("Ollama chưa sẵn sàng. Quản trị viên cần kiểm tra dịch vụ AI cục bộ.")
+        names = [item.get("name") for item in response.json().get("models", [])]
+    except (httpx.HTTPError, ValueError, TypeError, AttributeError):
+        raise ValueError("Không kết nối được Ollama. Quản trị viên cần kiểm tra dịch vụ AI cục bộ.") from None
+    if settings.ollama_model not in names:
+        raise ValueError("Model Ollama chưa được tải. Quản trị viên cần chuẩn bị model trên máy chủ.")
+    with _settings_lock:
+        settings.llm_provider = "ollama"
+        settings.offline_only = False
+    return runtime_status()

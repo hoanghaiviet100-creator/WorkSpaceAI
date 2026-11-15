@@ -13,11 +13,11 @@ import { DialogCancel, Modal } from "./components";
 import type { Workspace } from "./data";
 import StudySession from "./StudySession";
 import StudyCreateDialog from "./StudyCreateDialog";
-import { createStudyItems } from "./study-generator";
+import { getRuntimeStatus, studyRequest, type RuntimeStatus } from "./api";
 import {
   reviewCards,
   studyConfig,
-  studySources,
+  serverStudySources,
   type StudyCitation,
   type StudyConfig,
   type StudyItem,
@@ -27,6 +27,9 @@ import {
 import { sampleStudy } from "./study-sample";
 import flashcardIcon from "./flashcard-icon.svg";
 import quizIcon from "./quiz-icon.svg";
+import emailIcon from "./email-icon.svg";
+import { emailStatus } from "./StudioEmail";
+import { visibleStudioResults } from "./notebook-model";
 
 const tools = {
   flashcard: {
@@ -60,7 +63,11 @@ export default function Studio({
   launch,
   clearLaunch,
   onSource,
+  onExplain,
   motionRef,
+  onComposeEmail,
+  onOpenEmail,
+  queuedEmailId,
 }: {
   workspace: Workspace;
   update: (change: (current: Workspace) => Workspace) => void;
@@ -72,7 +79,11 @@ export default function Studio({
   launch: StudyConfig | null;
   clearLaunch: () => void;
   onSource: (citation: StudyCitation) => void;
+  onExplain: (prompt: string, sourceIds: string[]) => void;
   motionRef: RefObject<HTMLDivElement | null>;
+  onComposeEmail: () => void;
+  onOpenEmail: (id: string) => void;
+  queuedEmailId?: string;
 }) {
   const [config, setConfig] = useState<StudyConfig | null>(null);
   const [dialog, setDialog] = useState<{
@@ -82,7 +93,31 @@ export default function Studio({
   const [title, setTitle] = useState("");
   const [menu, setMenu] = useState<string | null>(null);
   const sets = workspace.studySets ?? [];
-  const available = useMemo(() => studySources(workspace), [workspace]);
+  const emails = visibleStudioResults(workspace).sort(
+    (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+  );
+  const available = useMemo(() => serverStudySources(workspace), [workspace]);
+  const [studyRuntime, setStudyRuntime] = useState<RuntimeStatus | null>(null);
+  const [runtimeError, setRuntimeError] = useState(false);
+  const [retrySet, setRetrySet] = useState<StudySet | null>(null);
+  const configOpen = config !== null;
+  useEffect(() => {
+    if (!configOpen) return;
+    let active = true;
+    setStudyRuntime(null);
+    setRuntimeError(false);
+    void getRuntimeStatus().then(
+      (runtime) => {
+        if (active) setStudyRuntime(runtime);
+      },
+      () => {
+        if (active) setRuntimeError(true);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [configOpen]);
   const working = sets.some((set) => set.status === "generating");
   useEffect(() => {
     if (launch) setConfig(launch);
@@ -101,10 +136,17 @@ export default function Studio({
     }));
   const closeConfig = () => {
     setConfig(null);
+    setRetrySet(null);
     clearLaunch();
   };
-  const generate = async (settings: StudyConfig, retry?: StudySet) => {
+  const generate = async (
+    settings: StudyConfig,
+    retry?: StudySet,
+    later = false,
+  ) => {
     if (working || !settings.sourceIds.length) return;
+    const engine = studyRuntime?.engine_mode;
+    if (!later && (!engine || engine === "offline")) return;
     const sources = settings.sourceIds.map((id) =>
       available.find((source) => source.id === id),
     );
@@ -124,20 +166,36 @@ export default function Studio({
       id: retry?.id ?? crypto.randomUUID(),
       title: retry?.title ?? `${tools[settings.kind].label} · ${base}`,
       createdAt: retry?.createdAt ?? new Date().toISOString(),
-      status: "generating",
+      status: later ? "planned" : "generating",
       config: settings,
       items: [],
     };
     if (retry) changeSet(set.id, () => set);
     else addSet(set);
     closeConfig();
+    if (later) return;
     try {
-      const items = await createStudyItems(workspace, settings);
+      const session = await studyRequest<{
+        session_id: string;
+        actual_count: number;
+        draft: boolean;
+      }>(workspace.id, "", {
+        selected_doc_ids: settings.sourceIds,
+        requested_count: settings.count,
+        difficulty: settings.difficulty,
+        language: settings.language ?? "auto",
+        focus: settings.focus,
+        question_types: settings.questionTypes ?? ["single"],
+        engine,
+        study_format: settings.kind === "quiz" ? "quiz" : "flashcards",
+      });
       changeSet(set.id, (current) => ({
         ...current,
-        items,
+        sessionId: session.session_id,
+        actualCount: session.actual_count,
+        draft: session.draft,
         status: "ready",
-        engine: "extractive",
+        engine: "f2",
       }));
     } catch (error) {
       changeSet(set.id, (current) => ({
@@ -181,11 +239,14 @@ export default function Studio({
           <StudySession
             key={selected.id}
             set={selected}
+            workspaceId={workspace.id}
+            sources={workspace.sources}
             expanded={expanded}
             onExpand={onExpand}
             onBack={() => onSelect(null)}
             onUpdate={(change) => changeSet(selected.id, change)}
             onSource={onSource}
+            onExplain={onExplain}
             onReview={(items) => createReview(selected, items)}
           />
         ) : (
@@ -228,6 +289,26 @@ export default function Studio({
                     </button>
                   </div>
                 ))}
+                <div className="study-tool" data-kind="email">
+                  <button className="study-tool-main" onClick={onComposeEmail}>
+                    <img
+                      className="study-tool-icon"
+                      src={emailIcon}
+                      width={44}
+                      height={44}
+                      alt=""
+                    />
+                    <strong>Draft &amp; send email</strong>
+                    <span>Write an email from this note.</span>
+                  </button>
+                  <button
+                    className="icon-button study-tool-settings"
+                    aria-label="Customize email"
+                    onClick={onComposeEmail}
+                  >
+                    <Settings2 size={16} />
+                  </button>
+                </div>
               </div>
               <section className="study-history" aria-label="Study set history">
                 <div className="study-history-title">
@@ -242,14 +323,16 @@ export default function Studio({
                       const tool = tools[set.config.kind];
                       const progress =
                         set.config.kind === "flashcard"
-                          ? `${set.items.filter((item) => set.mastered?.[item.id]).length}/${set.items.length} mastered`
+                          ? set.engine === "f2"
+                            ? `${Object.values(set.mastered ?? {}).filter(Boolean).length}/${set.actualCount} mastered`
+                            : `${set.items.filter((item) => set.mastered?.[item.id]).length}/${set.items.length} mastered`
                           : set.lastScore
                             ? `${set.lastScore.correct}/${set.lastScore.total} correct`
                             : set.quiz
                               ? `${Object.keys(set.quiz.answers).length}/${set.quiz.order.length} answered`
                               : "Not started";
                       const sourceCount =
-                        set.status === "ready"
+                        set.status === "ready" && set.engine !== "f2"
                           ? new Set(
                               set.items.map((item) => item.citation.docId),
                             ).size
@@ -280,9 +363,11 @@ export default function Studio({
                                   {set.engine === "sample"
                                     ? " · Sample set"
                                     : ""}
-                                  {set.engine === "extractive" &&
-                                  set.items.length < set.config.count
-                                    ? ` · Created ${set.items.length}/${set.config.count}`
+                                  {(set.engine === "extractive" ||
+                                    set.engine === "f2") &&
+                                  (set.actualCount ?? set.items.length) <
+                                    set.config.count
+                                    ? ` · Created ${set.actualCount ?? set.items.length}/${set.config.count}`
                                     : ""}
                                 </span>
                               </button>
@@ -299,17 +384,30 @@ export default function Studio({
                                   </span>
                                 ) : (
                                   <>
-                                    <span className="study-error" role="status">
-                                      {set.error}
+                                    <span
+                                      className={
+                                        set.status === "error"
+                                          ? "study-error"
+                                          : undefined
+                                      }
+                                      role="status"
+                                    >
+                                      {set.status === "planned"
+                                        ? "Settings saved"
+                                        : set.error}
                                     </span>
                                     <button
                                       className="study-text-button"
                                       disabled={working}
-                                      onClick={() =>
-                                        void generate(set.config, set)
-                                      }
+                                      onClick={() => {
+                                        setRetrySet(set);
+                                        setConfig(set.config);
+                                      }}
                                     >
-                                      <RotateCcw size={14} /> Retry
+                                      <RotateCcw size={14} />{" "}
+                                      {set.status === "planned"
+                                        ? "Create"
+                                        : "Retry"}
                                     </button>
                                   </>
                                 )}
@@ -428,6 +526,66 @@ export default function Studio({
                   </div>
                 )}
               </section>
+              <section className="study-history" aria-label="Email history">
+                <div className="study-history-title">
+                  <h3>Email history</h3>
+                  <span>{emails.length}</span>
+                </div>
+                {emails.length ? (
+                  <ul className="study-history-list">
+                    {emails.map((email) => (
+                      <li key={email.id}>
+                        <div className="study-history-row studio-email-row">
+                          <img
+                            className="study-history-icon"
+                            src={emailIcon}
+                            alt=""
+                          />
+                          <button
+                            className="study-open"
+                            onClick={() => onOpenEmail(email.id)}
+                          >
+                            <strong>{email.title}</strong>
+                            <span>
+                              {email.draft?.to ||
+                                email.config.recipient ||
+                                "No recipient"}
+                            </span>
+                            <span>
+                              {emailStatus(email, queuedEmailId)} ·{" "}
+                              {dateFormat.format(new Date(email.updatedAt))}
+                            </span>
+                            {email.status === "generating" && (
+                              <span
+                                className="study-skeleton"
+                                aria-hidden="true"
+                              >
+                                <i />
+                                <i />
+                              </span>
+                            )}
+                          </button>
+                        </div>
+                        {(email.status === "error" ||
+                          email.delivery === "failed") && (
+                          <div className="study-row-actions">
+                            <button
+                              className="study-text-button"
+                              onClick={() => onOpenEmail(email.id)}
+                            >
+                              <RotateCcw size={14} /> Retry
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="studio-email-empty">
+                    Emails you draft or send appear here.
+                  </p>
+                )}
+              </section>
             </div>
           </>
         )}
@@ -437,9 +595,12 @@ export default function Studio({
           config={config}
           sources={available}
           working={working}
+          runtime={studyRuntime}
+          runtimeError={runtimeError}
           onChange={setConfig}
           onClose={closeConfig}
-          onCreate={() => void generate(config)}
+          onCreate={() => void generate(config, retrySet ?? undefined)}
+          onSave={() => void generate(config, retrySet ?? undefined, true)}
         />
       )}
       {dialog && (

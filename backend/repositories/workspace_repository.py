@@ -8,6 +8,15 @@ from rank_bm25 import BM25Okapi
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 
 
+STOP_WORDS = {
+    "và", "hoặc", "của", "cho", "là", "ở", "tại", "có", "các", "những", "một", "trong",
+    "được", "với", "này", "đó", "nào", "mấy", "gồm", "như", "gì", "thế", "sao",
+    "thì", "đã", "sẽ", "đang", "bởi", "ra", "vào", "lại",
+    "the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "what", "which",
+    "how", "who", "when", "where", "why", "it", "this", "that",
+}
+
+
 def tokenize_vietnamese_english(text: str) -> List[str]:
     """
     Enhanced tokenizer for Vietnamese and English technical text.
@@ -279,8 +288,8 @@ class WorkspaceRepository:
         self._rebuild_index()
         return len(added_chunks)
 
-    def ingest_csv_tasks(self, doc_id: str, doc_name: str, csv_content: str) -> int:
-        """Ingests structured CSV task records with row-level provenance and line locators."""
+    def ingest_csv(self, doc_id: str, doc_name: str, csv_content: str) -> int:
+        """Index CSV rows with their source positions."""
         doc_hash = hashlib.sha256(csv_content.encode("utf-8")).hexdigest()
         reader = csv.DictReader(io.StringIO(csv_content))
         added_chunks: List[DocumentChunk] = []
@@ -368,7 +377,10 @@ class WorkspaceRepository:
             return []
 
         # 2. Tokenize with enhanced Vietnamese-English tokenizer
-        q_tokens = tokenize_vietnamese_english(query)
+        q_tokens = [
+            token for token in tokenize_vietnamese_english(query)
+            if any(word not in STOP_WORDS for word in token.split("_"))
+        ]
         if not q_tokens:
             return []
 
@@ -382,17 +394,7 @@ class WorkspaceRepository:
         bm25_scores = list(bm25_model.get_scores(q_tokens))
         max_bm25 = max(bm25_scores) if len(bm25_scores) > 0 and max(bm25_scores) > 0 else 1.0
 
-        q_set = set(q_tokens)
-
-        # Lexical ranking (BM25 with token-overlap tie-breaker)
-        STOP_WORDS = {
-            "và", "hoặc", "của", "cho", "là", "ở", "tại", "có", "các", "những", "một", "trong",
-            "được", "với", "này", "đó", "nào", "mấy", "gồm", "như", "gì", "thế_nào", "sao",
-            "thì", "đã", "sẽ", "đang", "bởi", "ra", "vào", "lại",
-            "the", "a", "an", "and", "or", "of", "to", "in", "is", "are", "what", "which", "how", "it", "this", "that",
-        }
-        content_q_set = {t for t in q_set if t not in STOP_WORDS}
-        effective_q_set = content_q_set if content_q_set else q_set
+        effective_q_set = set(q_tokens)
 
         overlap_map = {}
         for i, c in enumerate(eligible):

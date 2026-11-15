@@ -45,25 +45,107 @@ import {
   type Workspace,
   type Thread,
   type Message,
-  type Handoff,
   type Evidence,
   type Draft,
 } from "./data";
 
 const summarySectionIcons = [
   [/rủi ro|thách thức|\brisk\b/i, AlertTriangle],
-  [/đánh giá|kết quả|số liệu|\bevaluation\b|\bresults\b/i, ChartNoAxesColumnIncreasing],
+  [
+    /đánh giá|kết quả|số liệu|\bevaluation\b|\bresults\b/i,
+    ChartNoAxesColumnIncreasing,
+  ],
   [/kiến trúc|thiết kế|\barchitecture\b|\bdesign\b/i, Layers],
   [/kế hoạch|lộ trình|tiến độ|\broadmap\b|\btimeline\b/i, CalendarDays],
   [/mục tiêu|phạm vi|\bobjectives?\b|\bscope\b/i, Target],
 ] as const;
+
+type AnswerFinding = { id: string; index: number; evidence?: Evidence };
+
+function answerFindings(
+  message: Message,
+  evidence: Workspace["evidence"],
+  notebook: boolean,
+) {
+  const groups: {
+    section?: string;
+    list: boolean;
+    findings: AnswerFinding[];
+  }[] = [];
+  message.evidenceIds.forEach((id, index) => {
+    const entry = evidence[id];
+    const item =
+      entry?.origin === "server" && !isVerified(entry.verificationStatus)
+        ? undefined
+        : entry;
+    const section = item?.section;
+    const list =
+      !!section ||
+      (notebook &&
+        item?.origin === "server" &&
+        item.title === "Supported finding" &&
+        message.evidenceIds.length > 1);
+    const finding = { id, index, evidence: item };
+    const previous = groups.at(-1);
+    if (list && previous?.list && section === previous.section) {
+      previous.findings.push(finding);
+    } else {
+      groups.push({ section, list, findings: [finding] });
+    }
+  });
+  return groups;
+}
+
+function FindingList({
+  findings,
+  notebook,
+  onEvidence,
+}: {
+  findings: AnswerFinding[];
+  notebook: boolean;
+  onEvidence: (id: string) => void;
+}) {
+  const items: { subsection?: string; findings: AnswerFinding[] }[] = [];
+  for (const finding of findings) {
+    const subsection = finding.evidence?.subsection;
+    const previous = items.at(-1);
+    if (subsection && previous?.subsection === subsection) {
+      previous.findings.push(finding);
+    } else {
+      items.push({ subsection, findings: [finding] });
+    }
+  }
+  const renderFinding = ({ id, index, evidence }: AnswerFinding) => (
+    <li key={id}>
+      {evidence?.finding}{" "}
+      <Citation
+        id={id}
+        onOpen={onEvidence}
+        number={notebook ? index + 1 : undefined}
+      />
+    </li>
+  );
+  return (
+    <ul className="answer-findings">
+      {items.map(({ subsection, findings }) =>
+        subsection ? (
+          <li key={findings[0].id}>
+            <strong>{subsection}</strong>
+            <ul>{findings.map(renderFinding)}</ul>
+          </li>
+        ) : (
+          renderFinding(findings[0])
+        ),
+      )}
+    </ul>
+  );
+}
 
 export default function Chat({
   workspace,
   thread,
   update,
   onEvidence,
-  onEmailHandoff,
   onEmailDraft,
   onFiles,
   active,
@@ -71,12 +153,13 @@ export default function Chat({
   onStudioOpen,
   onStudy,
   autoAsk = false,
+  quizQuestion,
+  onQuizQuestionSent,
 }: {
   workspace: Workspace;
   thread: Thread;
   update: (fn: (w: Workspace) => Workspace) => void;
   onEvidence: (id: string) => void;
-  onEmailHandoff: (context: Handoff) => void;
   onEmailDraft: () => void;
   onFiles: () => void;
   active: boolean;
@@ -84,6 +167,8 @@ export default function Chat({
   onStudioOpen?: (id: string) => void;
   onStudy?: (kind: StudyKind, focus: string) => void;
   autoAsk?: boolean;
+  quizQuestion?: { prompt: string; sourceIds: string[] };
+  onQuizQuestionSent?: () => void;
 }) {
   const [input, setInput] = useState(
     isRetiredThread(thread) ? "" : (thread.composerDraft ?? ""),
@@ -108,6 +193,7 @@ export default function Chat({
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const requestLock = useRef(false);
   const submittedIntake = useRef(false);
+  const submittedQuizQuestion = useRef<typeof quizQuestion>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollViewport = useRef<HTMLDivElement>(null);
   const chatHistory = useRef<HTMLDivElement>(null);
@@ -202,15 +288,30 @@ export default function Chat({
     field.style.height = "auto";
     field.style.height = `${Math.min(field.scrollHeight, 136)}px`;
   }, [input]);
-  const send = async (request = input, forced?: Message["state"]) => {
+  const send = async (
+    request = input,
+    forced?: Message["state"],
+    quizSources?: string[],
+  ) => {
     if (!request.trim() || loading || requestLock.current) return;
     followLatest.current = true;
-    const ids = selected.map((s) => s.id);
-    const activeMode = live ? "Ask" : detectMode(request);
+    const quizSourceSet = new Set(
+      quizSources?.map((id) => resolveCitedSource(id, workspace.sources)?.id),
+    );
+    const sources = quizSources
+      ? workspace.sources.filter(
+          (source) =>
+            quizSourceSet.has(source.id) &&
+            source.status === "Processed" &&
+            (!live || source.origin === "server"),
+        )
+      : selected;
+    const ids = sources.map((s) => s.id);
+    const activeMode = live || quizSources ? "Ask" : detectMode(request);
     const evidenceIds = relevantEvidence(workspace, request, ids);
     const at = new Date().toISOString();
-    setInput("");
-    if (thread.composerDraft)
+    if (!quizSources) setInput("");
+    if (!quizSources && thread.composerDraft)
       update((workspace) => ({
         ...workspace,
         threads: workspace.threads.map((item) =>
@@ -227,11 +328,14 @@ export default function Chat({
         state: "answer",
         sourceIds: ids,
         evidenceIds: [],
+        quizSourceIds: quizSources,
         at,
         origin: "server",
       };
       try {
-        if (selected.some((s) => s.origin !== "server"))
+        if (quizSources && !ids.length)
+          throw new Error("The quiz source is unavailable. Restore it in Sources, then retry.");
+        if (sources.some((s) => s.origin !== "server"))
           throw new Error(
             "Sync the server library and select server documents before asking a live question.",
           );
@@ -260,15 +364,13 @@ export default function Chat({
         const response = await chatRequest(
           request.trim(),
           ids,
-          history,
+          quizSources ? [] : history,
           recipient,
-          undefined,
           workspace.id,
+          undefined,
+          false,
+          !!quizSources,
         );
-        if (response.route === "RECONCILE_FLOW")
-          throw new Error(
-            "Update the server to continue asking questions in this note.",
-          );
         result.routeType = response.route;
         result.groundingScore =
           typeof response.grounding_score === "number" &&
@@ -300,6 +402,7 @@ export default function Chat({
             title: c.section || "Supported finding",
             finding: c.claim_text,
             section: c.section || undefined,
+            subsection: c.subsection || undefined,
             quote: c.evidence_quote,
             locator: `p. ${c.cited_page}${c.cited_start_line ? ` · lines ${c.cited_start_line}–${c.cited_end_line ?? c.cited_start_line}` : ""}`,
             context: "Server-verified citation",
@@ -438,21 +541,24 @@ export default function Chat({
   const sendRef = useRef(send);
   sendRef.current = send;
   useEffect(() => {
+    if (
+      !active || !quizQuestion || loading || requestLock.current ||
+      submittedQuizQuestion.current === quizQuestion
+    ) return;
+    submittedQuizQuestion.current = quizQuestion;
+    onQuizQuestionSent?.();
+    void sendRef.current(
+      quizQuestion.prompt,
+      undefined,
+      quizQuestion.sourceIds,
+    );
+  }, [active, quizQuestion, loading, onQuizQuestionSent]);
+  useEffect(() => {
     if (!active || !autoAsk || !thread.composerDraft || submittedIntake.current)
       return;
     submittedIntake.current = true;
     void sendRef.current(thread.composerDraft);
   }, [active, autoAsk, thread.composerDraft]);
-  const handoff = (m: Message) =>
-    onEmailHandoff({
-      question: m.request,
-      answer: m.evidenceIds
-        .map((id) => workspace.evidence[id]?.finding)
-        .filter(Boolean)
-        .join("\n"),
-      evidenceIds: m.evidenceIds,
-      sourceIds: m.sourceIds,
-    });
   const welcome = notebook && !messages.length && !pending;
   return (
     <div className={`chat-view${welcome ? " nb-chat-welcome" : ""}`}>
@@ -531,19 +637,32 @@ export default function Chat({
               </div>
             </section>
           )}
-          {messages.map((m) =>
-            notebook && m.studioResultId ? (
-              <div className="nb-studio-event" key={m.id}>
-                <Check size={15} />
-                <span>Email draft saved</span>
-                <button onClick={() => onStudioOpen?.(m.studioResultId!)}>
-                  {workspace.studioResults?.find(
-                    (result) => result.id === m.studioResultId,
-                  )?.title || "Deleted result"}
-                  <ArrowRight size={14} />
-                </button>
-              </div>
-            ) : (
+          {messages.map((m) => {
+            if (notebook && m.studioResultId) {
+              const id = m.studioResultId;
+              const email = workspace.studioResults?.find(
+                (result) => result.id === id,
+              );
+              const sent = m.id === `sent-${id}`;
+              return (
+                <div className="nb-studio-event" key={m.id}>
+                  <Check size={15} />
+                  <span>
+                    {sent
+                      ? email?.dispatchMode === "local_mock"
+                        ? "Simulated email sent to"
+                        : "Email sent to"
+                      : "Email draft saved"}
+                  </span>
+                  <button onClick={() => onStudioOpen?.(id)}>
+                    {(sent ? email?.draft?.to : email?.title) ||
+                      "Deleted result"}
+                    <ArrowRight size={14} />
+                  </button>
+                </div>
+              );
+            }
+            return (
               <article
                 className="exchange"
                 data-offscreen-ready={m !== latestMessage || undefined}
@@ -603,65 +722,88 @@ export default function Chat({
                           %
                         </p>
                       )}
-                      {m.evidenceIds.map((id, index) => {
-                        const e = workspace.evidence[id];
-                        const section = e?.section;
-                        const continuesSection = !!section &&
-                          workspace.evidence[m.evidenceIds[index - 1]]?.section === section;
-                        const SectionIcon = section && !continuesSection
-                          ? summarySectionIcons.find(([pattern]) => pattern.test(section))?.[1]
-                          : undefined;
-                        return e &&
-                          !(
-                            e.origin === "server" &&
-                            !isVerified(e.verificationStatus)
-                          ) ? (
-                          <section
-                            className={`finding${id === "conflict" ? " finding-conflict" : ""}${e.section ? " summary-finding" : ""}${continuesSection ? " summary-continuation" : ""}`}
-                            key={id}
-                          >
-                            <div
-                              className="finding-heading"
-                              hidden={
-                                continuesSection || (notebook && !e.section && e.title === "Supported finding")
-                              }
+                      {answerFindings(m, workspace.evidence, notebook).map(
+                        ({ section, list, findings }) => {
+                          const { id, index, evidence: e } = findings[0];
+                          if (list) {
+                            const SectionIcon = section
+                              ? summarySectionIcons.find(([pattern]) =>
+                                  pattern.test(section),
+                                )?.[1]
+                              : undefined;
+                            return (
+                              <section
+                                className="finding summary-finding"
+                                key={id}
+                              >
+                                {section && (
+                                  <div className="finding-heading">
+                                    {SectionIcon && (
+                                      <SectionIcon
+                                        size={15}
+                                        aria-hidden="true"
+                                      />
+                                    )}
+                                    <h3>{section}</h3>
+                                  </div>
+                                )}
+                                <FindingList
+                                  findings={findings}
+                                  notebook={notebook}
+                                  onEvidence={onEvidence}
+                                />
+                              </section>
+                            );
+                          }
+                          return e ? (
+                            <section
+                              className={`finding${id === "conflict" ? " finding-conflict" : ""}`}
+                              key={id}
                             >
-                              {id === "conflict" && <AlertTriangle size={16} />}
-                              {SectionIcon && <SectionIcon size={15} aria-hidden="true" />}
-                              <h3>{e.title}</h3>
-                            </div>
-                            <p>{e.finding}</p>
-                            <Badge
-                              tone={
-                                e.origin === "server" &&
-                                isVerified(e.verificationStatus)
-                                  ? "document"
-                                  : "neutral"
-                              }
-                            >
-                              {e.verificationStatus?.replaceAll("_", " ") ??
-                                "Unverified sample"}
-                            </Badge>
-                            <Citation
-                              id={id}
-                              onOpen={onEvidence}
-                              number={notebook ? index + 1 : undefined}
-                            />
-                            {id === "conflict" &&
-                              m.evidenceIds.includes("deadline") && (
-                                <p className="conflict-next-step">
-                                  Ask your lecturers to confirm the date before
-                                  updating the deadline.
-                                </p>
-                              )}
-                          </section>
-                        ) : (
-                          <Notice key={id} tone="neutral">
-                            This source is no longer available in this
-                            workspace.
-                          </Notice>
-                        );
-                      })}
+                              <div
+                                className="finding-heading"
+                                hidden={
+                                  notebook && e.title === "Supported finding"
+                                }
+                              >
+                                {id === "conflict" && (
+                                  <AlertTriangle size={16} />
+                                )}
+                                <h3>{e.title}</h3>
+                              </div>
+                              <p>{e.finding}</p>
+                              <Badge
+                                tone={
+                                  e.origin === "server" &&
+                                  isVerified(e.verificationStatus)
+                                    ? "document"
+                                    : "neutral"
+                                }
+                              >
+                                {e.verificationStatus?.replaceAll("_", " ") ??
+                                  "Unverified sample"}
+                              </Badge>
+                              <Citation
+                                id={id}
+                                onOpen={onEvidence}
+                                number={notebook ? index + 1 : undefined}
+                              />
+                              {id === "conflict" &&
+                                m.evidenceIds.includes("deadline") && (
+                                  <p className="conflict-next-step">
+                                    Ask your lecturers to confirm the date
+                                    before updating the deadline.
+                                  </p>
+                                )}
+                            </section>
+                          ) : (
+                            <Notice key={id} tone="neutral">
+                              This source is no longer available in this
+                              workspace.
+                            </Notice>
+                          );
+                        },
+                      )}
                       {!!m.rejectedClaims?.length && (
                         <Notice tone="neutral">
                           {m.rejectedClaims.length} unsupported claim
@@ -672,15 +814,6 @@ export default function Chat({
                         </Notice>
                       )}
                       <div className="answer-footer">
-                        <div className="answer-actions">
-                          <button className="button" onClick={() => handoff(m)}>
-                            <Mail size={15} />
-                            {notebook
-                              ? "Draft an email"
-                              : "Draft email from this"}{" "}
-                            <ArrowRight size={13} />
-                          </button>
-                        </div>
                         <p className="provenance-note">
                           <Check size={13} />
                           {m.origin === "server"
@@ -726,7 +859,7 @@ export default function Chat({
                       </p>
                       <button
                         className="button"
-                        onClick={() => send(m.request)}
+                        onClick={() => send(m.request, undefined, m.quizSourceIds)}
                       >
                         <RotateCcw size={14} />
                         Retry
@@ -853,8 +986,8 @@ export default function Chat({
                   )}
                 </div>
               </article>
-            ),
-          )}
+            );
+          })}
           {pending && (
             <article className="exchange pending-exchange">
               <UserMessage message={pending} />

@@ -3,14 +3,10 @@ import type {
   EmailAuditRow,
   EmailState,
   EngineMode,
-  RequirementRow,
-  ReconciliationRunRow,
-  ReconciledItemRow,
   VerificationStatus,
   RouteType,
-  TaskState,
 } from "./schema";
-export type Mode = "Ask" | "Tasks" | "Email";
+export type Mode = "Ask" | "Email";
 export type View = "chat" | "email";
 export type Source = {
   id: string;
@@ -43,6 +39,7 @@ export type Evidence = {
   id: string;
   finding: string;
   section?: string;
+  subsection?: string;
   claimId?: string;
   messageId?: string;
   page?: number;
@@ -55,38 +52,6 @@ export type Evidence = {
   docHash?: string;
   verifiedAt?: string;
   origin?: "sample" | "server";
-};
-export type Task = {
-  id: string;
-  title: string;
-  description: string;
-  owner: string;
-  initials: string;
-  due: string;
-  status: TaskState;
-  flag?: string;
-  source?: string;
-  secondarySource?: string;
-  mappedReqId?: string;
-  completionPct?: number;
-  sourceRef?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  localLabel?: string;
-  archived?: boolean;
-};
-export type Suggestion = {
-  id: string;
-  title: string;
-  description: string;
-  owner: string;
-  due: string;
-  status?: TaskState;
-  selected: boolean;
-  source?: string;
-  threadId?: string;
-  mappedReqId?: string;
-  completionPct?: number;
 };
 export type Draft = {
   serverCitations?: string[];
@@ -120,7 +85,7 @@ export type Message = {
   id: string;
   request: string;
   mode: Mode;
-  state: "answer" | "abstention" | "error" | "suggestions" | "draft";
+  state: "answer" | "abstention" | "error" | "draft";
   sourceIds: string[];
   evidenceIds: string[];
   at: string;
@@ -130,6 +95,7 @@ export type Message = {
   groundingScore?: number;
   routeType?: RouteType;
   rejectedClaims?: string[];
+  quizSourceIds?: string[];
   errorText?: string;
   origin?: "sample" | "server";
   studioResultId?: string;
@@ -146,7 +112,7 @@ export type Thread = {
   id: string;
   title: string;
   mode: Mode;
-  view: View | "tasks";
+  view: View;
   updated: string;
   messages: Message[];
   draft?: Draft;
@@ -164,24 +130,14 @@ export type Workspace = {
   updated: string;
   sources: Source[];
   evidence: Record<string, Evidence>;
-  tasks: Task[];
-  suggestions: Suggestion[];
   draft: Draft;
   threads: Thread[];
   members: string[];
-  requirements?: RequirementRow[];
-  reconciliationRuns?: (ReconciliationRunRow & {
-    origin: "preview" | "server";
-    inputSignature?: string;
-  })[];
-  reconciledItems?: (ReconciledItemRow & {
-    title?: string;
-    serverState?: string;
-  })[];
   schemaVersion?: number;
   notebookVersion?: 1;
   legacyThreads?: Thread[];
   studioResults?: import("./notebook-model").StudioResult[];
+  emailSendMode?: "automatic" | "confirm";
   studySets?: import("./study-model").StudySet[];
 };
 export const team = [
@@ -368,8 +324,6 @@ export function seedWorkspaces(): Workspace[] {
       updated: "2026-11-04T10:42:00+07:00",
       sources: initialSources,
       evidence,
-      tasks: [],
-      suggestions: [],
       draft: initialEmail,
       members: team,
       threads: [
@@ -437,8 +391,6 @@ export function seedWorkspaces(): Workspace[] {
         source("seminar-file", "Seminar_Notes.txt", "64 lines · Text"),
       ],
       evidence: thesisEvidence,
-      tasks: [],
-      suggestions: [],
       draft: blankDraft(),
       members: team.slice(0, 3),
       threads: [
@@ -503,14 +455,9 @@ export function emptyWorkspace(name: string, description: string): Workspace {
     updated: new Date().toISOString(),
     sources: [],
     evidence: {},
-    tasks: [],
-    suggestions: [],
     draft: blankDraft(),
     threads: [],
     members: [team[0]],
-    requirements: [],
-    reconciliationRuns: [],
-    reconciledItems: [],
     schemaVersion: 3,
   };
 }

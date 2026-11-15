@@ -13,17 +13,17 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from backend.algorithms.f2_quiz_generation import build_definition_questions
-from backend.algorithms.f2_source_extraction import StudySpanKind
-from backend.core.f2_study_schemas import SourceRef, StudySourceSelection
-from backend.providers.f2_quiz_provider import (
+from backend.algorithms.feature2.f2_quiz_generation import build_definition_questions
+from backend.algorithms.feature2.f2_source_extraction import StudySpanKind
+from backend.core.feature2.f2_study_schemas import SourceRef, StudySourceSelection
+from backend.providers.feature2.f2_quiz_provider import (
     MAX_QUIZ_RESPONSE_BYTES, DeterministicQuizProvider, OllamaQuizProvider,
     QuizProviderError, build_quiz_prompt,
 )
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_quiz_service import F2QuizService, QuizGenerationError
-from backend.services.f2_source_service import (
+from backend.services.feature2.f2_quiz_service import F2QuizService, QuizGenerationError
+from backend.services.feature2.f2_source_service import (
     F2SourceService, PreparedStudySources, SourceAccessContext, SourceContentIssue, StudySourcePassage,
 )
 
@@ -310,14 +310,16 @@ def test_ollama_adapter_uses_json_mode_finite_timeouts_and_exact_source_mapping(
         requests.append(request)
         body = json.loads(request.content)
         assert request.url.path == "/api/generate"
-        assert body["model"] == "test-model"
-        assert body["format"] == "json" and body["stream"] is False
+        assert body["model"] == "qwen3.5:9b-q4_K_M"
+        assert "questions" in body["format"]["properties"] and body["stream"] is False
+        assert body["think"] is False
+        assert body["options"]["num_predict"] == 4096
         assert "<untrusted_document_data" in body["prompt"]
-        assert request.extensions["timeout"]["read"] == 60.0
+        assert request.extensions["timeout"]["read"] == 300.0
         assert request.extensions["timeout"]["connect"] == 2.0
         return httpx.Response(200, json={"done": True, "response": json.dumps({"questions": [draft()]})})
 
-    provider = OllamaQuizProvider(model="test-model", transport=httpx.MockTransport(handler))
+    provider = OllamaQuizProvider(model="qwen3.5:9b-q4_K_M", transport=httpx.MockTransport(handler))
     sources = prepared(requested_count=1)
     result = F2QuizService(provider).generate_quiz(sources)
     assert result.status == "COMPLETE"
@@ -393,7 +395,7 @@ def audit(event, args):
     if event == 'open' and args[2] & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC):
         raise AssertionError('file write')
 sys.addaudithook(audit)
-from backend.algorithms.f2_quiz_generation import build_definition_questions
+from backend.algorithms.feature2.f2_quiz_generation import build_definition_questions
 assert len(build_definition_questions((('S1', 'Cache: Fast memory.'), ('S2', 'RAM: Volatile storage.')), 10)) == 2
 for name in sys.modules:
     assert not name.startswith(('pydantic', 'fastapi', 'numpy', 'httpx', 'streamlit', 'backend.core', 'backend.services', 'backend.providers')), name

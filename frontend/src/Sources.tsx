@@ -567,11 +567,6 @@ export default function Sources({
       commit((current) => ({
         ...current,
         sources: current.sources.filter((source) => source.id !== deleting.id),
-        requirements: current.requirements?.map((requirement) =>
-          requirement.doc_id === deleting.id
-            ? { ...requirement, doc_id: null }
-            : requirement,
-        ),
       }));
       setDeleting(null);
     } catch (error) {

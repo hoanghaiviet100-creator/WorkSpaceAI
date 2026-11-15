@@ -12,6 +12,7 @@ from backend.providers.prompts import (
     build_email_prompt,
     build_qa_prompt,
     build_summary_prompt,
+    requests_detailed_answer,
 )
 
 
@@ -178,33 +179,41 @@ class LLMProvider:
             pass
         return settings.ollama_model
 
-    def call_ollama(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
+    def call_ollama(
+        self, prompt: str, enforce_json: bool = False, *, detailed_summary: bool = False, supplemental: bool = False,
+    ) -> Optional[str]:
         """
         Calls local Ollama instance with qwen2.5 optimization options:
-        - num_ctx: 4096 (bounded laptop memory usage)
+        - num_ctx: 4096 for chat, 16384 for detailed document summaries
         - temperature: 0.1 (strict factual grounding)
         - top_p: 0.85
         - repeat_penalty: 1.1
         - format: json (when requested)
-        - timeout: 60.0s
         """
         if not self.is_ollama_online():
             return None
         active_model = self.get_effective_ollama_model()
         detailed = "YÊU CẦU TRIỂN KHAI CHI TIẾT:" in prompt
+        num_predict = 2048 if detailed or detailed_summary else 1024
+        if detailed_summary and not supplemental:
+            num_predict = 4096
+        timeout = 28.0 if supplemental else 115.0 if detailed_summary else 120.0 if detailed else 60.0
         payload: Dict[str, Any] = {
             "model": active_model,
             "prompt": prompt,
             "stream": False,
             "options": {
-                "num_ctx": 4096,
-                "num_predict": 2048 if detailed else 1024,
+                "num_ctx": 16384 if detailed_summary else 4096,
+                "num_predict": num_predict,
                 "num_thread": 4,
                 "temperature": 0.1,
                 "top_p": 0.85,
                 "repeat_penalty": 1.1,
             },
         }
+        if active_model.startswith("qwen3.5:"):
+            # Keep Qwen3.5's final answer within the request's token and time limits.
+            payload["think"] = False
         if enforce_json:
             payload["format"] = "json"
             if detailed:
@@ -238,7 +247,7 @@ class LLMProvider:
             resp = httpx.post(
                 f"{settings.ollama_base_url}/api/generate",
                 json=payload,
-                timeout=httpx.Timeout(120.0 if detailed else 60.0, connect=2.0),
+                timeout=httpx.Timeout(timeout, connect=2.0),
             )
             if resp.status_code == 200:
                 return resp.json().get("response", "").strip()
@@ -349,7 +358,11 @@ class LLMProvider:
 
         # 2. Try Local Ollama if configured
         if settings.llm_provider == "ollama" and self.is_ollama_online():
-            raw_response = self.call_ollama(prompt, enforce_json=True)
+            raw_response = self.call_ollama(
+                prompt, enforce_json=True,
+                detailed_summary=document_summary and (requests_detailed_answer(query) or supplemental_summary),
+                supplemental=supplemental_summary,
+            )
 
         # 3. Try Gemini API if configured
         if not raw_response and settings.llm_provider == "gemini":
@@ -443,6 +456,9 @@ class LLMProvider:
                         evidence_quote=top.text[:120],
                     )
                 ]
+
+        if document_summary:
+            return []
 
         # 5. Smart Offline Synthesis Fallback
         smart_text = self.synthesize_smart_answer(query, chunks)

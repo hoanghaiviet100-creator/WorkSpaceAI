@@ -5,19 +5,19 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from backend.core.f2_practice_schemas import QuizSubmission
-from backend.core.f2_quiz_payload import LLMQuizPayload, LLMQuizQuestion, quiz_response_schema
-from backend.core.f2_study_schemas import QuizSet, StudySourceSelection
-from backend.providers.f2_gemini_provider import GeminiQuizProvider
-from backend.providers.f2_nvidia_nim_provider import NvidiaNimQuizProvider
-from backend.providers.f2_source_content_provider import SourceContentProvider, build_source_content_prompt
-from backend.providers.f2_study_provider import StudyEvidence
+from backend.core.feature2.f2_practice_schemas import QuizSubmission
+from backend.core.feature2.f2_quiz_payload import LLMQuizPayload, LLMQuizQuestion, quiz_response_schema
+from backend.core.feature2.f2_study_schemas import QuizSet, StudySourceSelection
+from backend.providers.feature2.f2_gemini_provider import GeminiQuizProvider
+from backend.providers.feature2.f2_nvidia_nim_provider import NvidiaNimQuizProvider
+from backend.providers.feature2.f2_source_content_provider import SourceContentProvider, build_source_content_prompt
+from backend.providers.feature2.f2_study_provider import StudyEvidence
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
-from backend.services.f2_quiz_service import F2QuizService
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext
-from backend.services.f2_study_draft_service import F2StudyDraftService, StudyDraftError
+from backend.services.feature2.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
+from backend.services.feature2.f2_quiz_service import F2QuizService
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext
+from backend.services.feature2.f2_study_draft_service import F2StudyDraftService, StudyDraftError
 
 
 TEXT = "The application sends only selected documents to the chosen provider.\n\nThe application stores documents only in the current session."
@@ -52,8 +52,8 @@ def test_contract_schema_matches_parser_and_contains_no_client_provenance_or_ver
     schema = quiz_response_schema()
     assert schema["required"] == ["questions"] and schema["additionalProperties"] is False
     properties = schema["properties"]["questions"]["items"]["properties"]
-    assert set(properties) == {"question", "options", "correct_option_id", "explanation", "source_ids"}
-    assert properties["options"]["minItems"] == 2 and properties["options"]["maxItems"] == 4
+    assert set(properties) == {"question", "options", "correct_option_id", "explanation", "source_ids", "kind", "extra_keys"}
+    assert properties["options"]["maxItems"] == 4
     assert "$ref" not in json.dumps(schema) and "$defs" not in schema
     schema["properties"].clear()
     assert "questions" in quiz_response_schema()["properties"]
@@ -144,7 +144,7 @@ def test_preview_hides_proposed_answers_explanation_and_sources_until_submission
     assert view.status == "UNVERIFIED_DRAFT" and view.result is None
     assert view.actual_count == 1 and view.requested_count == 10
     public = json.loads(view.model_dump_json())
-    assert set(public["questions"][0]) == {"question_id", "question", "options"}
+    assert set(public["questions"][0]) == {"question_id", "question", "options", "kind"}
     assert "proposed_option_id" not in view.model_dump_json() and "explanation" not in view.model_dump_json()
     assert "source_refs" not in view.model_dump_json() and "evidence_quote" not in view.model_dump_json()
 

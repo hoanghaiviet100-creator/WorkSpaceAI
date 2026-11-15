@@ -1,9 +1,7 @@
 /** Database contracts from database/schema.sql. UI-only preferences stay outside these rows. */
 export type EngineMode = "offline" | "ollama" | "gemini";
-export type TaskState = "TODO" | "IN_PROGRESS" | "REVIEW" | "DONE";
 export type RouteType =
   | "QA_FLOW"
-  | "RECONCILE_FLOW"
   | "EMAIL_FLOW"
   | "CLARIFICATION_FLOW"
   | "REJECTED_SAFEGUARD";
@@ -22,14 +20,6 @@ export type EmailState =
   | "APPROVED"
   | "SENT"
   | "FAILED_RETRYABLE";
-export type ReconciliationState =
-  | "FULLY_COVERED"
-  | "PARTIALLY_COVERED"
-  | "NOT_COVERED"
-  | "OVERDUE"
-  | "DEADLINE_CONFLICT";
-export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
-
 export interface DocumentRow {
   doc_id: string;
   doc_name: string;
@@ -69,58 +59,6 @@ export interface DocumentChunkRow {
   doc_version: string;
   embedding: number[] | null;
   created_at: string;
-}
-export interface RequirementRow {
-  req_id: string;
-  doc_id: string | null;
-  title: string;
-  description: string | null;
-  keywords: string[];
-  official_deadline: string | null;
-  mandatory_flag: boolean;
-  source_ref: string;
-  created_at: string;
-  updated_at: string;
-}
-export interface TaskRow {
-  task_id: string;
-  mapped_req_id: string | null;
-  title: string;
-  owner: string | null;
-  status: TaskState;
-  logged_deadline: string | null;
-  completion_pct: number;
-  source_ref: string;
-  created_at: string;
-  updated_at: string;
-}
-export interface ReconciliationRunRow {
-  run_id: string;
-  reference_date: string;
-  coverage_ratio: number;
-  total_requirements: number;
-  covered_requirements: number;
-  overdue_count: number;
-  conflict_count: number;
-  executed_at: string;
-}
-export interface DateConflict {
-  doc_a: string;
-  date_a: string;
-  doc_b: string;
-  date_b: string;
-}
-export interface ReconciledItemRow {
-  id: number;
-  run_id: string;
-  req_id: string;
-  state: ReconciliationState;
-  risk_level: RiskLevel;
-  avg_completion: number;
-  days_remaining: number | null;
-  owners: string[];
-  date_conflicts: DateConflict[];
-  citations: string[];
 }
 export interface ChatSessionRow {
   session_id: string;
@@ -186,22 +124,12 @@ export interface SchemaTables {
   documents: DocumentRow[];
   document_pages: DocumentPageRow[];
   document_chunks: DocumentChunkRow[];
-  requirements: RequirementRow[];
-  tasks: TaskRow[];
-  reconciliation_runs: ReconciliationRunRow[];
-  reconciled_items: ReconciledItemRow[];
   chat_sessions: ChatSessionRow[];
   chat_messages: ChatMessageRow[];
   citation_claims: CitationClaimRow[];
   email_drafts: EmailDraftRow[];
   email_audit_logs: EmailAuditRow[];
 }
-export const TASK_STATES: readonly TaskState[] = [
-  "TODO",
-  "IN_PROGRESS",
-  "REVIEW",
-  "DONE",
-];
 export const VERIFIED_STATUSES: readonly VerificationStatus[] = [
   "VERIFIED_EXACT",
   "VERIFIED_SUBSTRING",
@@ -212,14 +140,3 @@ export const isVerified = (status?: string): boolean =>
   VERIFIED_STATUSES.includes(status as VerificationStatus);
 export const featureRoute = (mode: "Ask" | "Email"): RouteType =>
   mode === "Email" ? "EMAIL_FLOW" : "QA_FLOW";
-export function normalizeTaskStatus(value: string): TaskState {
-  if (TASK_STATES.includes(value as TaskState)) return value as TaskState;
-  if (["To do", "To-do", "Not Started"].includes(value)) return "TODO";
-  if (["In Review", "Design Review"].includes(value)) return "REVIEW";
-  if (value === "Done") return "DONE";
-  return "IN_PROGRESS";
-}
-export function clampProgress(value: unknown, fallback = 0) {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : fallback;
-}

@@ -45,8 +45,6 @@ export default function EmailWorkspace({
   notify,
   selectedId,
   onSelect,
-  launch,
-  clearLaunch,
 }: {
   workspace: Workspace;
   update: (fn: (workspace: Workspace) => Workspace) => void;
@@ -54,20 +52,19 @@ export default function EmailWorkspace({
   notify: (text: string) => void;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
-  launch: StudioConfig | null;
-  clearLaunch: () => void;
 }) {
-  const [config, setConfig] = useState<StudioConfig | null>(null);
+  const [settings, setConfig] = useState<StudioConfig | null>(null);
   const [renaming, setRenaming] = useState<StudioResult | null>(null);
   const [newTitle, setNewTitle] = useState("");
   const [deleting, setDeleting] = useState<StudioResult | null>(null);
   const [emailEditor, setEmailEditor] = useState(false);
   const [tab, setTab] = useState<"results" | "notes">("results");
   const lock = useRef(new Set<string>());
-  const settings = config || launch;
-  const results = visibleStudioResults(workspace).sort(
-    (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0),
-  );
+  const results = visibleStudioResults(workspace)
+    .filter((result) => !result.delivery)
+    .sort(
+      (a, b) => (Date.parse(b.createdAt) || 0) - (Date.parse(a.createdAt) || 0),
+    );
   const selected = results.find((result) => result.id === selectedId);
   const thread = workspace.threads[0];
   const notes = thread
@@ -81,7 +78,6 @@ export default function EmailWorkspace({
   );
   const closeConfig = () => {
     setConfig(null);
-    clearLaunch();
   };
   const changeResult = (id: string, patch: Partial<StudioResult>) =>
     update((current) => ({
@@ -580,7 +576,6 @@ export default function EmailWorkspace({
                 maxLength={120}
                 placeholder="Progress update email"
                 onChange={(event) => {
-                  clearLaunch();
                   setConfig({ ...settings, title: event.target.value });
                 }}
               />
@@ -595,7 +590,6 @@ export default function EmailWorkspace({
                 value={settings.goal}
                 placeholder="What is the email about?"
                 onChange={(event) => {
-                  clearLaunch();
                   setConfig({ ...settings, goal: event.target.value });
                 }}
               />
@@ -608,7 +602,6 @@ export default function EmailWorkspace({
                 value={settings.recipient}
                 placeholder="Enter the recipient's email address"
                 onChange={(event) => {
-                  clearLaunch();
                   setConfig({ ...settings, recipient: event.target.value });
                 }}
               />
@@ -619,7 +612,6 @@ export default function EmailWorkspace({
                 <select
                   value={settings.tone}
                   onChange={(event) => {
-                    clearLaunch();
                     setConfig({ ...settings, tone: event.target.value });
                   }}
                 >
@@ -633,7 +625,6 @@ export default function EmailWorkspace({
                 <select
                   value={settings.length}
                   onChange={(event) => {
-                    clearLaunch();
                     setConfig({ ...settings, length: event.target.value });
                   }}
                 >

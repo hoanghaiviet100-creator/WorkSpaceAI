@@ -10,8 +10,9 @@ if str(PROJECT_ROOT) not in sys.path:
 from fastapi import FastAPI
 from backend.api.chat_routes import handle_user_request, router as chat_router
 from backend.api.document_routes import router as document_router
-from backend.api.email_routes import approve_email, router as email_router
+from backend.api.feature3.email_routes import approve_email, router as email_router
 from backend.api.runtime_routes import router as runtime_router
+from backend.api.feature2.study_routes import router as study_router
 from backend.repositories.workspace_repository import workspace_repository
 from backend.services.document_service import document_service
 from backend.services.workspace_context import configure_workspace_storage
@@ -37,6 +38,7 @@ app.include_router(chat_router)
 app.include_router(email_router)
 app.include_router(document_router)
 app.include_router(runtime_router)
+app.include_router(study_router)
 
 
 def seed_demo_workspace() -> None:

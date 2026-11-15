@@ -79,95 +79,7 @@ CREATE TABLE IF NOT EXISTS `document_chunks` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
--- 4. Table: requirements (Danh mục yêu cầu/tiêu chí từ đề bài hoặc bóc tách tự động)
--- ------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `requirements` (
-    `req_id` VARCHAR(50) NOT NULL,
-    `doc_id` VARCHAR(100) NULL COMMENT 'Tài liệu nguồn chứa requirement',
-    `title` VARCHAR(255) NOT NULL,
-    `description` TEXT NULL,
-    `keywords` JSON NOT NULL COMMENT 'Mảng từ khóa phục vụ mapping với task',
-    `official_deadline` DATE NULL COMMENT 'Hạn chót chính thức trong đề bài',
-    `mandatory_flag` BOOLEAN NOT NULL DEFAULT TRUE COMMENT 'Yêu cầu bắt buộc hay tự chọn',
-    `source_ref` VARCHAR(255) NOT NULL COMMENT 'Tọa độ nguồn ví dụ: Project_Brief.pdf:P6:L10-15',
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`req_id`),
-    KEY `idx_req_doc_id` (`doc_id`),
-    KEY `idx_req_deadline` (`official_deadline`),
-    KEY `idx_req_mandatory` (`mandatory_flag`),
-    CONSTRAINT `fk_req_doc_id` FOREIGN KEY (`doc_id`) 
-        REFERENCES `documents` (`doc_id`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------------------------
--- 5. Table: tasks (Bảng công việc Kanban của nhóm)
--- ------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `tasks` (
-    `task_id` VARCHAR(50) NOT NULL,
-    `mapped_req_id` VARCHAR(50) NULL COMMENT 'Mã yêu cầu được ánh xạ',
-    `title` VARCHAR(255) NOT NULL,
-    `owner` VARCHAR(100) NULL COMMENT 'Thành viên phụ trách',
-    `status` ENUM('TODO', 'IN_PROGRESS', 'REVIEW', 'DONE') NOT NULL DEFAULT 'IN_PROGRESS',
-    `logged_deadline` DATE NULL COMMENT 'Hạn chót nhóm tự ghi nhận',
-    `completion_pct` DECIMAL(5,2) NOT NULL DEFAULT 0.00 COMMENT 'Tiến độ 0.00 - 100.00',
-    `source_ref` VARCHAR(255) NOT NULL DEFAULT 'team_tasks.csv' COMMENT 'Nguồn import task',
-    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (`task_id`),
-    KEY `idx_tasks_req_id` (`mapped_req_id`),
-    KEY `idx_tasks_status` (`status`),
-    KEY `idx_tasks_owner` (`owner`),
-    KEY `idx_tasks_deadline` (`logged_deadline`),
-    CONSTRAINT `chk_completion_pct` CHECK (`completion_pct` >= 0.00 AND `completion_pct` <= 100.00),
-    CONSTRAINT `fk_tasks_mapped_req` FOREIGN KEY (`mapped_req_id`) 
-        REFERENCES `requirements` (`req_id`) ON DELETE SET NULL ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------------------------
--- 6. Table: reconciliation_runs (Nhật ký các lần chạy đối soát tiến độ & mâu thuẫn)
--- ------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `reconciliation_runs` (
-    `run_id` VARCHAR(64) NOT NULL,
-    `reference_date` DATE NOT NULL COMMENT 'Ngày mốc dùng để tính quá hạn',
-    `coverage_ratio` DECIMAL(5,4) NOT NULL DEFAULT 0.0000 COMMENT 'Tỷ lệ bao phủ 0.0000 - 1.0000',
-    `total_requirements` INT UNSIGNED NOT NULL DEFAULT 0,
-    `covered_requirements` INT UNSIGNED NOT NULL DEFAULT 0,
-    `overdue_count` INT UNSIGNED NOT NULL DEFAULT 0,
-    `conflict_count` INT UNSIGNED NOT NULL DEFAULT 0,
-    `executed_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (`run_id`),
-    KEY `idx_recon_exec_at` (`executed_at`),
-    KEY `idx_recon_ref_date` (`reference_date`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------------------------
--- 7. Table: reconciled_items (Chi tiết kết quả đánh giá cho từng Requirement)
--- ------------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS `reconciled_items` (
-    `id` BIGINT UNSIGNED AUTO_INCREMENT,
-    `run_id` VARCHAR(64) NOT NULL,
-    `req_id` VARCHAR(50) NOT NULL,
-    `state` ENUM('FULLY_COVERED', 'PARTIALLY_COVERED', 'NOT_COVERED', 'OVERDUE', 'DEADLINE_CONFLICT') NOT NULL,
-    `risk_level` ENUM('LOW', 'MEDIUM', 'HIGH', 'CRITICAL') NOT NULL DEFAULT 'LOW',
-    `avg_completion` DECIMAL(5,2) NOT NULL DEFAULT 0.00,
-    `days_remaining` INT NULL COMMENT 'Số ngày còn lại so với ngày mốc (có thể âm nếu quá hạn)',
-    `owners` JSON NOT NULL COMMENT 'Danh sách phụ trách dạng ["Bình", "An"]',
-    `date_conflicts` JSON NOT NULL COMMENT 'Danh sách mâu thuẫn ngày [doc_a, date_a, doc_b, date_b]',
-    `citations` JSON NOT NULL COMMENT 'Căn cứ trích dẫn chứng minh kết luận',
-    PRIMARY KEY (`id`),
-    KEY `idx_recon_items_run` (`run_id`),
-    KEY `idx_recon_items_req` (`req_id`),
-    KEY `idx_recon_items_risk` (`risk_level`),
-    KEY `idx_recon_items_state` (`state`),
-    CONSTRAINT `fk_recon_items_run` FOREIGN KEY (`run_id`) 
-        REFERENCES `reconciliation_runs` (`run_id`) ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT `fk_recon_items_req` FOREIGN KEY (`req_id`) 
-        REFERENCES `requirements` (`req_id`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------------------------
--- 8. Table: chat_sessions (Phiên hội thoại trao đổi của người dùng)
+-- 4. Table: chat_sessions (Phiên hội thoại trao đổi của người dùng)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `chat_sessions` (
     `session_id` VARCHAR(64) NOT NULL,
@@ -180,7 +92,7 @@ CREATE TABLE IF NOT EXISTS `chat_sessions` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
--- 9. Table: chat_messages (Từng lượt trao đổi câu hỏi & phản hồi trả lời)
+-- 5. Table: chat_messages (Từng lượt trao đổi câu hỏi & phản hồi trả lời)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `chat_messages` (
     `message_id` VARCHAR(64) NOT NULL,
@@ -200,7 +112,7 @@ CREATE TABLE IF NOT EXISTS `chat_messages` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
--- 10. Table: citation_claims (Nhật ký xác thực tính trung thực của từng câu phát biểu)
+-- 6. Table: citation_claims (Nhật ký xác thực tính trung thực của từng câu phát biểu)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `citation_claims` (
     `claim_id` VARCHAR(64) NOT NULL,
@@ -236,7 +148,7 @@ CREATE TABLE IF NOT EXISTS `citation_claims` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
--- 11. Table: email_drafts (Bản nháp email được sinh kèm mã bảo vệ HMAC Tamper-Proof)
+-- 7. Table: email_drafts (Bản nháp email được sinh kèm mã bảo vệ HMAC Tamper-Proof)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `email_drafts` (
     `draft_id` VARCHAR(64) NOT NULL,
@@ -268,7 +180,7 @@ CREATE TABLE IF NOT EXISTS `email_drafts` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------------------------
--- 12. Table: email_audit_logs (Audit Log bất biến ghi nhận mọi bước chuyển trạng thái FSM)
+-- 8. Table: email_audit_logs (Audit Log bất biến ghi nhận mọi bước chuyển trạng thái FSM)
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `email_audit_logs` (
     `log_id` BIGINT UNSIGNED AUTO_INCREMENT,

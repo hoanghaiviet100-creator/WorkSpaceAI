@@ -134,3 +134,48 @@ def test_offline_mode_blocks_generation_even_with_a_configured_key():
     status = runtime_service.runtime_status()
     assert status["engine_mode"] == "offline"
     assert status["offline_only"] is True
+
+def test_provider_selection_rejects_keys_and_arbitrary_models():
+    client = TestClient(app)
+    assert client.post('/api/runtime/provider', json={'provider':'gemini','api_key':TEST_KEY}).status_code == 422
+    assert client.post('/api/runtime/provider', json={'provider':'ollama','model':'other'}).status_code == 422
+    assert client.post('/api/runtime/provider', json={'provider':'other'}).status_code == 422
+
+
+def test_missing_dev_key_preserves_current_engine():
+    settings.llm_provider = 'ollama'
+    response = TestClient(app).post('/api/runtime/provider', json={'provider':'gemini'}, headers={'Origin':'http://localhost:8501'})
+    assert response.status_code == 409
+    assert settings.llm_provider == 'ollama'
+    assert not runtime_service.ENV_PATH.exists()
+
+
+def test_user_can_switch_using_server_key_without_submitting_credentials():
+    settings.gemini_api_key = TEST_KEY
+    settings.gemini_model = 'gemini-2.5-flash'
+    with patch.object(runtime_service.httpx, 'get', return_value=model_list('gemini-2.5-flash')) as get:
+        response = TestClient(app).post('/api/runtime/provider', json={'provider':'gemini'}, headers={'Origin':'http://localhost:8501'})
+    assert response.status_code == 200
+    assert settings.llm_provider == 'gemini'
+    assert get.call_args.kwargs['headers']['x-goog-api-key'] == TEST_KEY
+    assert TEST_KEY not in response.text
+    assert not runtime_service.ENV_PATH.exists()
+
+
+def test_ollama_switch_checks_exact_model_and_preserves_engine_on_failure():
+    settings.llm_provider = 'gemini'
+    with patch.object(runtime_service.httpx, 'get', return_value=httpx.Response(200,json={'models':[]})):
+        response = TestClient(app).post('/api/runtime/provider', json={'provider':'ollama'})
+    assert response.status_code == 409
+    assert settings.llm_provider == 'gemini'
+    with patch.object(runtime_service.httpx, 'get', return_value=httpx.Response(200,json={'models':[{'name':settings.ollama_model}]})):
+        response = TestClient(app).post('/api/runtime/provider', json={'provider':'ollama'})
+    assert response.status_code == 200
+    assert settings.llm_provider == 'ollama'
+    assert settings.offline_only is False
+
+
+def test_provider_switch_blocks_foreign_origin_and_dev_key_route_stays_local():
+    client = TestClient(app, client=('172.18.0.4',1234))
+    assert client.post('/api/runtime/provider', json={'provider':'ollama'},headers={'Origin':'https://untrusted.example'}).status_code == 403
+    assert client.post('/api/runtime/gemini',json={'api_key':TEST_KEY},headers={'Origin':'http://localhost:8501'}).status_code == 403

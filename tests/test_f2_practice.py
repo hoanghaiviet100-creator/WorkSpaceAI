@@ -11,18 +11,18 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
-from backend.algorithms.f2_quiz_grading import QuizGradingError, grade_single_choice
-from backend.core.f2_practice_schemas import (
+from backend.algorithms.feature2.f2_quiz_grading import QuizGradingError, grade_single_choice
+from backend.core.feature2.f2_practice_schemas import (
     FlashcardBackView, FlashcardFrontView, QuizAnswer, QuizPracticeResult, QuizPracticeView, QuizSubmission,
 )
-from backend.core.f2_study_schemas import StudySourceSelection
+from backend.core.feature2.f2_study_schemas import StudySourceSelection
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_flashcard_service import F2FlashcardService
-from backend.services.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
-from backend.services.f2_quiz_service import F2QuizService
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext
+from backend.services.feature2.f2_flashcard_service import F2FlashcardService
+from backend.services.feature2.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
+from backend.services.feature2.f2_quiz_service import F2QuizService
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext
 
 
 TEXT = "Cache: Fast temporary memory.\nRAM: Volatile working storage.\nCPU: A processor executing instructions."
@@ -72,7 +72,7 @@ def answers(quiz, *, correct=True):
 
 def assert_hidden(view):
     forbidden = {"correct_option_id", "explanation", "source_refs", "evidence_quote", "back",
-                 "resource_digest", "source_snapshot_digest", "quiz", "deck", "submission"}
+                 "resource_digest", "source_snapshot_digest", "quiz", "deck", "submission", "option_seed"}
     def inspect(value):
         if isinstance(value, dict):
             assert not forbidden & value.keys()
@@ -92,7 +92,14 @@ def test_quiz_start_and_get_expose_only_questions_options_and_progress():
     assert view == again
     assert view.status == "IN_PROGRESS" and view.actual_count == 3
     assert view.questions[0].question == quiz.questions[0].question
-    assert view.questions[0].options == quiz.questions[0].options
+    assert set(option.option_id for option in view.questions[0].options) == {
+        option.option_id for option in quiz.questions[0].options
+    }
+    positions = {
+        next(index for index, option in enumerate(public.options) if option.option_id == original.correct_option_id)
+        for public, original in zip(view.questions, quiz.questions, strict=True)
+    }
+    assert positions == {0, 1, 2}
     assert_hidden(view)
     assert len(repo.reads) == 4  # two fresh source reads per successful operation
 
@@ -124,6 +131,21 @@ def test_submit_reveals_keys_explanations_sources_and_correct_score(correct, sco
     assert service.get_quiz(view.session_id, context=CONTEXT).status == "SUBMITTED"
     assert_hidden(service.get_quiz(view.session_id, context=CONTEXT))
     assert service.get_quiz_result(view.session_id, context=CONTEXT) == result
+
+
+def test_check_answer_grades_each_option_without_submitting_quiz():
+    _, quiz, service = setup()
+    view = service.start_quiz(quiz, context=CONTEXT)
+    question = quiz.questions[0]
+    for option in question.options:
+        submission = QuizSubmission(answers=(
+            QuizAnswer(question_id=question.question_id, option_id=option.option_id),
+        ))
+        feedback = service.check_quiz_answer(view.session_id, submission, context=CONTEXT)
+        assert feedback.selected_option_id == option.option_id
+        assert feedback.correct_option_id == question.correct_option_id
+        assert feedback.is_correct == (option.option_id == question.correct_option_id)
+    assert service.get_quiz(view.session_id, context=CONTEXT).status == "IN_PROGRESS"
 
 
 def test_partial_and_unanswered_grading_uses_actual_count_instead_of_requested_ten():
@@ -527,14 +549,14 @@ def test_grading_algorithm_rejects_invalid_keys_ids_and_repeated_answers(questio
 
 
 def test_grading_algorithm_stdlib_isolation_and_purity():
-    tree = ast.parse(Path("backend/algorithms/f2_quiz_grading.py").read_text(encoding="utf-8"))
+    tree = ast.parse(Path("backend/algorithms/feature2/f2_quiz_grading.py").read_text(encoding="utf-8"))
     roots = {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
     roots |= {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     assert roots <= sys.stdlib_module_names
     assert not roots & {"os", "pathlib", "socket", "subprocess", "urllib", "http"}
     code = """
 import sys
-from backend.algorithms.f2_quiz_grading import grade_single_choice
+from backend.algorithms.feature2.f2_quiz_grading import grade_single_choice
 grade = grade_single_choice((("q", ("A", "B"), "A"),), (("q", "A"),))
 assert grade.score_percent == 100.0
 assert not any(n in sys.modules for n in ('pydantic', 'fastapi', 'httpx', 'numpy'))

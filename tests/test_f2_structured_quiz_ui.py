@@ -8,8 +8,8 @@ import httpx
 from streamlit.testing.v1 import AppTest
 
 from backend.core.config import settings
-from backend.providers.f2_gemini_provider import GeminiQuizProvider
-from backend.services.f2_source_service import SourceAccessContext
+from backend.providers.feature2.f2_gemini_provider import GeminiQuizProvider
+from backend.services.feature2.f2_source_service import SourceAccessContext
 
 
 APP = Path(__file__).resolve().parents[1] / "frontend/f2_manual_app.py"

@@ -32,11 +32,6 @@ export async function startFixture(options = {}) {
     notebookVersion: 1,
     sources: [],
     evidence: {},
-    tasks: [],
-    suggestions: [],
-    requirements: [],
-    reconciliationRuns: [],
-    reconciledItems: [],
     studioResults: [],
     legacyThreads: [],
     threads: [

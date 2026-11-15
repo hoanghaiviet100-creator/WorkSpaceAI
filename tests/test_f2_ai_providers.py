@@ -9,15 +9,15 @@ from streamlit.testing.v1 import AppTest
 from streamlit.proto.TextInput_pb2 import TextInput
 
 from backend.core.config import settings
-from backend.core.f2_study_schemas import SourceRef, StudySourceSelection
-from backend.providers.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
-from backend.providers.f2_study_provider import MAX_STUDY_RESPONSE_BYTES, StudyEvidence, StudyProviderError
+from backend.core.feature2.f2_study_schemas import SourceRef, StudySourceSelection
+from backend.providers.feature2.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
+from backend.providers.feature2.f2_study_provider import MAX_STUDY_RESPONSE_BYTES, StudyEvidence, StudyProviderError
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_flashcard_service import F2FlashcardService
-from backend.services.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
-from backend.services.f2_quiz_service import F2QuizService
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext
+from backend.services.feature2.f2_flashcard_service import F2FlashcardService
+from backend.services.feature2.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
+from backend.services.feature2.f2_quiz_service import F2QuizService
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext
 
 
 KEY = "unit-test-key-not-a-real-credential"

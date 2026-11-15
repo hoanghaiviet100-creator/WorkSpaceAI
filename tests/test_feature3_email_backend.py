@@ -23,7 +23,7 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
-from backend.algorithms.email_state_machine import (
+from backend.algorithms.feature3.email_state_machine import (
     ALL_FSM_STATES,
     APPROVED,
     DELIVERY_UNKNOWN,
@@ -40,8 +40,8 @@ from backend.algorithms.email_state_machine import (
 from backend.core.config import settings
 from backend.core.schemas import CreateDraftRequest, EmailDraftRecord, EmailFSMState
 from backend.main import app
-from backend.repositories.draft_repository import draft_repository
-from backend.services.email_service import email_service
+from backend.repositories.feature3.draft_repository import draft_repository
+from backend.services.feature3.email_service import email_service
 
 
 class TestFeature3EmailBackend(unittest.TestCase):

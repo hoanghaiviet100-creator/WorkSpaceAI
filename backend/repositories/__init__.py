@@ -1,4 +1,4 @@
-from backend.repositories.draft_repository import DraftRepository, draft_repository
+from backend.repositories.feature3.draft_repository import DraftRepository, draft_repository
 from backend.repositories.workspace_repository import (
     HybridWorkspaceIndex,
     WorkspaceRepository,

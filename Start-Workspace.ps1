@@ -21,7 +21,7 @@ function Wait-LocalService([string]$Url, [int]$Attempts = 30) {
 
 $pythonOptions = @(
     (Join-Path $workspaceRoot '.venv\Scripts\python.exe'),
-    (Join-Path (Split-Path $workspaceRoot -Parent) '.venv-schema-audit\Scripts\python.exe')
+    (Join-Path $workspaceRoot '.venv-schema-audit\Scripts\python.exe')
 )
 $workspacePython = $null
 foreach ($option in $pythonOptions) {
@@ -56,7 +56,6 @@ try {
     $env:LLM_PROVIDER = if ($Engine -eq 'offline') { 'mock' } else { $Engine }
     $env:WORKSPACE_OFFLINE_ONLY = if ($Engine -eq 'offline') { 'true' } else { 'false' }
     if ($Engine -eq 'offline') { $env:HF_HUB_OFFLINE = '1'; $env:TRANSFORMERS_OFFLINE = '1' }
-    $env:EMAIL_DISPATCH_MODE = 'local_mock'
     $env:PYTHONIOENCODING = 'utf-8'
     $env:PYTHONUNBUFFERED = '1'
     $env:VITE_API_ENABLED = 'true'

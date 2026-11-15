@@ -177,6 +177,7 @@ export function Modal({
   className = "",
   deferContent = false,
   exitDuration,
+  motion = "vertical",
 }: {
   title: string;
   titleIcon?: ReactNode;
@@ -186,6 +187,7 @@ export function Modal({
   className?: string;
   deferContent?: boolean;
   exitDuration?: number;
+  motion?: "vertical" | "right";
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -195,10 +197,10 @@ export function Modal({
   const revealContent = () => {
     if (deferContent) startTransition(() => setContentReady(true));
   };
-  useEntrance(ref, true, { onEntered: revealContent });
+  useEntrance(ref, true, { onEntered: revealContent, motion });
   const dismiss = useCallback(
-    () => exit(ref.current, () => closeRef.current()),
-    [exit],
+    () => exit(ref.current, () => closeRef.current(), motion),
+    [exit, motion],
   );
   useEffect(() => {
     const before = document.activeElement as HTMLElement;

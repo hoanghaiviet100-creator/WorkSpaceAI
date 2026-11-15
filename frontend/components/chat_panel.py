@@ -169,7 +169,7 @@ def visible_chat_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]
     retired = {
         index
         for index, message in enumerate(messages)
-        if is_route((message.get("data") or {}).get("route"), RouteType.RECONCILE_FLOW)
+        if (message.get("data") or {}).get("route") == "RECONCILE_FLOW"
     }
     hidden = retired | {
         index - 1
@@ -192,7 +192,6 @@ def run_assistant(query: str, recipient: str) -> Dict[str, Any]:
         user_req = UserRequest(
             query=query,
             recipient_email=recipient.strip() or None,
-            allow_reconciliation=False,
             selected_doc_ids=st.session_state.get("selected_doc_ids"),
             conversation_history=recent_history,
         )

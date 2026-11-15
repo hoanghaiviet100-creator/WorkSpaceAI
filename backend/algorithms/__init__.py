@@ -6,11 +6,6 @@ __all__ = [
     "CitationClaim",
     "CitationVerificationResult",
     "verify_citations",
-    # Cross-Document Reconciliation (Feature 2)
-    "reconcile_requirements_and_tasks",
-    "ReconciliationSummary",
-    "ReconciledItemReport",
-    "DateConflict",
     # Email FSM & Integrity Gate (Feature 3)
     "DRAFT",
     "APPROVED",
@@ -29,7 +24,7 @@ __all__ = [
 
 def __getattr__(name: str) -> Any:
     if name in ("CitationClaim", "CitationVerificationResult", "verify_citations"):
-        from backend.algorithms import citation_verifier
+        from backend.algorithms.feature1 import citation_verifier
         return getattr(citation_verifier, name)
     if name in (
         "DRAFT",
@@ -45,14 +40,6 @@ def __getattr__(name: str) -> Any:
         "approve_snapshot",
         "verify_and_lock_for_send",
     ):
-        from backend.algorithms import email_state_machine
+        from backend.algorithms.feature3 import email_state_machine
         return getattr(email_state_machine, name)
-    if name in (
-        "reconcile_requirements_and_tasks",
-        "ReconciliationSummary",
-        "ReconciledItemReport",
-        "DateConflict",
-    ):
-        from backend.algorithms import reconciliation
-        return getattr(reconciliation, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

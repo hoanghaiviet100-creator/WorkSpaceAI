@@ -1,5 +1,7 @@
 from uuid import uuid4
+from concurrent.futures import ThreadPoolExecutor
 from fastapi.testclient import TestClient
+from backend.core.config import settings
 from backend.main import app
 from backend.services.workspace_context import get_workspace_services
 
@@ -52,7 +54,7 @@ def test_question_cannot_retrieve_a_document_from_another_workspace():
     a, b = namespace(), namespace()
     upload(client, a, "private-a.txt", "Workspace Alpha verification code is ALPHA-6194.")
     upload(client, b, "public-b.txt", "Workspace Beta is about network sockets.")
-    response = client.post("/api/chat", headers=b, json={"query": "What is the verification code in private-a.txt?", "selected_doc_ids": ["private-a.txt"], "reference_date": "2026-11-06"})
+    response = client.post("/api/chat", headers=b, json={"query": "What is the verification code in private-a.txt?", "selected_doc_ids": ["private-a.txt"]})
     assert response.status_code == 200
     assert response.json()["status"].startswith("ABSTAINED")
     assert not response.json()["validated_claims"]
@@ -68,16 +70,45 @@ def test_delete_and_email_drafts_are_isolated():
     assert client.get("/api/documents", headers=a).json() == []
     assert len(client.get("/api/documents", headers=b).json()) == 1
     for scope, address in ((a, "alpha@example.org"), (b, "beta@example.org")):
-        response = client.post("/api/chat", headers=scope, json={"query": "Draft an email about these course notes", "recipient_email": address, "selected_doc_ids": [], "reference_date": "2026-11-06"})
+        response = client.post("/api/chat", headers=scope, json={"query": "Draft an email about these course notes", "recipient_email": address, "selected_doc_ids": []})
         assert response.status_code == 200
         assert response.json()["draft"]["recipient_email"] == address
     assert get_workspace_services(a["X-Workspace-ID"]).drafts.get("draft_001").recipient_email == "alpha@example.org"
     assert get_workspace_services(b["X-Workspace-ID"]).drafts.get("draft_001").recipient_email == "beta@example.org"
 
 
-def test_invalid_namespace_is_rejected_and_custom_report_has_no_demo_citations():
+def test_invalid_namespace_is_rejected_and_comparisons_respect_selected_sources():
     client = TestClient(app)
     for value in ("../private", "", "x" * 65):
         assert client.get("/api/documents", headers={"X-Workspace-ID": value}).status_code == 400
-    response = client.post("/api/chat", headers=namespace(), json={"query": "Reconcile requirements and tasks", "selected_doc_ids": [], "reference_date": "2026-11-06"})
-    assert response.json()["reconciliation_report"]["item_reports"] == []
+    response = client.post("/api/chat", headers=namespace(), json={"query": "Reconcile requirements and tasks", "selected_doc_ids": []})
+    assert response.status_code == 200
+    assert response.json()["route"] == "QA_FLOW"
+    assert response.json()["status"] == "ABSTAINED_NO_SOURCE_SELECTED"
+
+
+def test_studio_email_uses_context_and_dispatches_each_draft_at_most_once(monkeypatch):
+    monkeypatch.setattr(settings, "email_dispatch_mode", "local_mock")
+    monkeypatch.setattr(settings, "llm_provider", "mock")
+    client = TestClient(app)
+    scope = namespace()
+    payload = {
+        "query": "Draft an email about: Review field measurements\nTone: Formal. Length: Medium.",
+        "studio_tool": "email",
+        "studio_delivery": True,
+        "recipient_email": "reader@example.org",
+        "selected_doc_ids": [],
+        "conversation_history": [{"role": "assistant", "content": "The next field visit is Friday."}],
+    }
+    drafts = [client.post("/api/chat", headers=scope, json=payload).json()["draft"] for _ in range(2)]
+    assert drafts[0]["draft_id"] != drafts[1]["draft_id"]
+    assert "The next field visit is Friday." in drafts[0]["body"]
+    path = f"/api/email/studio/{drafts[0]['draft_id']}/send"
+    assert client.post(path, headers=namespace()).status_code == 404
+    assert client.post(path + "?expected_mode=gmail_real", headers=scope).status_code == 412
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        responses = list(pool.map(lambda _: client.post(path, headers=scope), range(2)))
+    assert sorted(response.status_code for response in responses) == [200, 409]
+    sent = next(response.json() for response in responses if response.status_code == 200)
+    assert (sent["status"], sent["dispatch_mode"]) == ("SENT", "local_mock")
+    assert get_workspace_services(scope["X-Workspace-ID"]).drafts.get(drafts[1]["draft_id"]).fsm_state == "DRAFT"

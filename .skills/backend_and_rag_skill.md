@@ -39,5 +39,5 @@
 - **Verification Flow**:
   1. Parse JSON safely (handling optional markdown code blocks ````json ... ````).
   2. Align candidate claims against retrieved chunk text using `align_claim_to_chunks()`.
-  3. Pass through `verify_citations()` in `backend/algorithms/citation_verifier.py`.
+  3. Pass through `verify_citations()` in `backend/algorithms/feature1/citation_verifier.py`.
   4. If all claims fail verification, abstain with `ABSTAINED_INSUFFICIENT_EVIDENCE`.

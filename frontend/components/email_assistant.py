@@ -5,9 +5,9 @@ Column 3 (Tab 3): Human-in-the-Loop Email Assistant with Cryptographic Verificat
 from __future__ import annotations
 
 import streamlit as st
-from backend.api.email_routes import approve_email
+from backend.api.feature3.email_routes import approve_email
 from backend.core.config import settings
-from backend.services.email_service import email_service
+from backend.services.feature3.email_service import email_service
 from frontend.state import (
     EMAIL_RE,
     STRETCH,

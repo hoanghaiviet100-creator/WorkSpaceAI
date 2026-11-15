@@ -1,9 +1,8 @@
-import type { Draft, Message, Suggestion, Thread, Workspace } from "./data";
+import type { Draft, Message, Thread, Workspace } from "./data";
 import { sampleStudy } from "./study-sample";
 
-export type StudioKind = "plan" | "email";
 export type StudioConfig = {
-  kind: StudioKind;
+  kind: "email";
   title: string;
   goal: string;
   recipient: string;
@@ -12,7 +11,7 @@ export type StudioConfig = {
 };
 export type StudioResult = {
   id: string;
-  kind: StudioKind;
+  kind: "email";
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -23,10 +22,11 @@ export type StudioResult = {
   content: string;
   config: StudioConfig;
   draft?: Draft;
-  suggestions?: Suggestion[];
   error?: string;
   origin: "imported" | "generated" | "local";
   attemptId?: string;
+  delivery?: "draft" | "sending" | "sent" | "failed" | "unknown";
+  dispatchMode?: "local_mock" | "gmail_real";
 };
 
 export const defaultStudioConfig = (): StudioConfig => ({
@@ -39,7 +39,7 @@ export const defaultStudioConfig = (): StudioConfig => ({
 });
 const timestamp = (value?: string) => Date.parse(value ?? "") || 0;
 
-export function isRetiredThread(thread: Thread) {
+export function isRetiredThread(thread: { mode: string; view: string }) {
   return thread.mode === "Tasks" || thread.view === "tasks";
 }
 
@@ -59,11 +59,17 @@ export function visibleChatMessages(workspace: Workspace, thread: Thread) {
   );
   const retiredResults = new Set(
     (workspace.studioResults ?? [])
-      .filter((result) => result.kind === "plan")
+      .filter((result: { kind: string }) => result.kind === "plan")
       .map((result) => result.id),
   );
   return thread.messages.filter(
-    (message) =>
+    (
+      message: Omit<Message, "mode" | "state" | "routeType"> & {
+        mode: string;
+        state: string;
+        routeType?: string;
+      },
+    ) =>
       message.mode !== "Tasks" &&
       message.state !== "suggestions" &&
       message.routeType !== "RECONCILE_FLOW" &&
@@ -124,7 +130,10 @@ export function notebookWorkspace(
   if (workspace.notebookVersion === 1) {
     if (
       !recoverPending ||
-      !workspace.studioResults?.some((result) => result.status === "generating")
+      !workspace.studioResults?.some(
+        (result) =>
+          result.status === "generating" || result.delivery === "sending",
+      )
     )
       return workspace;
     return {
@@ -136,7 +145,14 @@ export function notebookWorkspace(
               status: "error",
               error: "The page was reloaded before this finished. Try again.",
             }
-          : result,
+          : result.delivery === "sending"
+            ? {
+                ...result,
+                delivery: "unknown",
+                error:
+                  "Delivery could not be confirmed. Check Gmail before sending again.",
+              }
+            : result,
       ),
     };
   }
@@ -258,13 +274,14 @@ export function studioText(result: StudioResult) {
 export function captureChatOutputs(workspace: Workspace): Workspace {
   const thread = workspace.threads[0];
   if (!thread) return workspace;
+  const visibleMessages = new Set(visibleChatMessages(workspace, thread));
   const results = [...(workspace.studioResults ?? [])];
   let changed = false;
   const messages = thread.messages.map((message) => {
     if (
       message.studioResultId ||
       message.state !== "draft" ||
-      message.mode === "Tasks"
+      !visibleMessages.has(message)
     )
       return message;
     const id = `chat-${message.id}`;

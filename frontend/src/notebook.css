@@ -1097,16 +1097,12 @@
   font-size: 16px;
   font-weight: 650;
 }
-.notebook .summary-finding:has(+ .summary-continuation) {
-  padding-bottom: 0;
-  border-bottom: 0;
-}
-.notebook .summary-continuation {
-  padding-top: 4px;
-}
-.notebook .finding > p {
+.notebook .finding > p,
+.notebook .answer-findings {
   font-size: 16px;
   line-height: 1.6;
+}
+.notebook .finding > p {
   margin: 8px 0;
 }
 .notebook .finding > .badge {
@@ -1129,14 +1125,6 @@
   padding: 0;
   border: 0;
 }
-.notebook .answer-actions {
-  gap: 8px;
-}
-.notebook .answer-actions .button {
-  font-size: 11px;
-  min-height: 32px;
-  padding: 6px 8px;
-}
 .notebook .provenance-note {
   font-size: 11px;
   color: var(--nb-muted);
@@ -1156,6 +1144,7 @@
   display: none;
 }
 .notebook .question-bubble {
+  white-space: pre-wrap;
   background: var(--nb-soft);
   border: 1px solid var(--nb-line);
   border-radius: 16px 16px 4px 16px;
@@ -1754,7 +1743,6 @@
   .application-shell:has(.notebook) .toast {
     bottom: calc(80px + env(safe-area-inset-bottom));
   }
-  .notebook .answer-actions .button,
   .notebook .nb-source-search button {
     min-height: 44px;
   }

@@ -457,7 +457,6 @@ export default function Email({
                     .map((s) => s.id),
                   [],
                   draft.to,
-                  undefined,
                   workspaceId,
                 );
                 if (!result.draft)

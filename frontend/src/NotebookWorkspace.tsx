@@ -26,21 +26,20 @@ import {
   UserRound,
 } from "lucide-react";
 import { Citation, EvidenceContext, Modal } from "./components";
-import type { Handoff, View, Workspace } from "./data";
+import type { View, Workspace } from "./data";
 import Chat from "./Chat";
 import Sources from "./Sources";
 import Studio from "./Studio";
+import { useStudioEmail } from "./StudioEmail";
 import EmailWorkspace from "./EmailWorkspace";
 import { PanelDivider, usePanelWidths } from "./panel-resize";
 import DocumentInspector from "./DocumentInspector";
 import { noteTransitionDuration, useEntrance } from "./useEntrance";
 import {
   captureChatOutputs,
-  defaultStudioConfig,
   isRetiredThread,
   visibleChatMessages,
   visibleStudioResults,
-  type StudioConfig,
 } from "./notebook-model";
 import { workspaceColor } from "./home-model";
 import {
@@ -159,9 +158,12 @@ export default function NotebookWorkspace({
   );
   const [evidenceId, setEvidenceId] = useState<string | null>(null);
   const [resultId, setResultId] = useState<string | null>(null);
-  const [launch, setLaunch] = useState<StudioConfig | null>(null);
   const [emailOpen, setEmailOpen] = useState(false);
   const [studyId, setStudyId] = useState<string | null>(null);
+  const [quizQuestion, setQuizQuestion] = useState<{
+    prompt: string;
+    sourceIds: string[];
+  }>();
   const [studyLaunch, setStudyLaunch] = useState<StudyConfig | null>(null);
   const [studyCitation, setStudyCitation] = useState<StudyCitation | null>(
     null,
@@ -224,6 +226,12 @@ export default function NotebookWorkspace({
       update((current) => captureChatOutputs(fn(current))),
     [update],
   );
+  const {
+    openConfig: composeEmail,
+    review: reviewEmail,
+    windows: emailWindows,
+    queuedId,
+  } = useStudioEmail(workspace, commit, active);
   const clearRailExit = useCallback((rail: Rail) => {
     setRailExits((current) =>
       current[rail] ? { ...current, [rail]: undefined } : current,
@@ -257,17 +265,29 @@ export default function NotebookWorkspace({
     [mobile, desktop, clearRailExit],
   );
   const revealSources = useCallback(() => reveal("sources"), [reveal]);
+  const explainQuiz = useCallback(
+    (prompt: string, sourceIds: string[]) => {
+      setQuizQuestion((pending) => pending ?? { prompt, sourceIds });
+      reveal("chat");
+    },
+    [reveal],
+  );
+  const clearQuizQuestion = useCallback(() => setQuizQuestion(undefined), []);
   const openEmail = useCallback((id: string) => {
     setResultId(id);
     setEmailOpen(true);
   }, []);
-  const openEmailHandoff = useCallback((context: Handoff) => {
-    setLaunch({ ...defaultStudioConfig(), goal: context.question });
-    setEmailOpen(true);
-  }, []);
+  const openEmailResult = (id: string) => {
+    if (workspace.studioResults?.find((result) => result.id === id)?.delivery)
+      reviewEmail(id);
+    else openEmail(id);
+  };
   const openLatestEmail = useCallback(() => {
     setEmailOpen(true);
-    setResultId(visibleStudioResults(workspace)[0]?.id || null);
+    setResultId(
+      visibleStudioResults(workspace).find((result) => !result.delivery)?.id ||
+        null,
+    );
   }, [workspace]);
   const closePane = useCallback(
     (target: Rail) => {
@@ -306,8 +326,9 @@ export default function NotebookWorkspace({
     if (view === "email") {
       setEmailOpen(true);
       setResultId(
-        workspace.studioResults?.find((result) => result.kind === "email")
-          ?.id || null,
+        workspace.studioResults?.find(
+          (result) => result.kind === "email" && !result.delivery,
+        )?.id || null,
       );
     }
   }, [view]);
@@ -511,11 +532,12 @@ export default function NotebookWorkspace({
               onEvidence={setEvidenceId}
               active={active && !studyExpanded && (!mobile || pane === "chat")}
               onFiles={revealSources}
-              onStudioOpen={openEmail}
+              onStudioOpen={openEmailResult}
               onStudy={suggestStudy}
-              onEmailHandoff={openEmailHandoff}
               onEmailDraft={openLatestEmail}
               autoAsk={autoAsk}
+              quizQuestion={quizQuestion}
+              onQuizQuestionSent={clearQuizQuestion}
             />
           </section>
           {desktop && !rightClosed && !studyExpanded && (
@@ -563,8 +585,12 @@ export default function NotebookWorkspace({
                 launch={studyLaunch}
                 clearLaunch={clearStudyLaunch}
                 onSource={setStudyCitation}
+                onExplain={explainQuiz}
                 onClose={closeStudio}
                 motionRef={studioPanel}
+                onComposeEmail={composeEmail}
+                onOpenEmail={openEmailResult}
+                queuedEmailId={queuedId}
               />
             </div>
           </section>
@@ -620,6 +646,40 @@ export default function NotebookWorkspace({
               Choose light, dark, or system appearance. The connected server
               processes sources using the current AI settings.
             </p>
+            <fieldset className="studio-email-settings">
+              <legend>Email delivery</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="email-delivery"
+                  checked={workspace.emailSendMode === "automatic"}
+                  onChange={() =>
+                    commit((current) => ({
+                      ...current,
+                      emailSendMode: "automatic",
+                    }))
+                  }
+                />
+                Send automatically
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="email-delivery"
+                  checked={workspace.emailSendMode !== "automatic"}
+                  onChange={() =>
+                    commit((current) => ({
+                      ...current,
+                      emailSendMode: "confirm",
+                    }))
+                  }
+                />
+                Always ask for confirmation
+              </label>
+              <small>
+                Queued emails have a five-second Undo and Review window.
+              </small>
+            </fieldset>
             <details>
               <summary>
                 Archived conversations <ChevronDown size={14} />
@@ -645,13 +705,11 @@ export default function NotebookWorkspace({
           <SavedNotes notes={savedNotes} onEvidence={setEvidenceId} />
         </Modal>
       )}
+      {emailWindows}
       {emailOpen && (
         <Modal
           title="Draft email"
-          onClose={() => {
-            setEmailOpen(false);
-            setLaunch(null);
-          }}
+          onClose={() => setEmailOpen(false)}
           wide
           deferContent
         >
@@ -662,8 +720,6 @@ export default function NotebookWorkspace({
             onEvidence={setEvidenceId}
             selectedId={resultId}
             onSelect={setResultId}
-            launch={launch}
-            clearLaunch={() => setLaunch(null)}
           />
         </Modal>
       )}

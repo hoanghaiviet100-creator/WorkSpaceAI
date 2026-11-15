@@ -13,17 +13,17 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from backend.algorithms.f2_flashcard_generation import DEFAULT_MAX_BACK_WORDS, build_definition_cards
-from backend.algorithms.f2_source_extraction import StudySpanKind
-from backend.core.f2_study_schemas import SourceRef, StudySourceSelection
-from backend.providers.f2_flashcard_provider import (
+from backend.algorithms.feature2.f2_flashcard_generation import DEFAULT_MAX_BACK_WORDS, build_definition_cards
+from backend.algorithms.feature2.f2_source_extraction import StudySpanKind
+from backend.core.feature2.f2_study_schemas import SourceRef, StudySourceSelection
+from backend.providers.feature2.f2_flashcard_provider import (
     MAX_FLASHCARD_RESPONSE_BYTES, DeterministicFlashcardProvider, FlashcardProviderError,
     OllamaFlashcardProvider, build_flashcard_prompt,
 )
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_flashcard_service import F2FlashcardService, FlashcardGenerationError
-from backend.services.f2_source_service import (
+from backend.services.feature2.f2_flashcard_service import F2FlashcardService, FlashcardGenerationError
+from backend.services.feature2.f2_source_service import (
     F2SourceService, PreparedStudySources, SourceAccessContext, SourceContentIssue, StudySourcePassage,
 )
 
@@ -366,7 +366,7 @@ def test_ollama_flashcards_use_cards_prompt_and_bounded_json_transport():
         assert body["model"] == "test-model"
         assert body["stream"] is False and body["format"] == "json"
         assert "field cards" in body["prompt"] and "tối đa 20 từ" in body["prompt"]
-        assert request.extensions["timeout"]["read"] == 60.0
+        assert request.extensions["timeout"]["read"] == 300.0
         assert request.extensions["timeout"]["connect"] == 2.0
         return httpx.Response(200, json={"done": True, "response": json.dumps({"cards": [draft()]})})
 
@@ -436,7 +436,7 @@ def audit(event, args):
     if event == 'open' and args[2] & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC):
         raise AssertionError('file write')
 sys.addaudithook(audit)
-from backend.algorithms.f2_flashcard_generation import build_definition_cards
+from backend.algorithms.feature2.f2_flashcard_generation import build_definition_cards
 assert len(build_definition_cards((('S1', 'Cache: Fast memory.'),), 10)) == 1
 for name in sys.modules:
     assert not name.startswith(('pydantic', 'fastapi', 'numpy', 'httpx', 'streamlit', 'backend.core', 'backend.services', 'backend.providers')), name

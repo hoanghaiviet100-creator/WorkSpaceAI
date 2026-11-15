@@ -1,5 +1,4 @@
 import type { Workspace, Draft, Source } from "./data";
-import { clampProgress, normalizeTaskStatus } from "./schema";
 
 export const SCHEMA_VERSION = 3;
 export function normalizeDraft(draft: Draft): Draft {
@@ -10,15 +9,11 @@ export function normalizeDraft(draft: Draft): Draft {
     origin: draft.origin ?? "local",
   };
 }
-/** Migrate on read without discarding records, legacy labels, CC or drafts. */
+/** Migrate on read to normalize source metadata and drafts. */
 export function migrateWorkspace(w: Workspace): Workspace {
-  const requirements = w.requirements ?? [];
   return {
     ...w,
     schemaVersion: SCHEMA_VERSION,
-    requirements,
-    reconciliationRuns: w.reconciliationRuns ?? [],
-    reconciledItems: w.reconciledItems ?? [],
     sources: w.sources.map((s) => ({
       ...s,
       origin: s.origin ?? (s.status === "Preview only" ? "local" : "sample"),
@@ -29,40 +24,6 @@ export function migrateWorkspace(w: Workspace): Workspace {
         { ...e, origin: e.origin ?? "sample" },
       ]),
     ),
-    tasks: w.tasks.map((t) => {
-      const legacyStatus = t.status as string;
-      const status = normalizeTaskStatus(legacyStatus);
-      const localLabel = [
-        "Design Review",
-        "Rework",
-        "Not Started",
-        "Blocked",
-        "On Hold",
-      ].includes(legacyStatus)
-        ? legacyStatus
-        : t.localLabel;
-      return {
-        ...t,
-        status,
-        localLabel,
-        archived: t.archived ?? legacyStatus === "Archived",
-        completionPct: clampProgress(
-          t.completionPct,
-          status === "DONE" ? 100 : 0,
-        ),
-        sourceRef:
-          t.sourceRef ??
-          (t.source && w.evidence[t.source]
-            ? `${w.evidence[t.source].file} ${w.evidence[t.source].locator}`
-            : ""),
-        createdAt: t.createdAt ?? w.updated,
-        updatedAt: t.updatedAt ?? w.updated,
-      };
-    }),
-    suggestions: w.suggestions.map((s) => ({
-      ...s,
-      status: normalizeTaskStatus(s.status ?? "TODO"),
-    })),
     draft: normalizeDraft(w.draft),
     threads: w.threads.map((t) => ({
       ...t,
@@ -185,10 +146,6 @@ export function syncWorkspaceLibrary(
   return {
     ...w,
     sources,
-    requirements: w.requirements?.map((r) => ({
-      ...r,
-      doc_id: r.doc_id ? (ids.get(r.doc_id) ?? r.doc_id) : null,
-    })),
     evidence: Object.fromEntries(
       Object.entries(w.evidence).map(([key, e]) => [
         key,

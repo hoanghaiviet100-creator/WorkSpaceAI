@@ -5,10 +5,10 @@ import pytest
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
-from backend.core.f2_study_schemas import StudySourceSelection
+from backend.core.feature2.f2_study_schemas import StudySourceSelection
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext, SourcePreparationError
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext, SourcePreparationError
 
 
 TEXT = "\n".join(

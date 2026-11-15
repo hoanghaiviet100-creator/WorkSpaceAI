@@ -5,23 +5,23 @@ import json
 import httpx
 import pytest
 
-from backend.algorithms.f2_content_support import (
+from backend.algorithms.feature2.f2_content_support import (
     CARD_CLOZE_PREFIX, QUIZ_CLOZE_PREFIX,
     validate_flashcard_content_support, validate_quiz_content_support,
 )
-from backend.core.f2_study_schemas import FlashcardDeck, QuizSet, StudySourceSelection
-from backend.providers.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
-from backend.providers.f2_nvidia_nim_provider import NvidiaNimFlashcardProvider, NvidiaNimQuizProvider
-from backend.providers.f2_source_content_provider import SourceContentProvider, build_source_content_prompt
-from backend.providers.f2_study_provider import StudyEvidence, StudyProviderError
+from backend.core.feature2.f2_study_schemas import FlashcardDeck, QuizSet, StudySourceSelection
+from backend.providers.feature2.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
+from backend.providers.feature2.f2_nvidia_nim_provider import NvidiaNimFlashcardProvider, NvidiaNimQuizProvider
+from backend.providers.feature2.f2_source_content_provider import SourceContentProvider, build_source_content_prompt
+from backend.providers.feature2.f2_study_provider import StudyEvidence, StudyProviderError
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_flashcard_service import F2FlashcardService
-from backend.services.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
-from backend.services.f2_quiz_service import F2QuizService
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext, SourcePreparationError
-from backend.services.f2_study_draft_service import F2StudyDraftService, StudyDraftError
-from backend.services.f2_study_validation_service import F2StudyValidationService
+from backend.services.feature2.f2_flashcard_service import F2FlashcardService
+from backend.services.feature2.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
+from backend.services.feature2.f2_quiz_service import F2QuizService
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext, SourcePreparationError
+from backend.services.feature2.f2_study_draft_service import F2StudyDraftService, StudyDraftError
+from backend.services.feature2.f2_study_validation_service import F2StudyValidationService
 
 
 QUOTE = "Khi gửi yêu cầu, hệ thống chỉ sử dụng các tài liệu đã chọn."

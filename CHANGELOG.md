@@ -1,3 +1,25 @@
+## [Unreleased]
+- Defined Feature 2 as creating flashcards and quizzes from uploaded sources in React Studio. Documented source selection, citations, scores, review decks and browser storage. Runtime status identifies study generation as extractive.
+- Removed the backend reconciliation route, task planning action, task models and four planning tables from the SQL setup. Comparison requests now use document Q&A. CSV ingestion remains available as a document format.
+
+## [2.11.0] - 2026-11-11 — Remove F2 from the interface
+- Removed Requirements, reconciliation reports, Plan, Tasks and Kanban from React and Streamlit. Studio now offers Email, and the landing page presents Ask and Email.
+- Legacy Tasks links open the workspace chat. Archived F2 messages, notes and Studio results are filtered at display time. New chat requests exclude archived F2 turns from their context.
+- Both interfaces send `allow_reconciliation: false` in chat requests, so comparison questions can reach document Q&A. The request field defaults to `true` for existing API clients.
+- Validation passed for the production build, 33 frontend tests, and `verify.py` (49 Python syntax checks, R2 purity gate, 105 tests). Browser checks with test data covered the old Tasks URL, selected-source Q&A, opening an email draft for review, and mobile Studio.
+
+## [2.10.0] - 2026-11-10 — User model selection, server-managed credentials
+- Replaced the end-user key form with a Vietnamese Ollama/Gemini selector showing the developer-configured model, current provider, cloud data destination, loading/error/unconfigured states. No API-key input, key-saving control or credential submission helper remains in frontend code. Selector remains reachable on phone and is disabled during active chat generation.
+- GET /api/runtime adds provider_options [{id,model,configured}]. POST /api/runtime/provider accepts only provider=ollama|gemini; rejects credential/model injection, checks exact installed Ollama model or validates server Gemini credential/model. Failed selection keeps previous engine; admin credential routes retain their loopback restriction. Selector works behind Docker frontend proxy.
+- Selection affects the running backend instance; restart returns to developer .env defaults. User selection does not edit credentials/.env. Gemini stays scoped to document Q&A/summaries; tasks/Kanban remain Offline and email uses Ollama only when Ollama is selected.
+- Validation: Docker production build and verify.py passed (50 syntax checks, purity gate, 104 backend tests); 49 frontend tests passed. Live browser verified both options and absence of key fields; final UI/backend report Gemini with server-configured gemini-3.5-flash. No quality guarantee inferred from selection checks. Existing theme/type retained; broader restyling intentionally out of scope.
+
+## [2.9.8] - 2026-11-10 — Conversation and overview routing
+- Verified frontend-origin /api calls and backend-to-Ollama generation independently. Connection was working; observed browser history showed a greeting wrongly answered from documents and overview requests using narrow QA retrieval.
+- Added CONVERSATION response for exact greetings, before source checks; frontend displays this text without evidence/abstention. Context expansion skips prior greetings. Overview phrases route to selected-document summary. Bounded summary sampling reads full short documents or title/representative excerpts within 5500 chars to reduce context overflow.
+- Corrected AI settings notice/tooltip that labelled Ollama as Offline. No model/cloud/source-verification bypass changes.
+- Validation: production Docker images built; verify.py passed 50 syntax checks, purity gate and 99 tests; 49 frontend tests passed. Live frontend-origin greeting returned conversational response; selected calculus overview returned SUMMARY_GENERATED with three claims passing citation checks, no rejected claims. One successful overview is not a general quality guarantee; detailed answer quality remains limited by retrieval/model/citation matching.
+
 ## [2.9.7] - 2026-11-09 — Detailed source-grounded explanations
 - Detailed Q&A has a dedicated prompt: explanations belong in visible verified claim paragraphs, not only the discarded answer field. Do not anchor generation to the old assistant wording; resolved user topic remains. Structured Ollama detail output allows 3–5 explanatory paragraphs or an empty evidence response.
 - Elaborations can read an entire short retrieved document set when within 10 chunks/4500 characters, still respecting selected sources. Longer libraries retain bounded retrieval.

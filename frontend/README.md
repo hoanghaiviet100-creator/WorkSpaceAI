@@ -5,8 +5,8 @@ Giao diện WorkspaceAI sử dụng **React, TypeScript và Vite**, kết nối 
 Thư mục trên máy hiện tại:
 
 ```text
-H:\WorkSpaceAI\WorkSpaceAI\           ← thư mục gốc, chứa Start-Workspace.ps1
-H:\WorkSpaceAI\WorkSpaceAI\frontend\  ← giao diện React, chứa README này
+H:\WorkSpaceAI← thư mục gốc, chứa Start-Workspace.ps1
+H:\WorkSpaceAI\frontend\  ← giao diện React, chứa README này
 ```
 
 Nếu đặt dự án ở nơi khác, thay đường dẫn trong các lệnh bằng thư mục tương ứng.
@@ -16,7 +16,7 @@ Nếu đặt dự án ở nơi khác, thay đường dẫn trong các lệnh b�
 Máy hiện tại đã có thư viện cần thiết. Mở PowerShell và chạy:
 
 ```powershell
-Set-Location H:\WorkSpaceAI\WorkSpaceAI
+Set-Location H:\WorkSpaceAI
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-Workspace.ps1 -Engine offline
 ```
 
@@ -34,7 +34,7 @@ Lệnh trên bật cả backend và frontend, kiểm tra kết nối và chạy 
 
 Kết quả kiểm tra có `status: "ready"`, `engine_mode: "offline"` và `offline_only: true` nghĩa là backend sẵn sàng ở chế độ Offline.
 
-**Offline** thực hiện đọc, tìm kiếm, trích dẫn và tổng hợp theo quy tắc trên máy. Chế độ này không cần API key hoặc cài mô hình Ollama. Lệnh trên chặn gọi Gemini và đặt email ở chế độ mô phỏng `local_mock`.
+**Offline** thực hiện đọc, tìm kiếm, trích dẫn và tổng hợp theo quy tắc trên máy. Chế độ này không cần API key hoặc cài mô hình Ollama. Email mặc định dùng `local_mock`; Gmail SMTP chỉ bật khi cấu hình riêng.
 
 Lần sau cũng có thể nhấp đúp **`Start-Workspace.cmd`** ở thư mục gốc. File này dùng chế độ `auto`, theo lựa chọn engine đã lưu; cấu hình hiện tại là Offline. Dùng lệnh có `-Engine offline` phía trên để yêu cầu rõ chế độ Offline mỗi lần khởi động.
 
@@ -106,13 +106,27 @@ Mở **[http://127.0.0.1:5174/](http://127.0.0.1:5174/)**. Các biến `$env:...
 2. Cột **Nguồn**: bấm **Thêm nguồn → Tải file → Chọn file từ thiết bị** để mở hộp chọn file của máy. Có thể chọn nhiều file hoặc hủy rồi mở lại; cũng có thể kéo file vào cột này, nhập liên kết công khai hoặc dán văn bản. Menu **Tải lại file gốc** mở cùng hộp thoại nhưng chỉ chọn một file để khôi phục nguồn tương ứng.
 3. Tick nguồn cần dùng. Nguồn **Sẵn sàng** mới được chọn; bản mẫu hoặc bản xem trước cần tải file gốc lên backend.
 4. Cột **Hội thoại**: nhập câu hỏi. Mỗi workspace có một hội thoại chung; bấm chip số để mở đoạn nguồn. Có thể sao chép, lưu ghi chú và đánh giá câu trả lời.
+5. Mở **Studio** để tạo bộ học theo hướng dẫn Feature 2 bên dưới.
 
-5. Trong **Studio**, chọn **Flashcard** hoặc **Quiz** để mở cửa sổ tạo bộ học. Chọn số lượng, độ khó, ngôn ngữ hướng dẫn, nguồn và chủ đề, rồi bấm **Tạo ngay**. Có thể mở bộ mẫu 8 thẻ hoặc 5 câu ngay khi chưa tải nguồn.
-6. Mở một bộ từ lịch sử để học tiếp. Dùng nút mở rộng để học trên phần giữa và phải. Trên điện thoại, chọn tab Studio ở cuối màn hình.
+Soạn email mở từ hội thoại hoặc **Studio → Draft & send email**. Ghi chú đã lưu có nút riêng trên thanh Hội thoại.
 
-Studio lưu bộ học, thẻ đã nhớ và lượt Quiz theo workspace trong trình duyệt. Frontend dùng API trang tài liệu hiện có để trích câu hỏi và dẫn nguồn. Khi phù hợp, bộ học ưu tiên đoạn trích đã được kiểm chứng trong hội thoại. Chất lượng và số câu tạo được phụ thuộc vào văn bản trích xuất từ tài liệu.
+### Feature 3 — Soạn và gửi email từ Studio
 
-Soạn email vẫn mở từ hội thoại. Ghi chú đã lưu có nút riêng trên thanh Hội thoại.
+1. Mở một note, chọn các nguồn đã lập chỉ mục nếu cần, rồi vào **Studio → Draft & send email**. Nhập một địa chỉ người nhận, nội dung cần trao đổi, giọng điệu và độ dài.
+2. Mặc định **Always ask for confirmation** mở bản nháp để xem trước. Bật **Send automatically** trong cài đặt note để tự xếp hàng sau khi soạn. Cả hai cách đều chờ 5 giây. **Undo** giữ lại bản nháp. **Review** dừng đếm ngược và mở nội dung.
+3. Xem lại email ở **Email history** hoặc mở từ thông báo trong hội thoại. Nếu mất kết nối trong lúc gửi, kiểm tra Gmail trước khi gửi lại.
+
+Để thử an toàn, chạy `.\Start-Workspace.ps1 -Engine offline` từ thư mục gốc với `EMAIL_DISPATCH_MODE=local_mock` trong `.env`. Để gửi thật, đặt `EMAIL_DISPATCH_MODE=gmail_real`, `GMAIL_SENDER_EMAIL` và `GMAIL_APP_PASSWORD` trong `.env` phía backend rồi khởi động lại backend. `SMTP_HOST=smtp.gmail.com` và `SMTP_PORT=587` là giá trị mặc định. Gmail yêu cầu bật xác minh hai bước để tạo [mật khẩu ứng dụng](https://support.google.com/mail/answer/185833).
+
+### Feature 2 — Tạo quiz và flashcard từ nguồn đã tải lên
+
+1. Tải tài liệu vào cột **Nguồn** và chờ trạng thái **Sẵn sàng**.
+2. Trong **Studio**, chọn **Flashcard** hoặc **Quiz**. Các nguồn đã lập chỉ mục và đang được chọn sẽ được điền sẵn. Chọn nguồn, số lượng rồi bấm **Create**.
+3. Mở bộ học từ lịch sử. Lật flashcard để xem mặt sau, hoặc nộp quiz để xem điểm và đáp án. Bấm dẫn nguồn để mở đoạn trích đã dùng. Trên điện thoại, mở tab **Studio** ở cuối màn hình.
+
+React Studio gửi các đoạn từ nguồn đã chọn qua FastAPI đến Gemini hoặc Ollama đang được chọn trong Chat. Model viết câu hỏi, lựa chọn và giải thích từ ngữ cảnh tài liệu. Hộp thoại tạo bộ hiển thị model và nơi xử lý. Các mục có nguồn khớp nhưng chưa xác minh được đáp án tự động mang nhãn **AI draft**. Quiz nháp so sánh với đáp án đề xuất của AI, không ghi điểm đã xác minh.
+
+Lịch sử và điểm quiz được ghi trong trình duyệt. Phiên học của bộ mới được giữ trong bộ nhớ backend. Nếu đã khởi động lại backend, dùng **Regenerate** trong lịch sử để tạo phiên mới. Studio cũng có bộ mẫu 8 thẻ và 5 câu để dùng thử trước khi tải tài liệu.
 
 Backend hỗ trợ **PDF có văn bản, Word (.docx), PowerPoint (.pptx), TXT, MD và CSV**, tối đa 25 MB/file. PDF scan cần OCR trước. DOCX được đọc thành một trang văn bản; PPTX theo thứ tự slide. Nhập liên kết cần Internet và chỉ đọc nội dung công khai.
 
@@ -149,10 +163,13 @@ Mỗi workspace gửi header `X-Workspace-ID` để tách thư viện tài liệ
 | GET | `/api/runtime` | Trạng thái engine và chính sách Offline |
 | GET | `/api/documents` | Danh sách tài liệu của workspace |
 | POST | `/api/documents/upload` | Tải và xử lý file |
+| GET | `/api/documents/{doc_id}/pages/{page_number}` | Lấy văn bản, số dòng và phiên bản trang cho trình xem nguồn và Feature 2 |
 | POST | `/api/documents/select` | Lưu các tài liệu được chọn |
 | DELETE | `/api/documents/{doc_id}` | Xóa tài liệu |
 | POST | `/api/chat` | Hỏi đáp hoặc tạo bản nháp email |
 | POST | `/api/email/approve/{draft_id}` | Duyệt và thực hiện bước gửi theo chế độ backend |
+| GET | `/api/email/connection` | Kiểm tra chế độ gửi và cấu hình Gmail |
+| POST | `/api/email/studio/{draft_id}/send` | Duyệt và gửi bản nháp Studio theo workspace |
 
 API key chỉ thuộc cấu hình backend. Các biến `VITE_*` có thể xuất hiện trong mã gửi đến trình duyệt, vì vậy không đặt bí mật vào chúng. Hướng dẫn này giữ các luồng ở Offline; Gemini chỉ được bật khi người dùng chủ động cấu hình lại engine.
 
@@ -161,7 +178,7 @@ API key chỉ thuộc cấu hình backend. Các biến `VITE_*` có thể xuất
 | Phần | Hiện trạng |
 | --- | --- |
 | Tài liệu và hỏi đáp | Đã gọi backend; tìm kiếm theo các file được chọn và kiểm tra trích dẫn |
-| Email | Tạo bản nháp và duyệt qua backend; launcher dùng `local_mock`, kết quả gửi là mô phỏng. CC và đính kèm chưa được API gửi hiện tại hỗ trợ |
+| Email | Studio hỗ trợ một người nhận, xem lại và hoàn tác trước khi gửi. Chế độ `local_mock` mô phỏng gửi, `gmail_real` gửi qua SMTP. |
 | Đăng nhập | Các màn hình xem trước; chưa xác thực tài khoản Google, Microsoft, Apple hoặc email/password |
 | Cơ sở dữ liệu | `src/schema.ts` mô tả 12 bảng từ `database/schema.sql`; chưa có kết nối lưu trữ SQL đầy đủ |
 

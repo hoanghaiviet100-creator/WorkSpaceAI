@@ -9,22 +9,22 @@ from uuid import uuid4
 from pydantic import ValidationError
 import streamlit as st
 
-from backend.core.f2_practice_schemas import FlashcardBackView, QuizSubmission
-from backend.core.f2_study_schemas import StudySourceSelection
+from backend.core.feature2.f2_practice_schemas import FlashcardBackView, QuizSubmission
+from backend.core.feature2.f2_study_schemas import StudySourceSelection
 from backend.core.config import settings
-from backend.providers.f2_flashcard_provider import OllamaFlashcardProvider
-from backend.providers.f2_gemini_provider import DEFAULT_GEMINI_STUDY_MODEL, GeminiFlashcardProvider, GeminiQuizProvider
-from backend.providers.f2_nvidia_nim_provider import DEFAULT_NVIDIA_NIM_MODEL, NvidiaNimFlashcardProvider, NvidiaNimQuizProvider
-from backend.providers.f2_quiz_provider import OllamaQuizProvider
-from backend.providers.f2_source_content_provider import SourceContentProvider
-from backend.providers.f2_study_provider import StudyProviderError
+from backend.providers.feature2.f2_flashcard_provider import OllamaFlashcardProvider
+from backend.providers.feature2.f2_gemini_provider import DEFAULT_GEMINI_STUDY_MODEL, GeminiFlashcardProvider, GeminiQuizProvider
+from backend.providers.feature2.f2_nvidia_nim_provider import DEFAULT_NVIDIA_NIM_MODEL, NvidiaNimFlashcardProvider, NvidiaNimQuizProvider
+from backend.providers.feature2.f2_quiz_provider import OllamaQuizProvider
+from backend.providers.feature2.f2_source_content_provider import SourceContentProvider
+from backend.providers.feature2.f2_study_provider import StudyProviderError
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_flashcard_service import F2FlashcardService, FlashcardGenerationError
-from backend.services.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
-from backend.services.f2_quiz_service import F2QuizService, QuizGenerationError
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext, SourcePreparationError
-from backend.services.f2_study_draft_service import F2StudyDraftService, StudyDraftError
+from backend.services.feature2.f2_flashcard_service import F2FlashcardService, FlashcardGenerationError
+from backend.services.feature2.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
+from backend.services.feature2.f2_quiz_service import F2QuizService, QuizGenerationError
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext, SourcePreparationError
+from backend.services.feature2.f2_study_draft_service import F2StudyDraftService, StudyDraftError
 
 
 def _runtime():

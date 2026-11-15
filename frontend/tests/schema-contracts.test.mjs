@@ -65,8 +65,9 @@ test("study generation uses only configured sources and cites the extracted page
     ],
   }));
   const config = { ...study.studyConfig(workspace, "quiz"), count: 4 };
-  assert.deepEqual(config.sourceIds, ["chosen"]);
-  const items = await generator.createStudyItems(workspace, config);
+  assert.deepEqual(config.sourceIds, []);
+  const localConfig = { ...config, sourceIds: ["chosen"] };
+  const items = await generator.createStudyItems(workspace, localConfig);
   assert.equal(items.length, 4);
   for (const item of items) {
     assert.equal(item.citation.docId, "chosen");
@@ -82,7 +83,7 @@ test("study generation uses only configured sources and cites the extracted page
     }),
   );
   const english = await generator.createStudyItems(workspace, {
-    ...config,
+    ...localConfig,
     language: "en",
   });
   assert.match(english[0].question, /^Fill in the blank\./);
@@ -178,37 +179,18 @@ test("landing workspace history follows latest real activity and opens the lates
   assert.equal(empty.thread, undefined);
 });
 
-test("task states exactly match database ENUM", () => {
-  const sql = readFileSync("../database/schema.sql", "utf8");
-  const states = /`status`\s+ENUM\(([^)]+)\)/i
-    .exec(sql)[1]
-    .match(/'([^']+)'/g)
-    .map((x) => x.slice(1, -1));
-  assert.deepEqual(schema.TASK_STATES, states);
-});
-test("all twelve database tables have explicit frontend contracts", () => {
+test("all eight database tables have explicit frontend contracts", () => {
   const source = readFileSync("src/schema.ts", "utf8");
   const sql = readFileSync("../database/schema.sql", "utf8");
   const tables = [
     ...sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+`(\w+)`/gi),
   ].map((m) => m[1]);
-  assert.equal(tables.length, 12);
+  assert.equal(tables.length, 8);
   for (const table of tables) assert.match(source, new RegExp(`\\b${table}:`));
 });
-test("migration preserves records, local labels, CC and all conversations", () => {
+test("migration preserves sources, CC and all conversations", () => {
   const old = fixtures()[0];
-  old.tasks = ["Blocked", "Design Review", "Archived"].map((status, index) => ({
-    id: `legacy-task-${index}`,
-    title: "Archived workspace task",
-    status,
-  }));
   const migrated = model.migrateWorkspace(old);
-  assert.equal(migrated.tasks[0].status, "IN_PROGRESS");
-  assert.equal(migrated.tasks[0].localLabel, "Blocked");
-  assert.equal(migrated.tasks[1].status, "REVIEW");
-  assert.equal(migrated.tasks[1].localLabel, "Design Review");
-  assert.equal(migrated.tasks[2].archived, true);
-  assert.equal(migrated.tasks.length, old.tasks.length);
   assert.equal(migrated.sources.length, old.sources.length);
   assert.equal(migrated.threads.length, old.threads.length);
   assert.equal(migrated.draft.cc, old.draft.cc);
@@ -216,16 +198,10 @@ test("migration preserves records, local labels, CC and all conversations", () =
     migrated.threads[0].messages[0].request,
     old.threads[0].messages[0].request,
   );
-  assert.equal(old.tasks[0].status, "Blocked", "input is not mutated");
 });
-test("migration is idempotent and does not reseed deleted requirements", () => {
+test("workspace migration is idempotent", () => {
   const first = model.migrateWorkspace(fixtures()[0]);
-  first.requirements = [];
   assert.deepEqual(model.migrateWorkspace(first), first);
-});
-test("custom workspaces do not receive academic sample requirements", () => {
-  const w = data.emptyWorkspace("My project", "");
-  assert.deepEqual(model.migrateWorkspace(w).requirements, []);
 });
 test("action routing and session engines remain independent", () => {
   assert.equal(schema.featureRoute("Ask"), "QA_FLOW");
@@ -395,7 +371,6 @@ test("indexing a device preview removes the duplicate and preserves its referenc
     ],
   };
   w.sources = [source];
-  w.requirements = [{ req_id: "legacy-req", doc_id: source.id }];
   const evidenceKey = Object.keys(w.evidence)[0];
   w.evidence[evidenceKey].id = source.id;
   w.draft.attachmentIds = [source.id];
@@ -415,7 +390,6 @@ test("indexing a device preview removes the duplicate and preserves its referenc
   assert.equal(next.sources[0].selected, true);
   assert.equal(next.sources[0].fileSizeBytes, 105);
   assert.equal(next.sources[0].pages[0].doc_id, server.id);
-  assert.equal(next.requirements[0].doc_id, server.id);
   assert.equal(next.evidence[evidenceKey].id, server.id);
   assert.deepEqual(next.draft.attachmentIds, [server.id]);
   assert.deepEqual(next.threads[0].draft.attachmentIds, [server.id]);
@@ -534,7 +508,6 @@ test("all document and workflow requests retain the current workspace header", a
       ["notes.txt"],
       [],
       undefined,
-      "2026-11-06",
       wid,
     );
     await api.approveAndSend(serverDraft(), wid);
@@ -569,15 +542,11 @@ test("chat sends selected docs and history using the real endpoint contract", as
       "Question",
       ["d1"],
       [{ role: "user", content: "Before" }],
-      undefined,
-      "2026-11-06",
     );
     assert.equal(captured.url, "/api/chat");
     const body = JSON.parse(captured.init.body);
     assert.deepEqual(body.selected_doc_ids, ["d1"]);
-    assert.equal(body.reference_date, "2026-11-06");
     assert.equal(body.conversation_history[0].content, "Before");
-    assert.equal(body.allow_reconciliation, false);
     assert.equal(body.active_mode, undefined);
   } finally {
     globalThis.fetch = original;

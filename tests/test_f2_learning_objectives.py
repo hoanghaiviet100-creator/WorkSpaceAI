@@ -11,24 +11,24 @@ import json
 import httpx
 import pytest
 
-from backend.algorithms.f2_content_support import (
+from backend.algorithms.feature2.f2_content_support import (
     CARD_CLOZE_PREFIX, QUIZ_CLOZE_PREFIX, build_learning_objectives,
     validate_flashcard_content_support, validate_quiz_content_support,
 )
-from backend.algorithms.f2_source_extraction import extract_contextual_study_spans, extract_study_spans
-from backend.algorithms.f2_study_validation import validate_quiz_support
-from backend.core.f2_study_schemas import QuizSet, StudySourceSelection
-from backend.core.f2_practice_schemas import QuizSubmission
-from backend.providers.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
-from backend.providers.f2_source_content_provider import SourceContentProvider, build_source_content_prompt
-from backend.providers.f2_study_provider import StudyEvidence
+from backend.algorithms.feature2.f2_source_extraction import extract_contextual_study_spans, extract_study_spans
+from backend.algorithms.feature2.f2_study_validation import validate_quiz_support
+from backend.core.feature2.f2_study_schemas import QuizSet, StudySourceSelection
+from backend.core.feature2.f2_practice_schemas import QuizSubmission
+from backend.providers.feature2.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
+from backend.providers.feature2.f2_source_content_provider import SourceContentProvider, build_source_content_prompt
+from backend.providers.feature2.f2_study_provider import StudyEvidence
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_flashcard_service import F2FlashcardService
-from backend.services.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
-from backend.services.f2_quiz_service import F2QuizService
-from backend.services.f2_source_service import F2SourceService, SourceAccessContext
-from backend.services.f2_study_validation_service import F2StudyValidationService
+from backend.services.feature2.f2_flashcard_service import F2FlashcardService
+from backend.services.feature2.f2_practice_service import F2PracticeService, PracticeAccessContext, PracticeError
+from backend.services.feature2.f2_quiz_service import F2QuizService
+from backend.services.feature2.f2_source_service import F2SourceService, SourceAccessContext
+from backend.services.feature2.f2_study_validation_service import F2StudyValidationService
 from f2_learning_samples import FIXTURES, samples
 
 

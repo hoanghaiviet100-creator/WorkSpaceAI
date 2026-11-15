@@ -281,10 +281,6 @@
   .email-audit summary {
     min-height: 44px;
   }
-  .review-intro {
-    flex-wrap: wrap;
-    gap: 10px;
-  }
   .document-metadata {
     grid-template-columns: 95px minmax(0, 1fr);
   }

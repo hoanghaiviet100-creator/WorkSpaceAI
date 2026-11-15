@@ -26,7 +26,7 @@ export type RuntimeStatus = {
   model: string | null;
   saved_locally?: boolean;
   offline_only?: boolean;
-  gemini_scope?: "feature1";
+  gemini_scope?: "feature1" | "feature1_and_study";
   model_options?: string[];
   provider_options?: {
     id: "ollama" | "gemini";
@@ -53,7 +53,7 @@ async function request<T>(
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    path === "/chat" ? 150_000 : 60_000,
+    path === "/chat" ? 150_000 : path === "/study" ? 330_000 : 60_000,
   );
   try {
     const headers = new Headers(options.headers);
@@ -83,6 +83,23 @@ async function request<T>(
     clearTimeout(timeout);
   }
 }
+export function studyRequest<T>(
+  workspaceId: string,
+  path: string,
+  body?: unknown,
+) {
+  const key = "workspaceai-study-learner";
+  let learner = localStorage.getItem(key);
+  if (!learner) {
+    learner = crypto.randomUUID();
+    localStorage.setItem(key, learner);
+  }
+  const options = body === undefined ? {} : json(body);
+  const headers = new Headers(options.headers);
+  headers.set("X-Study-Learner", learner);
+  return request<T>(`/study${path}`, { ...options, headers }, workspaceId);
+}
+
 const json = (body: unknown): RequestInit => ({
   method: "POST",
   headers: { "Content-Type": "application/json" },
@@ -91,6 +108,7 @@ const json = (body: unknown): RequestInit => ({
 export type ServerClaim = Partial<CitationClaimRow> & {
   claim_text: string;
   section?: string | null;
+  subsection?: string | null;
   cited_doc_id: string;
   cited_page: number;
   evidence_quote: string;
@@ -164,9 +182,10 @@ export function chatRequest(
   selectedDocIds: string[],
   history: { role: string; content: string }[] = [],
   recipient?: string,
-  referenceDate = new Date().toLocaleDateString("en-CA"),
   workspaceId?: string,
   studioTool?: "email",
+  studioDelivery = false,
+  quizExplanation = false,
 ) {
   return request<ChatResponse>(
     "/chat",
@@ -174,14 +193,33 @@ export function chatRequest(
       query,
       selected_doc_ids: selectedDocIds,
       conversation_history: history,
-      reference_date: referenceDate,
-      allow_reconciliation: false,
       ...(recipient ? { recipient_email: recipientAddress(recipient) } : {}),
       ...(studioTool ? { studio_tool: studioTool } : {}),
+      ...(studioDelivery ? { studio_delivery: true } : {}),
+      ...(quizExplanation ? { quiz_explanation: true } : {}),
     }),
     workspaceId,
   );
 }
+export const getEmailConnection = () =>
+  request<{ mode: "local_mock" | "gmail_real"; configured: boolean }>(
+    "/email/connection",
+  );
+export const sendStudioEmail = (
+  draftId: string,
+  workspaceId: string,
+  mode: "local_mock" | "gmail_real",
+) =>
+  request<{
+    status: "SENT" | "FAILED" | "DELIVERY_UNKNOWN";
+    dispatch_mode?: "local_mock" | "gmail_real";
+    audit_timestamp?: string;
+    error?: string;
+  }>(
+    `/email/studio/${encodeURIComponent(draftId)}/send?expected_mode=${mode}`,
+    { method: "POST" },
+    workspaceId,
+  );
 export async function renameDocument(
   id: string,
   name: string,

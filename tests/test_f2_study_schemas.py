@@ -7,7 +7,7 @@ import sys
 import pytest
 from pydantic import ValidationError
 
-from backend.core.f2_study_schemas import (
+from backend.core.feature2.f2_study_schemas import (
     Flashcard,
     FlashcardDeck,
     QuizQuestion,
@@ -259,7 +259,7 @@ def audit(event, args):
 
 before = set(sys.modules)
 sys.addaudithook(audit)
-from backend.core.f2_study_schemas import QuizSet
+from backend.core.feature2.f2_study_schemas import QuizSet
 for name in set(sys.modules) - before:
     assert not name.startswith(('backend.services', 'backend.repositories', 'backend.providers', 'backend.api', 'fastapi', 'streamlit')), name
 print('STUDY_CONTRACT_IMPORT_ISOLATED')

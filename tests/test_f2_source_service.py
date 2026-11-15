@@ -8,12 +8,12 @@ from unittest.mock import patch
 
 import pytest
 
-from backend.algorithms.f2_source_extraction import StudySpanKind, extract_study_spans
-from backend.core.f2_study_schemas import StudySourceSelection
+from backend.algorithms.feature2.f2_source_extraction import StudySpanKind, extract_study_spans
+from backend.core.feature2.f2_study_schemas import StudySourceSelection
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
-from backend.services.f2_source_service import (
+from backend.services.feature2.f2_source_service import (
     F2SourceService, SourceAccessContext, SourcePreparationError,
 )
 
@@ -361,7 +361,7 @@ def audit(event, args):
     if event == 'open' and args[2] & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC):
         raise AssertionError('file write')
 sys.addaudithook(audit)
-from backend.algorithms.f2_source_extraction import extract_study_spans
+from backend.algorithms.feature2.f2_source_extraction import extract_study_spans
 assert len(extract_study_spans('Cache: Fast temporary memory.')) == 1
 for name in sys.modules:
     assert not name.startswith(('pydantic', 'fastapi', 'starlette', 'numpy', 'httpx', 'streamlit', 'rank_bm25', 'backend.core', 'backend.services', 'backend.providers', 'backend.repositories')), name

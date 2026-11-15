@@ -1,7 +1,7 @@
 import re
 from typing import List, Tuple
 from backend.core.guardrails import detect_prompt_injection, validate_email_address
-from backend.algorithms.email_state_machine import validate_rfc5322_email
+from backend.algorithms.feature3.email_state_machine import validate_rfc5322_email
 from backend.core.schemas import RouteType, UserRequest
 
 
@@ -13,6 +13,9 @@ def route_user_request(req: UserRequest) -> Tuple[RouteType, List[str]]:
     is_injected, reason = detect_prompt_injection(req.query)
     if is_injected:
         return RouteType.REJECTED_SAFEGUARD, [reason or "Prompt injection detected"]
+
+    if req.quiz_explanation:
+        return RouteType.QA_FLOW, []
 
     q = req.query.lower()
     missing_slots: List[str] = []
