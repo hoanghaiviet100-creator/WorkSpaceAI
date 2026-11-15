@@ -3,6 +3,7 @@
 
 ## 1. Architecture & Layer Map
 - `backend/core/`: Schemas (`schemas.py`), Configuration (`config.py`), Security Guardrails (`guardrails.py`).
+- `backend/database/`: MySQL 8.0+ Layer (`connection.py`, `models.py`, `init_db.py`, `database/schema.sql`).
 - `backend/algorithms/`: Pure Python Stdlib (R2 deterministic logic: Citation Verifier, Email FSM, Reconciliation).
 - `backend/repositories/`: Local in-memory indexing, BM25 + Dense RRF (`workspace_repository.py`), Email staging (`draft_repository.py`).
 - `backend/providers/`: Local embeddings (`embedding_provider.py`), LLM interfaces (`llm_provider.py`), Prompt templates (`prompts.py`).

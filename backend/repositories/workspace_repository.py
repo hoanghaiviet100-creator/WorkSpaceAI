@@ -41,11 +41,13 @@ class WorkspaceRepository:
         self._bm25: Optional[BM25Okapi] = None
         self._embed_fn: Optional[Callable[[List[str]], Any]] = embed_fn
         self.dense_available: bool = embed_fn is not None
+        self._chunk_embeddings: Dict[str, Any] = {}
 
     def set_embed_fn(self, embed_fn: Optional[Callable[[List[str]], Any]]) -> None:
         """Sets or updates the dense embedding function and updates dense availability status."""
         self._embed_fn = embed_fn
         self.dense_available = embed_fn is not None
+        self._chunk_embeddings = {}
 
     def add_document(self, metadata: DocumentMetadata, chunks: List[DocumentChunk]) -> int:
         """Stores a new document and its chunks in the repository, then rebuilds the index."""
@@ -148,6 +150,60 @@ class WorkspaceRepository:
                 "is_selected": d["is_selected"],
             })
         return result
+
+    def get_document(self, doc_id: str) -> Optional[DocumentMetadata]:
+        """Gets document metadata by doc_id or doc_name."""
+        target = doc_id.lower().strip()
+        for d_id, doc in self.documents.items():
+            if d_id.lower().strip() == target or doc.doc_name.lower().strip() == target:
+                return doc
+        return None
+
+    def rename_document(self, doc_id: str, new_name: str) -> Optional[DocumentMetadata]:
+        """Renames a document and updates its chunks."""
+        doc = self.get_document(doc_id)
+        if not doc:
+            return None
+        old_name = doc.doc_name
+        doc.doc_name = new_name.strip()
+        for c in self.chunks:
+            if c.doc_id == doc.doc_id or c.doc_name == old_name:
+                c.doc_name = new_name.strip()
+        self._rebuild_index()
+        return doc
+
+    def get_document_page(self, doc_id: str, page_number: int) -> Optional[Dict[str, Any]]:
+        """Retrieves page text and metadata for provenance & citation display."""
+        lookup = self.build_page_lookup()
+        key = (doc_id, page_number)
+        entry = lookup.get(key)
+        if not entry:
+            entry = lookup.get((doc_id.lower(), page_number))
+        if not entry:
+            doc = self.get_document(doc_id)
+            if doc:
+                entry = lookup.get((doc.doc_name, page_number)) or lookup.get((doc.doc_id, page_number))
+        if not entry:
+            return None
+
+        raw_text = entry.get("full_page_text", entry.get("text", ""))
+        line_count = entry.get("total_lines", len(raw_text.splitlines()))
+        doc_hash = entry.get("doc_hash", "")
+        doc_version = entry.get("doc_version", "v1")
+        page_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+
+        return {
+            "page_id": page_number,
+            "doc_id": doc_id,
+            "page_number": page_number,
+            "line_count": line_count,
+            "raw_text": raw_text,
+            "page_hash": page_hash,
+            "created_at": datetime.now().isoformat(),
+            "doc_hash": doc_hash,
+            "doc_version": doc_version,
+            "partial": False,
+        }
 
     def get_document_chunks(self, doc_id: str) -> List[DocumentChunk]:
         """Returns all chunks belonging to a document by doc_id or doc_name."""
@@ -432,9 +488,17 @@ class WorkspaceRepository:
             try:
                 q_vec = self._embed_fn([query])
                 if q_vec is not None and len(q_vec) > 0:
-                    c_texts = [c.text for c in eligible]
-                    c_vecs = self._embed_fn(c_texts)
-                    if c_vecs is not None and len(c_vecs) == len(eligible):
+                    if not hasattr(self, "_chunk_embeddings"):
+                        self._chunk_embeddings = {}
+                    uncached = [c for c in eligible if c.chunk_id not in self._chunk_embeddings]
+                    if uncached:
+                        new_vecs = self._embed_fn([c.text for c in uncached])
+                        if new_vecs is not None and len(new_vecs) == len(uncached):
+                            for c, v in zip(uncached, new_vecs):
+                                self._chunk_embeddings[c.chunk_id] = v
+
+                    c_vecs = [self._chunk_embeddings.get(c.chunk_id) for c in eligible]
+                    if all(v is not None for v in c_vecs):
                         import numpy as np
                         q_arr = np.asarray(q_vec[0], dtype=np.float32)
                         c_arr = np.asarray(c_vecs, dtype=np.float32)
@@ -622,13 +686,48 @@ class WorkspaceRepository:
         )
 
 
+def create_ollama_embed_fn() -> Optional[Callable[[List[str]], Optional[List[List[float]]]]]:
+    """
+    Creates a fast, batch-capable dense embedding function using local Ollama nomic-embed-text.
+    Gracefully returns None if Ollama or nomic-embed-text is offline.
+    """
+    import urllib.request
+    import json
+    from backend.core.config import settings
+
+    def embed_texts(texts: List[str]) -> Optional[List[List[float]]]:
+        if not texts:
+            return []
+        try:
+            payload = json.dumps({"model": settings.ollama_embed_model, "input": texts}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{settings.ollama_base_url}/api/embed",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=12.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return data.get("embeddings", [])
+        except Exception:
+            return None
+
+    try:
+        probe = embed_texts(["workspace ai test probe"])
+        if probe and len(probe) == 1 and len(probe[0]) > 0:
+            return embed_texts
+    except Exception:
+        pass
+    return None
+
+
 # Backward compatibility aliases
 HybridWorkspaceIndex = WorkspaceRepository
-workspace_repository = WorkspaceRepository()
+workspace_repository = WorkspaceRepository(embed_fn=create_ollama_embed_fn())
 
 __all__ = [
     "HybridWorkspaceIndex",
     "WorkspaceRepository",
     "workspace_repository",
     "tokenize_vietnamese_english",
+    "create_ollama_embed_fn",
 ]

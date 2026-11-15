@@ -100,6 +100,7 @@ class GeneratedClaim(BaseModel):
     cited_doc_id: str
     cited_page: int
     evidence_quote: str
+    section: Optional[str] = None
     verification_status: str = "UNVERIFIED"
     cited_start_line: Optional[int] = None
     cited_end_line: Optional[int] = None
@@ -198,7 +199,26 @@ class UserRequest(BaseModel):
     recipient_email: Optional[str] = None
     reference_date: date = Field(default_factory=lambda: date(2026, 10, 26))
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
+    allow_reconciliation: bool = True
+    studio_tool: Optional[str] = None
 
 
 class DocumentSelectRequest(BaseModel):
     selected_doc_ids: List[str]
+
+
+class DocumentRenameRequest(BaseModel):
+    name: str
+
+
+class DocumentImportUrlRequest(BaseModel):
+    url: str
+    title: str
+
+
+class ProviderSelectRequest(BaseModel):
+    provider: str
+
+
+class GeminiConfigRequest(BaseModel):
+    api_key: str

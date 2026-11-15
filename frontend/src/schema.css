@@ -1,0 +1,303 @@
+/* Functional additions reuse the established palette, typography and app shell. */
+.ai-settings-trigger,
+.ai-model-preview select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--text);
+  background: transparent;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ai-settings-trigger {
+  anchor-name: --workspace-ai-model;
+  max-inline-size: min(48vw, 200px);
+}
+.ai-settings-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ai-settings-trigger svg,
+.ai-model-preview svg {
+  color: var(--muted);
+}
+.ai-model-preview {
+  position: relative;
+}
+.ai-model-preview select {
+  appearance: none;
+  padding-inline-end: 25px;
+}
+.ai-model-preview svg {
+  position: absolute;
+  inset-inline-end: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.ai-model-picker {
+  position: fixed;
+  inset: auto 12px 70px auto;
+  margin: 0;
+  width: min(284px, calc(100vw - 24px));
+  max-height: min(360px, 65dvh);
+  overflow: auto;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--canvas);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgb(16 22 29 / 18%);
+  font-family: var(--font-chat);
+}
+@supports (bottom: anchor(top)) {
+  .ai-model-picker {
+    position-anchor: --workspace-ai-model;
+    bottom: calc(anchor(top) + 8px);
+    right: max(12px, anchor(right));
+    position-try-fallbacks: flip-block;
+  }
+}
+.ai-model-picker:popover-open {
+  animation: ai-model-picker-in 160ms cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes ai-model-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.ai-model-picker-heading,
+.ai-model-feedback {
+  margin: 0;
+  padding: 7px 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ai-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  text-align: left;
+  font-size: 12px;
+}
+.ai-model-option[aria-pressed="true"] {
+  background: var(--active);
+}
+.ai-model-option strong,
+.ai-model-option small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.ai-model-option small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ai-model-feedback button {
+  display: block;
+  min-height: 32px;
+  text-decoration: underline;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ai-model-picker:popover-open {
+    animation: none;
+  }
+}
+.ai-key-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-ink);
+}
+.offline-steps {
+  padding-left: 22px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.offline-steps li {
+  padding: 5px 0;
+}
+.schema-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px 12px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--muted);
+}
+.schema-meta > span:first-child {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.email-attachments summary,
+.email-audit summary {
+  cursor: pointer;
+  font-size: 12px;
+  padding-block: 8px;
+}
+.schema-check {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.schema-check input[type="checkbox"] {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+.document-metadata {
+  display: grid;
+  grid-template-columns: 125px minmax(0, 1fr);
+  gap: 8px 12px;
+  margin: 20px 0;
+  font-size: 12px;
+}
+.document-metadata dt {
+  color: var(--muted);
+}
+.document-metadata dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.document-page-select {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+}
+.document-page-select select {
+  border: 1px solid var(--control);
+  border-radius: 5px;
+  padding: 5px 12px;
+}
+.document-lines {
+  padding: 14px 14px 14px 46px;
+  background: var(--subtle);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 12px;
+  max-height: 380px;
+  overflow: auto;
+}
+.document-lines li {
+  padding: 2px 7px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.document-lines li:not([data-highlight="true"]) > span {
+  display: block;
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 1lh;
+}
+.document-lines li::marker {
+  color: var(--muted);
+}
+.document-lines li[data-highlight="true"] {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+}
+.source-sync {
+  margin: 0 0 10px;
+  justify-content: center;
+  font-size: 11px;
+  width: 100%;
+}
+.source-details > .text-button {
+  align-self: start;
+}
+.server-answer-text {
+  white-space: pre-wrap;
+}
+.finding > .badge {
+  margin: 4px 8px 4px 0;
+}
+.composer-tools {
+  flex-wrap: wrap;
+  row-gap: 5px;
+}
+.engine-field select {
+  max-width: 145px;
+}
+.email-titlebar {
+  flex-wrap: wrap;
+  padding-bottom: 6px;
+}
+.email-attachments {
+  padding: 10px 18px;
+  border-top: 1px solid var(--border);
+}
+.email-attachments summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.email-attachments summary::after {
+  content: "⌄";
+  margin-left: auto;
+}
+.email-attachments[open] summary::after {
+  content: "⌃";
+}
+.email-attachments label {
+  padding: 6px 0;
+}
+.email-audit {
+  margin-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.email-audit p,
+.fingerprint {
+  overflow-wrap: anywhere;
+}
+.audit-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+@media (max-width: 640px) {
+  .engine-field:has(.ai-settings-trigger) {
+    max-width: none;
+  }
+  .ai-settings-trigger {
+    min-height: 40px;
+  }
+  .email-attachments summary,
+  .email-audit summary {
+    min-height: 44px;
+  }
+  .review-intro {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .document-metadata {
+    grid-template-columns: 95px minmax(0, 1fr);
+  }
+  .engine-field {
+    max-width: 95px;
+  }
+  .engine-field select {
+    max-width: 95px;
+  }
+  .composer-bottom {
+    align-items: end;
+  }
+  .composer-caption > span {
+    max-width: 230px;
+  }
+}

@@ -1,11 +1,15 @@
 import {
   createContext,
+  startTransition,
+  useCallback,
   useContext,
   useEffect,
+  useId,
   useRef,
   useState,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   X,
   FileText,
@@ -18,6 +22,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { type Evidence, type EvidenceKey } from "./data";
+import { useEntrance, useExit } from "./useEntrance";
 export const EvidenceContext = createContext<Record<string, Evidence>>({});
 export function Badge({
   children,
@@ -31,13 +36,76 @@ export function Badge({
 export function Citation({
   id,
   onOpen,
+  number,
 }: {
   id: EvidenceKey;
   onOpen: (id: EvidenceKey) => void;
+  number?: number;
 }) {
+  const tooltipId = useId();
+  const [preview, setPreview] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    transform: string;
+  } | null>(null);
   const entry = useContext(EvidenceContext)[id];
   if (!entry)
     return <span className="unavailable-source">Source unavailable</span>;
+  if (number !== undefined)
+    return (
+      <span className="nb-citation-wrap">
+        <button
+          className="citation nb-citation"
+          aria-label={`Source ${number}: ${entry.file}, ${entry.locator}`}
+          aria-describedby={preview ? tooltipId : undefined}
+          onMouseEnter={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const width = Math.min(320, innerWidth - 32);
+            setPreview({
+              width,
+              left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
+              top: rect.top > 260 ? rect.top - 8 : rect.bottom + 8,
+              transform: rect.top > 260 ? "translateY(-100%)" : "none",
+            });
+          }}
+          onMouseLeave={() => setPreview(null)}
+          onFocus={(event) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const width = Math.min(320, innerWidth - 32);
+            setPreview({
+              width,
+              left: Math.max(8, Math.min(rect.left, innerWidth - width - 8)),
+              top: rect.top > 260 ? rect.top - 8 : rect.bottom + 8,
+              transform: rect.top > 260 ? "translateY(-100%)" : "none",
+            });
+          }}
+          onBlur={() => setPreview(null)}
+          onClick={() => {
+            setPreview(null);
+            onOpen(id);
+          }}
+        >
+          [{number}]
+        </button>
+        {preview &&
+          createPortal(
+            <span
+              id={tooltipId}
+              className="nb-citation-preview is-visible"
+              role="tooltip"
+              style={preview}
+            >
+              <strong>
+                <FileText size={13} /> {entry.file} · {entry.locator}
+              </strong>
+              <span>“{entry.quote}”</span>
+              <span className="citation-tip">🔍 Nhấp chuột để mở chi tiết trang</span>
+            </span>,
+            document.body,
+          )}
+      </span>
+    );
   return (
     <button className="citation" onClick={() => onOpen(id)}>
       <FileText size={13} />
@@ -79,36 +147,83 @@ export function Status({ status }: { status: string }) {
     </span>
   );
 }
+const DialogDismiss = createContext<() => void>(() => {});
+
+export function DialogCancel({
+  children = "Cancel",
+  disabled,
+}: {
+  children?: ReactNode;
+  disabled?: boolean;
+}) {
+  const dismiss = useContext(DialogDismiss);
+  return (
+    <button
+      type="button"
+      className="button"
+      disabled={disabled}
+      onClick={dismiss}
+    >
+      {children}
+    </button>
+  );
+}
+
 export function Modal({
   title,
+  titleIcon,
   children,
   onClose,
   wide = false,
   className = "",
+  deferContent = false,
+  exitDuration,
 }: {
   title: string;
+  titleIcon?: ReactNode;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
   className?: string;
+  deferContent?: boolean;
+  exitDuration?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const exit = useExit(exitDuration);
+  const [contentReady, setContentReady] = useState(!deferContent);
+  const revealContent = () => {
+    if (deferContent) startTransition(() => setContentReady(true));
+  };
+  useEntrance(ref, true, { onEntered: revealContent });
+  const dismiss = useCallback(
+    () => exit(ref.current, () => closeRef.current()),
+    [exit],
+  );
   useEffect(() => {
     const before = document.activeElement as HTMLElement;
     const el = ref.current;
-    el?.focus();
+    el?.focus({ preventScroll: true });
     const old = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const handle = (e: KeyboardEvent) => {
+      // Only the topmost dialog owns Escape and the focus loop.
+      const dialogs = document.querySelectorAll(
+        '[role="dialog"][aria-modal="true"]',
+      );
+      if (
+        dialogs[dialogs.length - 1] !== el ||
+        document.querySelector(".nb-action-menu")
+      )
+        return;
       if (
         e.key === "Escape" &&
         !e.defaultPrevented &&
         !document.querySelector("select:open")
       ) {
         e.preventDefault();
-        closeRef.current();
+        dismiss();
       }
       if (e.key === "Tab" && el) {
         const nodes = Array.from(
@@ -139,14 +254,14 @@ export function Modal({
     return () => {
       document.removeEventListener("keydown", handle);
       document.body.style.overflow = old;
-      before?.focus();
+      before?.focus({ preventScroll: true });
     };
-  }, []);
+  }, [dismiss]);
   return (
     <div
       className="overlay"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+        if (e.target === e.currentTarget) dismiss();
       }}
     >
       <div
@@ -154,25 +269,70 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-busy={contentReady ? undefined : true}
         tabIndex={-1}
         ref={ref}
       >
         <header>
-          <h2>{title}</h2>
+          <h2>
+            {titleIcon}
+            {title}
+          </h2>
           <button
             className="icon-button"
             aria-label="Close dialog"
-            onClick={onClose}
+            onClick={dismiss}
           >
             <X size={19} />
           </button>
         </header>
-        {children}
+        <DialogDismiss.Provider value={dismiss}>
+          {contentReady ? (
+            children
+          ) : (
+            <p role="status" className="window-loading modal-placeholder">
+              Loading…
+            </p>
+          )}
+        </DialogDismiss.Provider>
       </div>
     </div>
   );
 }
 export type Theme = "light" | "dark" | "system";
+/** Apply the saved theme even when the Display popover is closed or a deep link opens. */
+export function ThemeRuntime() {
+  useEffect(() => {
+    const media = matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => {
+      let saved = "system";
+      try {
+        saved = localStorage.getItem("wai-theme") || "system";
+      } catch {
+        /* Use the device preference. */
+      }
+      const resolved =
+        saved === "light" || saved === "dark"
+          ? saved
+          : media.matches
+            ? "dark"
+            : "light";
+      document.documentElement.dataset.theme = resolved;
+      document.documentElement.style.colorScheme = resolved;
+    };
+    const changed = (event: StorageEvent) => {
+      if (event.key === "wai-theme") apply();
+    };
+    apply();
+    media.addEventListener("change", apply);
+    addEventListener("storage", changed);
+    return () => {
+      media.removeEventListener("change", apply);
+      removeEventListener("storage", changed);
+    };
+  }, []);
+  return null;
+}
 export function ThemeControl() {
   const [theme, setTheme] = useState<Theme>(() => {
     try {

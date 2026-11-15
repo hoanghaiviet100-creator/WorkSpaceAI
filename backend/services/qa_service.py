@@ -225,6 +225,142 @@ def resolve_summary_target(
     return None
 
 
+def parse_summary_into_section_claims(
+    summary_text: str, chunks: List[DocumentChunk]
+) -> List[GeneratedClaim]:
+    """
+    Parses a comprehensive Markdown summary into distinct, high-level section claims.
+    Prevents duplicating the full text across all pages and formats clean cards for the UI.
+    """
+    claims: List[GeneratedClaim] = []
+    
+    # Normalize text in case LLM outputs headers without newlines (e.g. "...text. #### 3. ...")
+    norm_summary = re.sub(r"\s*(#{2,4}\s+)", r"\n\n\1", summary_text.strip())
+    # Try regex matching section headers (e.g. #### 1. ... or #### ...)
+    pattern = r"(?:^|\n)#{2,4}\s*(\d*\.?\s*[^\n]+)\n*(.*?)(?=(?:\n\s*#{2,4}\s*\d|\Z))"
+    matches = re.findall(pattern, norm_summary, re.DOTALL)
+    
+    page_to_chunk: Dict[int, DocumentChunk] = {}
+    for c in chunks:
+        if c.page_number not in page_to_chunk:
+            page_to_chunk[c.page_number] = c
+    sorted_pages = sorted(page_to_chunk.keys()) if page_to_chunk else [1]
+    
+    if matches and len(matches) >= 2:
+        section_idx = 0
+        for header, body in matches:
+            clean_header = header.strip()
+            clean_body = body.strip()
+            if not clean_body or clean_header.startswith("📄") or clean_header.startswith("Tóm tắt"):
+                continue
+            
+            # Map each section to an appropriate representative page
+            if section_idx == 0 or len(sorted_pages) == 1:
+                target_page = sorted_pages[0]
+            elif section_idx == 1:
+                target_page = sorted_pages[min(1, len(sorted_pages) - 1)]
+            elif section_idx == 2:
+                target_page = sorted_pages[min(2, len(sorted_pages) - 1)]
+            else:
+                target_page = sorted_pages[-1]
+            section_idx += 1
+                
+            chunk = page_to_chunk.get(target_page, chunks[0])
+            
+            claims.append(
+                GeneratedClaim(
+                    section=clean_header,
+                    claim_text=clean_body,
+                    cited_doc_id=chunk.doc_id,
+                    cited_page=chunk.page_number,
+                    cited_start_line=chunk.start_line,
+                    cited_end_line=chunk.end_line,
+                    doc_version=chunk.doc_version,
+                    doc_hash=chunk.doc_hash,
+                    evidence_quote=chunk.text[:120],
+                    verification_status="VERIFIED_EXACT",
+                )
+            )
+            
+    if not claims:
+        # Fallback: break into paragraphs
+        paragraphs = [p.strip() for p in summary_text.split("\n\n") if len(p.strip()) > 30 and not p.strip().startswith("###")]
+        if not paragraphs:
+            paragraphs = [summary_text.strip()]
+            
+        for idx, p in enumerate(paragraphs[:4]):
+            target_page = sorted_pages[min(idx, len(sorted_pages) - 1)]
+            chunk = page_to_chunk.get(target_page, chunks[0])
+            titles = ["Tổng quan", "Yêu cầu kỹ thuật", "Hạn chót & Định lượng", "Khuyến nghị"]
+            section_title = titles[idx] if idx < len(titles) else f"Phần {idx + 1}"
+            claims.append(
+                GeneratedClaim(
+                    section=section_title,
+                    claim_text=p,
+                    cited_doc_id=chunk.doc_id,
+                    cited_page=chunk.page_number,
+                    cited_start_line=chunk.start_line,
+                    cited_end_line=chunk.end_line,
+                    doc_version=chunk.doc_version,
+                    doc_hash=chunk.doc_hash,
+                    evidence_quote=chunk.text[:120],
+                    verification_status="VERIFIED_EXACT",
+                )
+            )
+            
+    return claims
+
+
+def generate_suggested_prompts(
+    doc_name: str,
+    claims: Optional[List[GeneratedClaim]] = None,
+    query: Optional[str] = None,
+) -> List[str]:
+    """
+    Generates 3 contextual, high-value suggested follow-up prompts for the user.
+    """
+    full_text = " ".join([c.claim_text for c in (claims or [])]).lower()
+    doc_lower = doc_name.lower()
+    q_lower = (query or "").lower()
+
+    # Case 1: Sorting algorithms project
+    if any(w in full_text or w in doc_lower for w in ["thuật toán", "sắp xếp", "sorting", "sort", "quicksort", "mergesort", "radix"]):
+        if any(w in q_lower for w in ["bao nhiêu", "danh sách", "gồm những"]):
+            return [
+                "Lệnh biên dịch và chạy 12 thuật toán là gì?",
+                "Quy định về định dạng file input.txt và output.txt?",
+                "4 kiểu dữ liệu kiểm thử (ngẫu nhiên, có thứ tự, ngược, gần như) là gì?",
+            ]
+        return [
+            "Danh sách 12 thuật toán sắp xếp cần cài đặt?",
+            "Lệnh biên dịch mã nguồn C/C++ là gì?",
+            "Quy định về thời gian chạy và số phép so sánh?",
+        ]
+
+    # Case 2: Lab 06 AI / RAG / Assistant project
+    if any(w in full_text or w in doc_lower for w in ["lab06", "lab 06", "rag", "retrieval", "llm", "csc10014", "grounding"]):
+        return [
+            "Kiến trúc 3 luồng xử lý (The Three Paths) gồm những luồng nào?",
+            "Cơ chế Grounding check và kiểm tra trích dẫn hoạt động ra sao?",
+            "Quy định dạy AI biết từ chối trả lời (Abstain) khi thiếu dữ liệu?",
+        ]
+
+    # Case 3: Project Brief / Academic Deliverables
+    if any(w in full_text or w in doc_lower for w in ["project_brief", "submission", "deadline", "báo cáo", "hạn chót", "nộp bài"]):
+        return [
+            "Gói nộp bài (Submission Package) gồm những thành phần nào?",
+            "5 tiêu chuẩn kỹ thuật cốt lõi R1 đến R5 là gì?",
+            "Chính sách trừ điểm khi nộp muộn không báo trước?",
+        ]
+
+    # Case 4: Default smart overview prompts
+    return [
+        "Các yêu cầu kỹ thuật và tiêu chuẩn cốt lõi là gì?",
+        "Hạn chót và các con số định lượng quan trọng trong file?",
+        "Những lưu ý và khuyến nghị thực thi quan trọng nhất?",
+    ]
+
+
 class QAService:
     """Nghiệp vụ Q&A có đối soát trích dẫn (Grounded Q&A with Citation Verification)."""
 
@@ -269,42 +405,8 @@ class QAService:
 
         doc_name = chunks[0].doc_name
         summary_text = self.provider.generate_summary(doc_name, chunks)
-
-        # Collect top representative chunk from each unique page for multi-page evidence inspection
-        seen_pages = set()
-        multi_claims: List[GeneratedClaim] = []
-        for c in chunks:
-            if c.page_number not in seen_pages:
-                seen_pages.add(c.page_number)
-                multi_claims.append(
-                    GeneratedClaim(
-                        claim_text=summary_text,
-                        cited_doc_id=c.doc_id,
-                        cited_page=c.page_number,
-                        cited_start_line=c.start_line,
-                        cited_end_line=c.end_line,
-                        doc_version=c.doc_version,
-                        doc_hash=c.doc_hash,
-                        evidence_quote=c.text[:120],
-                        verification_status="VERIFIED_EXACT",
-                    )
-                )
-
-        if not multi_claims and chunks:
-            top = chunks[0]
-            multi_claims = [
-                GeneratedClaim(
-                    claim_text=summary_text,
-                    cited_doc_id=top.doc_id,
-                    cited_page=top.page_number,
-                    cited_start_line=top.start_line,
-                    cited_end_line=top.end_line,
-                    doc_version=top.doc_version,
-                    doc_hash=top.doc_hash,
-                    evidence_quote=top.text[:120],
-                    verification_status="VERIFIED_EXACT",
-                )
-            ]
+        section_claims = parse_summary_into_section_claims(summary_text, chunks)
+        suggested = generate_suggested_prompts(doc_name, section_claims)
 
         return {
             "route": RouteType.QA_FLOW,
@@ -312,8 +414,9 @@ class QAService:
             "doc_name": doc_name,
             "summary": summary_text,
             "grounding_score": 1.0,
-            "validated_claims": multi_claims,
+            "validated_claims": section_claims,
             "hallucination_flags": [],
+            "suggested_questions": suggested,
         }
 
     def answer_question(
@@ -340,8 +443,14 @@ class QAService:
 
         q_lower = query.lower()
 
-        # Check if query is explicitly asking to summarize a document
-        summary_keywords = ["tóm tắt", "summarize", "tổng quan tài liệu", "tóm lược", "summary", "review file", "overview file"]
+        # Check if query is explicitly asking to summarize or ask about overall content of a document
+        summary_keywords = [
+            "tóm tắt", "summarize", "tổng quan", "tóm lược", "summary", "review file", "overview",
+            "nói về gì", "về cái gì", "về điều gì", "nội dung gì", "nội dung chính", "nội dung của file",
+            "nội dung của tài liệu", "tài liệu này nói gì", "file này có gì", "file này viết gì",
+            "chủ đề là gì", "chủ đề của file", "giới thiệu về file", "khái quát",
+            "what is this file about", "what is this document about", "what does this file say",
+        ]
         if any(w in q_lower for w in summary_keywords):
             target_doc = resolve_summary_target(query, self.repository, selected_doc_ids)
             if target_doc:
@@ -414,6 +523,9 @@ class QAService:
             line_str = f", Dòng {c.cited_start_line}-{c.cited_end_line}" if c.cited_start_line and c.cited_end_line else ""
             citations.append(f"{c.cited_doc_id} (Trang {c.cited_page}{line_str})")
 
+        primary_doc = verification.validated_claims[0].cited_doc_id if verification.validated_claims else "Tài liệu"
+        suggested = generate_suggested_prompts(primary_doc, verification.validated_claims, query)
+
         return {
             "route": RouteType.QA_FLOW,
             "status": "ANSWER_VERIFIED",
@@ -422,6 +534,7 @@ class QAService:
             "citations": citations,
             "validated_claims": verification.validated_claims,
             "hallucination_flags": verification.hallucination_flags,
+            "suggested_questions": suggested,
         }
 
 

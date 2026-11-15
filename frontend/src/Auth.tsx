@@ -20,7 +20,8 @@ const copy = {
   },
   reset: {
     title: "Reset your password",
-    description: "Enter the email address you use for your workspace.",
+    description:
+      "Enter the email address you use for your WorkspaceAI account.",
     submit: "Send reset link",
   },
 };
@@ -74,8 +75,7 @@ export default function Auth({
     setFeedback({
       scope: "provider",
       title: `${provider} sign-in is not available in this preview.`,
-      detail:
-        "You can explore the demo workspace while accounts are being connected.",
+      detail: "You can explore the demo while accounts are being connected.",
     });
   };
   const submit = (event: FormEvent<HTMLFormElement>) => {
@@ -113,8 +113,8 @@ export default function Auth({
             : "Email sign-in is not available in this preview.",
       detail:
         mode === "reset"
-          ? "No reset email was sent. You can return to sign-in or explore the demo workspace."
-          : "Your password was not sent or saved. Use the demo workspace to explore the app.",
+          ? "No reset email was sent. You can return to sign-in or explore the demo."
+          : "Your password was not sent or saved. Use the demo to explore the app.",
     });
   };
   const message = feedback && (
@@ -134,12 +134,12 @@ export default function Auth({
         <div className="auth-header-actions">
           <button
             className="auth-back"
-            aria-label="Back to workspace"
-            title="Back to workspace"
+            aria-label="Back to notes"
+            title="Back to notes"
             onClick={onClose}
           >
             <ArrowLeft size={15} />
-            <span>Back to workspace</span>
+            <span>Back to notes</span>
           </button>
           <ThemeControl />
         </div>
@@ -388,7 +388,7 @@ export default function Auth({
             </div>
           </section>
           <button className="auth-demo-link" onClick={onPreview}>
-            Explore demo workspace
+            Explore demo
             <ArrowRight size={15} />
           </button>
         </div>

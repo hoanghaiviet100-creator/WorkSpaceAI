@@ -20,22 +20,23 @@ def route_user_request(req: UserRequest) -> Tuple[RouteType, List[str]]:
         "email", "mail", "send", "draft", "gửi mail", "nháp",
         "thư", "soạn mail", "viết mail", "soạn thư", "viết thư", "gửi thư",
     ]
-    if any(k in q for k in email_keywords):
+    if getattr(req, "studio_tool", None) == "email" or any(k in q for k in email_keywords):
         if not validate_email_address(req.recipient_email):
             extracted_emails = re.findall(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", req.query)
             if extracted_emails:
                 req.recipient_email = extracted_emails[0]
             else:
                 missing_slots.append("recipient_email")
-        if len(q.split()) < 4:
+        if len(q.split()) < 4 and not getattr(req, "studio_tool", None):
             missing_slots.append("email_topic_or_scope")
 
         if missing_slots:
             return RouteType.CLARIFICATION_FLOW, missing_slots
         return RouteType.EMAIL_FLOW, []
 
-
-    if any(k in q for k in ["compare", "reconcile", "overdue", "conflict", "extract", "table", "đối chiếu", "trễ hạn"]):
+    if getattr(req, "allow_reconciliation", True) and any(
+        k in q for k in ["compare", "reconcile", "overdue", "conflict", "extract", "table", "đối chiếu", "trễ hạn"]
+    ):
         return RouteType.RECONCILE_FLOW, []
 
     return RouteType.QA_FLOW, []

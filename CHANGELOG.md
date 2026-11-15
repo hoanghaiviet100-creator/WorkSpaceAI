@@ -11,6 +11,15 @@ Tất cả các thay đổi và nâng cấp quan trọng của dự án **Worksp
 
 ---
 
+## [2.7.2] - 2026-11-16 — Modern React 19 Notebook Workspace, Hybrid RAG & Interactive Citations
+### Added
+- **Hybrid RAG Retrieval Engine**: Tích hợp mô hình embedding 768-chiều `nomic-embed-text` kết hợp thuật toán BM25 và Reciprocal Rank Fusion (RRF $k=60$) thuần Python.
+- **Interactive Citation Tooltip & Verification**: Hover xem trước trích dẫn nguồn với số hiệu trích dẫn động, định vị dòng/trang và chỉ số tin cậy.
+- **Gợi ý Câu hỏi Nhanh (Suggested Prompts)**: Sinh tự động 3 chip gợi ý sau mỗi câu trả lời hoặc tóm tắt.
+- **Bộ Schemas Cơ sở Dữ liệu MySQL & SQLite**: Thiết kế 12 bảng chuẩn hóa 3NF quản lý trọn vẹn toàn bộ vòng đời dữ liệu dự án.
+
+---
+
 ## [2.7.1] - 2026-11-11 — Feature 3: Backend Refinements, Security Hardening & Pure-Python Test Suite ("Tinh Tế")
 ### Added
 - **Bộ Kiểm Thử Độc Lập Feature 3 Backend (`tests/test_feature3_email_backend.py`)**:
