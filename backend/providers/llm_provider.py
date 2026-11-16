@@ -305,19 +305,47 @@ class LLMProvider:
 
                 claims: List[GeneratedClaim] = []
                 if isinstance(raw_cits, list) and raw_cits:
+                    valid_doc_ids = {c.doc_id for c in chunks}
+                    valid_doc_names = {c.doc_name for c in chunks}
+                    valid_pages = {c.page_number for c in chunks}
+
                     for cit in raw_cits:
                         if isinstance(cit, dict):
-                            doc_id = str(cit.get("doc_id", top.doc_id)).strip()
-                            page = int(cit.get("page", top.page_number))
-                            start_l = int(cit.get("line_start", top.start_line or 1))
-                            end_l = int(cit.get("line_end", top.end_line or start_l))
+                            raw_doc = str(cit.get("doc_id", top.doc_id)).strip()
+                            # Resolve doc_id against candidate chunks
+                            if raw_doc in valid_doc_ids or raw_doc in valid_doc_names:
+                                resolved_doc = raw_doc
+                            else:
+                                matched_c = next(
+                                    (c for c in chunks if raw_doc.lower() in c.doc_id.lower() or raw_doc.lower() in c.doc_name.lower()),
+                                    None
+                                )
+                                resolved_doc = matched_c.doc_id if matched_c else top.doc_id
+
+                            try:
+                                page = int(cit.get("page", top.page_number))
+                            except (ValueError, TypeError):
+                                page = top.page_number
+                            if page not in valid_pages:
+                                page = top.page_number
+
+                            try:
+                                start_l = int(cit.get("line_start", top.start_line or 1))
+                            except (ValueError, TypeError):
+                                start_l = top.start_line or 1
+
+                            try:
+                                end_l = int(cit.get("line_end", top.end_line or start_l))
+                            except (ValueError, TypeError):
+                                end_l = top.end_line or start_l
+
                             excerpt = str(cit.get("excerpt", "")).strip()
 
                             claim_stmt = str(cit.get("claim") or cit.get("statement") or answer_text).strip()
                             claims.append(
                                 GeneratedClaim(
                                     claim_text=claim_stmt,
-                                    cited_doc_id=doc_id,
+                                    cited_doc_id=resolved_doc,
                                     cited_page=page,
                                     cited_start_line=start_l,
                                     cited_end_line=end_l,

@@ -11,30 +11,43 @@ from backend.core.guardrails import wrap_untrusted_chunk
 from backend.core.schemas import DocumentChunk
 
 
-QWEN_SYSTEM_PROMPT = """Bạn là Trợ lý Học thuật Chuyên sâu WorkspaceAI (Đồ án CSC10014).
+def build_system_prompt_for_chunks(chunks: List[DocumentChunk]) -> str:
+    """Dynamically builds strict grounding system prompt with exact candidate doc IDs."""
+    valid_doc_ids = sorted(list({c.doc_id for c in chunks})) if chunks else ["Document.pdf"]
+    sample_doc_id = chunks[0].doc_id if chunks else "Document.pdf"
+    sample_page = chunks[0].page_number if chunks else 1
+    sample_start = chunks[0].start_line if chunks and chunks[0].start_line else 1
+    sample_end = chunks[0].end_line if chunks and chunks[0].end_line else sample_start + 1
+
+    doc_ids_str = ", ".join(f'"{d}"' for d in valid_doc_ids)
+
+    return f"""Bạn là Trợ lý Học thuật Chuyên sâu WorkspaceAI (Đồ án CSC10014).
 Nhiệm vụ của bạn là trả lời câu hỏi của người dùng một cách CHÍNH XÁC, CHI TIẾT, ĐẦY ĐỦ dựa DUY NHẤT vào các đoạn tài liệu được cung cấp.
 
 CÁC NGUYÊN TẮC BẮT BUỘC (KHÔNG ĐƯỢC VI PHẠM):
 1. CĂN CỨ 100%: Tuyệt đối không suy diễn, không tự bịa đặt thông tin nằm ngoài các đoạn tài liệu dưới đây. Nếu tài liệu không đủ dữ liệu để trả lời câu hỏi, hãy ghi rõ là tài liệu không đề cập.
-2. ĐÁNH DẤU TRÍCH DẪN: Cuối mỗi câu hoặc ý trả lời trong trường "answer", hãy ghi rõ nhãn nguồn dạng: [Tên tài liệu, Trang X, Dòng Y-Z].
-3. Ý KHẲNG ĐỊNH RIÊNG BIỆT (CLAIM): Với mỗi trích dẫn trong "citations", cung cấp trường "claim" là ý khẳng định hoặc câu kết luận cụ thể mà trích dẫn đó hỗ trợ (để hệ thống kiểm chứng theo từng luận điểm).
-4. TRÍCH NGUYÊN VĂN (EXCERPT): Trường "excerpt" trong mảng "citations" PHẢI LÀ TRÍCH ĐOẠN NGUYÊN VĂN 100% từng câu chữ từ tài liệu gốc, không sửa đổi hay tóm tắt, để hệ thống đối soát tự động kiểm tra.
-5. TỌA ĐỘ DÒNG VÀ TRANG: Lấy chính xác số trang (page) và số dòng (line_start, line_end) từ các nhãn [Dòng K] được gắn sẵn trong từng đoạn tài liệu.
-6. ĐỊNH DẠNG ĐẦU RA: Bạn BẮT BUỘC phải trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm lời dẫn) theo cấu trúc:
-{
-  "answer": "Câu trả lời chi tiết bằng tiếng Việt, giải thích đầy đủ các ý hỏi, cuối mỗi ý có gắn nhãn [Tên tài liệu, Trang X, Dòng Y-Z]...",
+2. ĐÁNH DẤU TRÍCH DẪN: Cuối mỗi câu hoặc ý trả lời trong trường "answer", hãy ghi rõ nhãn nguồn dạng: [{sample_doc_id}, Trang X, Dòng Y-Z].
+3. ĐÚNG MÃ TÀI LIỆU (DOC_ID): Trường "doc_id" trong "citations" BẮT BUỘC phải là một trong các mã tài liệu hợp lệ sau: [{doc_ids_str}]. Tuyệt đối KHÔNG dùng tên tài liệu khác.
+4. Ý KHẲNG ĐỊNH RIÊNG BIỆT (CLAIM): Với mỗi trích dẫn trong "citations", cung cấp trường "claim" là ý khẳng định hoặc câu kết luận cụ thể mà trích dẫn đó hỗ trợ.
+5. TRÍCH NGUYÊN VĂN (EXCERPT): Trường "excerpt" trong mảng "citations" PHẢI LÀ TRÍCH ĐOẠN NGUYÊN VĂN 100% từng câu chữ từ tài liệu gốc, không sửa đổi hay tóm tắt, để hệ thống đối soát tự động kiểm tra.
+6. TỌA ĐỘ DÒNG VÀ TRANG: Lấy chính xác số trang (page) và số dòng (line_start, line_end) từ các nhãn [Dòng K] được gắn sẵn trong từng đoạn tài liệu.
+7. ĐỊNH DẠNG ĐẦU RA: Bạn BẮT BUỘC phải trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm lời dẫn) theo cấu trúc:
+{{
+  "answer": "Câu trả lời chi tiết bằng tiếng Việt, giải thích đầy đủ các ý hỏi, cuối mỗi ý có gắn nhãn [{sample_doc_id}, Trang {sample_page}, Dòng {sample_start}-{sample_end}]...",
   "citations": [
-    {
+    {{
       "claim": "Ý khẳng định hoặc câu kết luận cụ thể được hỗ trợ bởi trích dẫn này",
-      "doc_id": "Project_Brief.pdf",
-      "page": 6,
-      "line_start": 1,
-      "line_end": 2,
+      "doc_id": "{sample_doc_id}",
+      "page": {sample_page},
+      "line_start": {sample_start},
+      "line_end": {sample_end},
       "excerpt": "Trích nguyên văn 100% câu chữ từ tài liệu gốc làm bằng chứng..."
-    }
+    }}
   ]
-}
+}}
 """
+
+QWEN_SYSTEM_PROMPT = build_system_prompt_for_chunks([])
 
 
 def format_chunk_for_llm(chunk: DocumentChunk) -> str:
@@ -76,8 +89,10 @@ def build_qa_prompt(
         if formatted_turns:
             history_block = "Lịch sử hội thoại trước đó:\n" + "\n".join(formatted_turns) + "\n\n"
 
+    system_prompt = build_system_prompt_for_chunks(chunks)
+
     prompt = (
-        f"{QWEN_SYSTEM_PROMPT}\n\n"
+        f"{system_prompt}\n\n"
         f"--- TÀI LIỆU CUNG CẤP ---\n{wrapped_context}\n\n"
         f"{history_block}"
         f"Câu hỏi của người dùng: {query}\n\n"
@@ -95,18 +110,12 @@ def build_summary_prompt(doc_name: str, chunks: List[DocumentChunk]) -> str:
     3. Quantitative Metrics, Deadlines & Policies
     4. Key Actionable Takeaways & Next Steps
     """
-    # Sample representative chunks across distinct pages if total length is very large
+    # Sample representative chunks uniformly across distinct pages so entire doc is covered
     selected_chunks = chunks
-    if len(chunks) > 12:
-        pages_seen = set()
-        picked = []
-        for c in chunks:
-            if c.page_number not in pages_seen:
-                pages_seen.add(c.page_number)
-                picked.append(c)
-        if len(picked) < 8:
-            picked.extend(chunks[:8])
-        selected_chunks = picked[:12]
+    if len(chunks) > 16:
+        # Uniform sampling across document
+        step = len(chunks) / 16.0
+        selected_chunks = [chunks[int(i * step)] for i in range(16)]
 
     combined_text = "\n\n".join(
         f"[Trang {c.page_number}, Dòng {c.start_line}-{c.end_line}]:\n{c.text}"
@@ -115,7 +124,10 @@ def build_summary_prompt(doc_name: str, chunks: List[DocumentChunk]) -> str:
     prompt = (
         f"Bạn là Chuyên gia Phân tích Tài liệu Cấp cao của WorkspaceAI (phong cách tóm tắt chuyên sâu tương đương NotebookLM).\n"
         f"Dưới đây là toàn bộ các phần nội dung trích xuất từ tài liệu '{doc_name}'.\n"
-        f"Hãy tổng hợp và tạo bản Tóm tắt Toàn diện (Executive Briefing Document) bằng tiếng Việt theo định dạng Markdown chuẩn mực sau:\n\n"
+        f"Hãy tổng hợp và tạo bản Tóm tắt Toàn diện (Executive Briefing Document) bằng tiếng Việt theo định dạng Markdown chuẩn mực sau.\n\n"
+        f"QUY TẮC ĐỊNH DẠNG BẮT BUỘC:\n"
+        f"1. Mỗi phần '#### 1.', '#### 2.', '#### 3.', '#### 4.' BẮT BUỘC phải nằm trên dòng riêng và cách đoạn trước 2 dấu xuống dòng.\n"
+        f"2. Mỗi gạch đầu dòng '- **Tên mục**:' phải nằm trên một dòng riêng biệt.\n\n"
         f"### 📄 Tóm tắt Tài liệu Toàn diện: **{doc_name}**\n\n"
         f"#### 1. 🎯 Tổng quan Điều hành & Bản chất Tài liệu (Executive Briefing)\n"
         f"- Nêu rõ mục đích, phạm vi, đối tượng áp dụng và bối cảnh chính của tài liệu.\n\n"

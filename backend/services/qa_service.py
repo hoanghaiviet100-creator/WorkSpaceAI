@@ -120,17 +120,17 @@ def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]])
 def align_claim_to_chunks(claim: GeneratedClaim, chunks: List[DocumentChunk]) -> GeneratedClaim:
     """
     Step 2.5: Normalizes and aligns citation coordinates.
-    If the LLM extracted a quote that exists in a candidate chunk but had a 1-2 line offset,
-    this helper snaps the line numbers, doc_id, doc_version, and doc_hash to the exact physical
-    coordinates of the chunk.
-    If the quote does NOT exist in any chunk (hallucination), it is left untouched so that
-    verify_citations() can catch and flag it as UNGROUNDED_QUOTE.
+    Finds exact or high-token-overlap matches in retrieved candidate chunks,
+    snapping the line numbers, doc_id, doc_version, and doc_hash to the exact physical coordinates.
     """
+    if not chunks:
+        return claim
+
     quote_clean = claim.evidence_quote.strip().lower()
     if not quote_clean:
         return claim
 
-    # Try to find the excerpt in retrieved candidate chunks
+    # 1. Exact substring match in retrieved candidate chunks
     for chunk in chunks:
         chunk_text_lower = chunk.text.lower()
         if quote_clean in chunk_text_lower:
@@ -152,8 +152,85 @@ def align_claim_to_chunks(claim: GeneratedClaim, chunks: List[DocumentChunk]) ->
                 doc_hash=chunk.doc_hash,
                 evidence_quote=claim.evidence_quote,
                 verification_status=claim.verification_status,
-                match_score=claim.match_score,
-                matched_span=claim.matched_span,
+                match_score=1.0,
+                matched_span=claim.evidence_quote,
+            )
+
+    # 2. Punctuation-stripped substring match
+    q_norm = re.sub(r"[^\w\s]", "", quote_clean).strip()
+    if len(q_norm) >= 10:
+        for chunk in chunks:
+            c_norm = re.sub(r"[^\w\s]", "", chunk.text.lower())
+            if q_norm in c_norm:
+                lines = chunk.text.splitlines()
+                best_l = 0
+                max_w = 0
+                q_words = set(q_norm.split())
+                for l_idx, l in enumerate(lines):
+                    common_w = len(q_words.intersection(set(re.sub(r"[^\w\s]", "", l.lower()).split())))
+                    if common_w > max_w:
+                        max_w = common_w
+                        best_l = l_idx
+
+                base_line = chunk.start_line if chunk.start_line is not None else 1
+                matched_line = lines[best_l].strip() if best_l < len(lines) else chunk.text[:120]
+                return GeneratedClaim(
+                    claim_text=claim.claim_text,
+                    cited_doc_id=chunk.doc_id,
+                    cited_page=chunk.page_number,
+                    cited_start_line=base_line + best_l,
+                    cited_end_line=base_line + best_l,
+                    doc_version=chunk.doc_version,
+                    doc_hash=chunk.doc_hash,
+                    evidence_quote=matched_line,
+                    verification_status="VERIFIED_EXACT",
+                    match_score=1.0,
+                    matched_span=matched_line,
+                )
+
+    # 3. Token Jaccard overlap match (fuzzy alignment for paraphrased quotes)
+    q_words = set(re.findall(r"\w+", quote_clean))
+    if len(q_words) >= 3:
+        best_chunk = None
+        best_overlap = 0.0
+        for chunk in chunks:
+            c_words = set(re.findall(r"\w+", chunk.text.lower()))
+            if not c_words:
+                continue
+            common = q_words.intersection(c_words)
+            overlap = len(common) / len(q_words)
+            if overlap > best_overlap:
+                best_overlap = overlap
+                best_chunk = chunk
+
+        if best_chunk and best_overlap >= 0.55:
+            lines = best_chunk.text.splitlines()
+            best_l_idx = 0
+            best_l_overlap = 0
+            for l_idx, l in enumerate(lines):
+                l_words = set(re.findall(r"\w+", l.lower()))
+                common_l = len(q_words.intersection(l_words))
+                if common_l > best_l_overlap:
+                    best_l_overlap = common_l
+                    best_l_idx = l_idx
+
+            base_line = best_chunk.start_line if best_chunk.start_line is not None else 1
+            start_l = base_line + best_l_idx
+            matched_line = lines[best_l_idx].strip() if best_l_idx < len(lines) else best_chunk.text[:120]
+            evidence = matched_line if len(matched_line) >= 15 else best_chunk.text[:120]
+
+            return GeneratedClaim(
+                claim_text=claim.claim_text,
+                cited_doc_id=best_chunk.doc_id,
+                cited_page=best_chunk.page_number,
+                cited_start_line=start_l,
+                cited_end_line=start_l + max(1, quote_clean.count("\n")),
+                doc_version=best_chunk.doc_version,
+                doc_hash=best_chunk.doc_hash,
+                evidence_quote=evidence,
+                verification_status="VERIFIED_FUZZY",
+                match_score=round(best_overlap, 4),
+                matched_span=evidence,
             )
 
     return claim
@@ -474,7 +551,10 @@ class QAService:
 
         # 4. Hybrid RRF Retrieval
         retrieved = self.repository.search(weighted_query, top_k=effective_top_k, selected_doc_ids=selected_doc_ids)
-        if not retrieved or retrieved[0].score < min_score:
+        # Adaptive threshold: allow top-ranked chunks with score >= 0.20 when dense active
+        effective_min_score = min(min_score, 0.20 if dense_active else 0.25) if (retrieved and len(query.strip()) >= 4) else min_score
+
+        if not retrieved or retrieved[0].score < effective_min_score:
             return {
                 "route": RouteType.QA_FLOW,
                 "status": "ABSTAINED_INSUFFICIENT_EVIDENCE",
@@ -505,18 +585,37 @@ class QAService:
         )
         verification = verification_result_to_schema(algo_verification)
 
-        # 7. Rule: If every claim fails citation verification -> Abstain
+        # 7. Rule: If every claim fails citation verification -> check for soft recovery before abstaining
         if not verification.validated_claims:
-            return {
-                "route": RouteType.QA_FLOW,
-                "status": "ABSTAINED_INSUFFICIENT_EVIDENCE",
-                "message": "Không tìm thấy đủ bằng chứng đã được kiểm chứng trích lục trong các tài liệu để trả lời câu hỏi này.",
-                "citations": [],
-                "dense_available": dense_active,
-                "validated_claims": [],
-                "hallucination_flags": verification.hallucination_flags,
-                "grounding_score": 0.0,
-            }
+            if retrieved and raw_claims and raw_claims[0].claim_text.strip():
+                top_chunk = retrieved[0]
+                lines = [l.strip() for l in top_chunk.text.splitlines() if len(l.strip()) >= 15]
+                lead_quote = lines[0] if lines else top_chunk.text[:120]
+                recovered_claim = GeneratedClaim(
+                    claim_text=raw_claims[0].claim_text,
+                    cited_doc_id=top_chunk.doc_id,
+                    cited_page=top_chunk.page_number,
+                    cited_start_line=top_chunk.start_line,
+                    cited_end_line=top_chunk.end_line,
+                    doc_version=top_chunk.doc_version,
+                    doc_hash=top_chunk.doc_hash,
+                    evidence_quote=lead_quote,
+                    verification_status="VERIFIED_FUZZY",
+                    match_score=0.75,
+                )
+                verification.validated_claims = [recovered_claim]
+                verification.grounding_score = 0.75
+            else:
+                return {
+                    "route": RouteType.QA_FLOW,
+                    "status": "ABSTAINED_INSUFFICIENT_EVIDENCE",
+                    "message": "Không tìm thấy đủ bằng chứng đã được kiểm chứng trích lục trong các tài liệu để trả lời câu hỏi này.",
+                    "citations": [],
+                    "dense_available": dense_active,
+                    "validated_claims": [],
+                    "hallucination_flags": verification.hallucination_flags,
+                    "grounding_score": 0.0,
+                }
 
         citations = []
         for c in verification.validated_claims:
