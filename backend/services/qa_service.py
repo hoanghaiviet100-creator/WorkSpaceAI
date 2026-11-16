@@ -310,40 +310,32 @@ def parse_summary_into_section_claims(
     Prevents duplicating the full text across all pages and formats clean cards for the UI.
     """
     claims: List[GeneratedClaim] = []
-    
+
     # Normalize text in case LLM outputs headers without newlines (e.g. "...text. #### 3. ...")
     norm_summary = re.sub(r"\s*(#{2,4}\s+)", r"\n\n\1", summary_text.strip())
-    # Try regex matching section headers (e.g. #### 1. ... or #### ...)
-    pattern = r"(?:^|\n)#{2,4}\s*(\d*\.?\s*[^\n]+)\n*(.*?)(?=(?:\n\s*#{2,4}\s*\d|\Z))"
-    matches = re.findall(pattern, norm_summary, re.DOTALL)
-    
+
     page_to_chunk: Dict[int, DocumentChunk] = {}
     for c in chunks:
         if c.page_number not in page_to_chunk:
             page_to_chunk[c.page_number] = c
     sorted_pages = sorted(page_to_chunk.keys()) if page_to_chunk else [1]
-    
-    if matches and len(matches) >= 2:
-        section_idx = 0
-        for header, body in matches:
-            clean_header = header.strip()
-            clean_body = body.strip()
-            if not clean_body or clean_header.startswith("📄") or clean_header.startswith("Tóm tắt"):
-                continue
-            
-            # Map each section to an appropriate representative page
-            if section_idx == 0 or len(sorted_pages) == 1:
-                target_page = sorted_pages[0]
-            elif section_idx == 1:
-                target_page = sorted_pages[min(1, len(sorted_pages) - 1)]
-            elif section_idx == 2:
-                target_page = sorted_pages[min(2, len(sorted_pages) - 1)]
-            else:
-                target_page = sorted_pages[-1]
-            section_idx += 1
-                
+
+    # Split cleanly by section headings (### or ####)
+    raw_sections = re.split(r"\n(?=#{2,4}\s+)", norm_summary.strip())
+    parsed_sections: List[Tuple[str, str]] = []
+    for s in raw_sections:
+        lines = s.strip().split("\n", 1)
+        header = re.sub(r"^#{2,4}\s+", "", lines[0]).strip()
+        body = lines[1].strip() if len(lines) > 1 else ""
+        if not body or any(header.startswith(p) for p in ["📄", "📚", "📊", "Tóm tắt", "Cẩm nang"]):
+            continue
+        parsed_sections.append((header, body))
+
+    if parsed_sections and len(parsed_sections) >= 2:
+        for idx, (clean_header, clean_body) in enumerate(parsed_sections):
+            target_page = sorted_pages[min(idx, len(sorted_pages) - 1)]
             chunk = page_to_chunk.get(target_page, chunks[0])
-            
+
             claims.append(
                 GeneratedClaim(
                     section=clean_header,
@@ -368,7 +360,11 @@ def parse_summary_into_section_claims(
         for idx, p in enumerate(paragraphs[:4]):
             target_page = sorted_pages[min(idx, len(sorted_pages) - 1)]
             chunk = page_to_chunk.get(target_page, chunks[0])
-            titles = ["Tổng quan", "Yêu cầu kỹ thuật", "Hạn chót & Định lượng", "Khuyến nghị"]
+            is_academic = any(w in summary_text.lower() for w in ["chuyên đề", "viét", "vi-ét", "toán", "công thức", "định lý", "học tập", "cẩm nang", "phương trình"])
+            if is_academic:
+                titles = ["Tổng quan Mục tiêu", "Khung Lý thuyết & Công thức", "Phân loại Dạng bài", "Bẫy Sai lầm & Gợi ý"]
+            else:
+                titles = ["Tổng quan", "Yêu cầu kỹ thuật", "Hạn chót & Định lượng", "Khuyến nghị"]
             section_title = titles[idx] if idx < len(titles) else f"Phần {idx + 1}"
             claims.append(
                 GeneratedClaim(
@@ -399,6 +395,26 @@ def generate_suggested_prompts(
     full_text = " ".join([c.claim_text for c in (claims or [])]).lower()
     doc_lower = doc_name.lower()
     q_lower = (query or "").lower()
+
+    # Case 0: Academic Study / Math / Science / Exam Prep
+    if any(w in full_text or w in doc_lower for w in ["viét", "vi-ét", "viet", "phương trình", "bậc hai", "hệ thức", "nghiệm", "định lý", "tam thức", "công thức", "toán", "đại số", "chuyên đề"]):
+        if any(w in q_lower for w in ["dấu", "dương", "âm", "trái dấu"]):
+            return [
+                "Điều kiện để phương trình có 2 nghiệm phân biệt cùng dương là gì?",
+                "Khi nào phương trình bậc hai có 2 nghiệm trái dấu?",
+                "Cách áp dụng dấu của nghiệm vào bài toán tìm tham số m?",
+            ]
+        if any(w in q_lower for w in ["dạng", "bài tập", "phương pháp", "giải"]):
+            return [
+                "Phương pháp biến đổi biểu thức đối xứng x1^2 + x2^2 về S và P?",
+                "Các bước giải bài toán tìm hai số khi biết tổng và tích?",
+                "Những bẫy sai lầm kinh điển cần tránh khi áp dụng hệ thức Vi-ét?",
+            ]
+        return [
+            "Hệ thức Vi-ét và điều kiện bắt buộc trước khi áp dụng là gì?",
+            "Phương pháp tính giá trị biểu thức đối xứng mà không cần giải phương trình?",
+            "Điều kiện để phương trình có 2 nghiệm cùng mang dấu dương?",
+        ]
 
     # Case 1: Sorting algorithms project
     if any(w in full_text or w in doc_lower for w in ["thuật toán", "sắp xếp", "sorting", "sort", "quicksort", "mergesort", "radix"]):

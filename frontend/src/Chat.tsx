@@ -59,6 +59,22 @@ const summarySectionIcons = [
   [/mục tiêu|phạm vi|\bobjectives?\b|\bscope\b/i, Target],
 ] as const;
 
+function formatMathSnippet(latex: string): string {
+  return latex
+    .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1)/($2)")
+    .replace(/\\Delta/g, "Δ")
+    .replace(/\\ge/g, "≥")
+    .replace(/\\le/g, "≤")
+    .replace(/\\ne/g, "≠")
+    .replace(/\\cdot/g, "·")
+    .replace(/\\times/g, "×")
+    .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
+    .replace(/\\text\{([^}]+)\}/g, "$1")
+    .replace(/\\quad/g, "   ")
+    .replace(/\\,/g, " ")
+    .trim();
+}
+
 function renderFormattedMarkdown(text: string): React.ReactNode {
   if (!text) return null;
 
@@ -66,6 +82,21 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
   const lines = text.split("\n");
   return lines.map((rawLine, lIdx) => {
     let line = rawLine;
+
+    // Display math block: $$...$$
+    if (line.trim().startsWith("$$") && line.trim().endsWith("$$") && line.trim().length >= 4) {
+      const mathContent = line.trim().slice(2, -2).trim();
+      const readable = formatMathSnippet(mathContent);
+      return (
+        <div
+          key={lIdx}
+          className="my-2.5 p-2.5 text-center font-mono text-sm bg-neutral-100/90 dark:bg-neutral-800/90 text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-100 dark:border-indigo-900/40 overflow-x-auto shadow-xs"
+        >
+          {readable}
+        </div>
+      );
+    }
+
     let isHeading = false;
     if (/^#{1,6}\s+/.test(line)) {
       isHeading = true;
@@ -104,7 +135,23 @@ function renderFormattedMarkdown(text: string): React.ReactNode {
               </em>
             );
           }
-          return iSeg;
+
+          // Split by inline math: $...$
+          const mathSegments = iSeg.split(/(\$[^$\n]+\$)/g);
+          return mathSegments.map((mSeg, mIdx) => {
+            if (mSeg.startsWith("$") && mSeg.endsWith("$") && mSeg.length >= 3) {
+              const innerMath = mSeg.slice(1, -1);
+              return (
+                <span
+                  key={`${sIdx}-${bIdx}-${iIdx}-${mIdx}`}
+                  className="font-mono text-[0.92em] font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-50/80 dark:bg-indigo-950/50 px-1 py-0.5 rounded border border-indigo-200/60 dark:border-indigo-800/50 mx-0.5"
+                >
+                  {formatMathSnippet(innerMath)}
+                </span>
+              );
+            }
+            return mSeg;
+          });
         });
       });
     });
