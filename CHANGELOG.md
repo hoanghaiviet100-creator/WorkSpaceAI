@@ -6,6 +6,7 @@ Tất cả các thay đổi và nâng cấp quan trọng của dự án **Worksp
 
 ## [Unreleased] Roadmap
 - [ ] Tích hợp bộ OCR đa phương thức cục bộ (Surya / PaddleOCR) cho PDF dạng ảnh quét hoàn toàn offline.
+- [x] Added attachments support for email drafts (Feature 3).
 - [ ] Mở rộng Graph RAG: Trích xuất Knowledge Graph liên tài liệu (Entity - Relationship) tăng cường cho đối soát nhiều tầng.
 - [ ] Hỗ trợ hàng đợi bất đồng bộ phân tán (Celery / Redis) khi ingest tài liệu dung lượng lớn (> 500 trang).
 
