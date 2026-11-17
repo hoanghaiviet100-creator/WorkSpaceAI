@@ -133,10 +133,8 @@ class EmailFSMState(str, Enum):
 
 
 class EmailDraftRecord(BaseModel):
-    """
-    Feature 3: Table EmailDraft in WorkspaceAI Database Schema.
-    Stores email draft with SHA-256 integrity hash, FSM state, and audit timestamp.
-    """
+    """Feature 3: Table EmailDraft in WorkspaceAI Database Schema.
+    Stores email draft with SHA-256 integrity hash, FSM state, and audit timestamp."""
     id: UUID = Field(default_factory=uuid.uuid4)
     workspace_id: UUID
     recipients: Union[List[str], str]
@@ -146,6 +144,8 @@ class EmailDraftRecord(BaseModel):
     sha256_digest: Optional[str] = None
     audit_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     citations: List[str] = Field(default_factory=list)
+    attachments: List[str] = Field(default_factory=list)
+
 
 
 class CreateDraftRequest(BaseModel):
@@ -154,12 +154,14 @@ class CreateDraftRequest(BaseModel):
     subject: str
     body: str
     citations: Optional[List[str]] = None
+    attachments: Optional[List[str]] = None
 
 
 class ApproveDraftRequest(BaseModel):
     recipients: Optional[Union[List[str], str]] = None
     subject: Optional[str] = None
     body: Optional[str] = None
+    attachments: Optional[List[str]] = None
     user_confirmed: bool = True
 
 
