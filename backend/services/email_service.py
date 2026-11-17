@@ -1,24 +1,16 @@
-"""
-backend/services/email_service.py
-CSC10014 Feature 3: Context-Aware Email Reporting Service.
+# backend/services/email_service.py
+# CSC10014 Feature 3: Context-Aware Email Reporting Service.
+# Encapsulates draft creation, cryptographic snapshot approval, and controlled SMTP dispatch.
+# Adheres strictly to the 5 FSM states: DRAFT, APPROVED, SENT, FAILED, DELIVERY_UNKNOWN.
+# Guarantees NFR-04: tamper-proof SHA‑256, duplicate‑send prevention, single dispatch per approved digest, no auto‑retry on DELIVERY_UNKNOWN.
 
-Encapsulates draft creation, cryptographic snapshot approval, and controlled SMTP dispatch.
-Adheres strictly to the 5 FSM states:
-- DRAFT
-- APPROVED
-- SENT
-- FAILED
-- DELIVERY_UNKNOWN
-
-Guarantees NFR-04:
-- Tamper-proof SHA-256 payload binding (recipients, subject, body).
-- Duplicate-send prevention.
-- Single dispatch per approved digest.
-- No automatic retries on DELIVERY_UNKNOWN (socket.timeout / SMTPServerDisconnected).
-"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from email.mime.application import MIMEApplication
+from email.mime.base import MIMEBase
+from email import encoders
+import os, mimetypes, zipfile, io
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import re
@@ -59,7 +51,45 @@ from backend.repositories.draft_repository import DraftRepository, draft_reposit
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
 
 
-def send_real_email_via_smtp(to_email: str, subject: str, body_text: str) -> Dict[str, Any]:
+def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
+    """Helper to attach local files, images, or compress directories into a MIMEMultipart message."""
+    for att_path in attachments:
+        if not att_path or not os.path.exists(att_path):
+            continue
+        if os.path.isdir(att_path):
+            zip_buffer = io.BytesIO()
+            dir_name = os.path.basename(os.path.normpath(att_path)) or "folder"
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, _, files in os.walk(att_path):
+                    for f in files:
+                        full_path = os.path.join(root, f)
+                        rel_path = os.path.relpath(full_path, att_path)
+                        zf.write(full_path, rel_path)
+            zip_buffer.seek(0)
+            part = MIMEApplication(zip_buffer.read(), Name=f"{dir_name}.zip")
+            part["Content-Disposition"] = f'attachment; filename="{dir_name}.zip"'
+            msg.attach(part)
+        else:
+            ctype, encoding = mimetypes.guess_type(att_path)
+            if ctype is None or encoding is not None:
+                ctype = "application/octet-stream"
+            maintype, subtype = ctype.split("/", 1)
+            with open(att_path, "rb") as f:
+                file_content = f.read()
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(file_content)
+            encoders.encode_base64(part)
+            filename = os.path.basename(att_path)
+            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            msg.attach(part)
+
+
+def send_real_email_via_smtp(
+    to_email: str,
+    subject: str,
+    body_text: str,
+    attachments: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Sends real email via Gmail SMTP using Python standard libraries (smtplib & MIMEText).
     Connects to smtp.gmail.com:587 with STARTTLS authentication.
@@ -86,6 +116,9 @@ def send_real_email_via_smtp(to_email: str, subject: str, body_text: str) -> Dic
     msg["To"] = clean_recipient
     msg["Subject"] = subject
     msg.attach(MIMEText(body_text, "plain", "utf-8"))
+
+    if attachments:
+        _attach_files_to_msg(msg, attachments)
 
     host = settings.smtp_host or "smtp.gmail.com"
     port = settings.smtp_port or 587
@@ -126,13 +159,14 @@ class EmailService:
         subject: Optional[str] = None,
         body: Optional[str] = None,
         citations: Optional[List[str]] = None,
+        attachments: Optional[List[str]] = None,
         req: Optional[UserRequest] = None,
     ) -> Union[EmailDraftRecord, Dict[str, Any]]:
         """
         Creates an email draft in DRAFT state.
         Supports both:
         1. Context-aware generation from UserRequest (backward compatibility for /api/chat).
-        2. Direct manual composition with (workspace_id, recipients, subject, body, citations).
+        2. Direct manual composition with (workspace_id, recipients, subject, body, citations, attachments).
         """
         user_req = workspace_id if isinstance(workspace_id, UserRequest) else req
         if user_req is not None:
@@ -198,6 +232,7 @@ class EmailService:
             sha256_digest=None,
             audit_timestamp=datetime.now(timezone.utc),
             citations=citations or [],
+            attachments=attachments or [],
         )
         self.draft_repo.save(new_draft)
         return new_draft
@@ -208,10 +243,11 @@ class EmailService:
         recipients: Optional[Union[List[str], str]] = None,
         subject: Optional[str] = None,
         body: Optional[str] = None,
+        attachments: Optional[List[str]] = None,
         user_confirmed: bool = True,
     ) -> EmailDraftRecord:
         """
-        UC-08: Review and Approve Email Snapshot.
+        # UC-08: Review and Approve Email Snapshot.
         Validates payload, enforces explicit human confirmation, transitions to APPROVED,
         computes and binds the canonical SHA-256 digest, and updates audit timestamp.
         """
@@ -244,6 +280,8 @@ class EmailService:
             stored.subject = final_subject
         if hasattr(stored, "body"):
             stored.body = final_body
+        if attachments is not None and hasattr(stored, "attachments"):
+            stored.attachments = attachments
         if hasattr(stored, "fsm_state"):
             stored.fsm_state = EmailFSMState.APPROVED
         if hasattr(stored, "sha256_digest"):
@@ -278,7 +316,7 @@ class EmailService:
 
     def dispatch_email(self, draft_id: Union[UUID, str]) -> Dict[str, Any]:
         """
-        UC-09: Send Email and Track Outcome.
+        # UC-09: Send Email and Track Outcome.
         Pre-dispatch gate:
         - Checks FSM state == APPROVED
         - Blocks duplicate dispatch (state == SENT)
@@ -299,6 +337,7 @@ class EmailService:
         recipients = getattr(stored, "recipients", None) or getattr(stored, "recipient_email", "")
         subject = getattr(stored, "subject", "")
         body = getattr(stored, "body", "")
+        attachments = getattr(stored, "attachments", None) or getattr(stored, "attachment_ids", []) or []
 
         # Verify integrity and duplicate-send gate (raises SecurityError or FSMStateError)
         verify_and_lock_for_send(
@@ -344,6 +383,11 @@ class EmailService:
         msg["To"] = ", ".join(to_addrs)
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain", "utf-8"))
+
+        # Attach files/folders/images if any (folders are zipped in‑memory)
+        if attachments:
+            _attach_files_to_msg(msg, attachments)
+
 
         host = settings.smtp_host or "smtp.gmail.com"
         port = settings.smtp_port or 587
