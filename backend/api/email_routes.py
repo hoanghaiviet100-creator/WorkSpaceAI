@@ -32,6 +32,7 @@ def create_draft_endpoint(req: CreateDraftRequest):
             subject=req.subject,
             body=req.body,
             citations=req.citations,
+            attachments=req.attachments,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -55,6 +56,7 @@ def approve_snapshot_endpoint(
         target_recipients = (req.recipients if req and req.recipients is not None else recipients)
         target_subject = (req.subject if req and req.subject is not None else subject)
         target_body = (req.body if req and req.body is not None else body)
+        target_attachments = (req.attachments if req and req.attachments is not None else None)
         target_confirmed = (req.user_confirmed if req is not None else user_confirmed)
 
         return email_service.approve_draft_snapshot(
@@ -62,6 +64,7 @@ def approve_snapshot_endpoint(
             recipients=target_recipients,
             subject=target_subject,
             body=target_body,
+            attachments=target_attachments,
             user_confirmed=target_confirmed,
         )
     except KeyError as exc:
