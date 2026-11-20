@@ -30,6 +30,9 @@ services:
       - PYTHONUNBUFFERED=1
       - LLM_PROVIDER=${LLM_PROVIDER:-ollama}
       - WORKSPACE_OFFLINE_ONLY=${WORKSPACE_OFFLINE_ONLY:-false}
+      - FEATURE1_SEMANTIC_VERIFY=${FEATURE1_SEMANTIC_VERIFY:-true}
+      - FEATURE1_SELECTIVE_THINKING=${FEATURE1_SELECTIVE_THINKING:-false}
+      - WORKSPACE_RESEARCH_URL=http://research/api/workspaceai/search
       # Inside Docker network, use the internal service hostname "ollama".
       # If you wish to connect to Ollama running on your host machine instead,
       # set OLLAMA_DOCKER_URL=http://host.docker.internal:11434 in .env.
@@ -53,6 +56,27 @@ services:
     restart: unless-stopped
     networks:
       - workspaceai-net
+      - research-net
+
+  research:
+    build:
+      context: .
+      dockerfile: docker/research/Dockerfile
+    environment:
+      SURFSENSE_AUTH: none
+      SURFSENSE_ALLOWED_HOSTS: localhost,research
+    volumes:
+      - surfsense_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost/api/health"]
+      start_period: 45s
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    stop_grace_period: 30s
+    networks:
+      - research-net
 
   # ============================================================================
   # Local Ollama LLM Service (Runs Qwen2.5 / Llama models locally)
@@ -79,10 +103,13 @@ services:
       - workspaceai-net
 
 volumes:
+  surfsense_data:
   ollama_models:
     name: workspaceai_ollama_models
 
 networks:
+  research-net:
+    internal: true
   workspaceai-net:
     name: workspaceai_network
     driver: bridge

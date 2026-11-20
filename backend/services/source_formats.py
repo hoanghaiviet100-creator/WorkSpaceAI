@@ -6,9 +6,11 @@ import re
 import socket
 import zipfile
 from html.parser import HTMLParser
+from typing import Optional
 from urllib.parse import unquote, urljoin, urlsplit
 from xml.etree import ElementTree as ET
 import httpx
+from backend.core.schemas import DocumentHeading
 
 MAX_SOURCE_BYTES = 25 * 1024 * 1024
 W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
@@ -28,13 +30,14 @@ def _office_archive(content: bytes) -> zipfile.ZipFile:
         raise ValueError("Tệp Office không hợp lệ hoặc đã bị hỏng.") from None
 
 
-def parse_office_pages(filename: str, content: bytes):
+def parse_office_pages(filename: str, content: bytes, *, headings: Optional[list[DocumentHeading]] = None):
     """DOCX uses one extracted-text page; PPTX follows sldIdLst, not ZIP filename order."""
     try:
         with _office_archive(content) as archive:
             if filename.lower().endswith(".docx"):
                 root = ET.fromstring(archive.read("word/document.xml"))
                 paragraphs = []
+                line_number = 1
                 for paragraph in root.iter(W + "p"):
                     parts = []
                     for node in paragraph.iter():
@@ -44,7 +47,20 @@ def parse_office_pages(filename: str, content: bytes):
                             parts.append("\t")
                         elif node.tag == W + "br":
                             parts.append("\n")
-                    paragraphs.append("".join(parts))
+                    text = "".join(parts)
+                    properties = paragraph.find(W + "pPr")
+                    if headings is not None and properties is not None and text.strip():
+                        outline_level = properties.find(W + "outlineLvl")
+                        style = properties.find(W + "pStyle")
+                        value = outline_level.get(W + "val", "") if outline_level is not None else ""
+                        styled = re.fullmatch(r"Heading\s*([1-9])", style.get(W + "val", ""), re.I) if style is not None else None
+                        level = int(value) + 1 if re.fullmatch(r"[0-8]", value) else int(styled[1]) if styled else None
+                        if level:
+                            headings.append(DocumentHeading(
+                                title=" ".join(text.split()), page=1, line=line_number, level=level, origin="style",
+                            ))
+                    paragraphs.append(text)
+                    line_number += text.count("\n") + 1
                 pages = [(1, "\n".join(paragraphs))]
             else:
                 presentation = ET.fromstring(archive.read("ppt/presentation.xml"))

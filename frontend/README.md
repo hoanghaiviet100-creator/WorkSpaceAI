@@ -180,7 +180,7 @@ API key chỉ thuộc cấu hình backend. Các biến `VITE_*` có thể xuất
 | Tài liệu và hỏi đáp | Đã gọi backend; tìm kiếm theo các file được chọn và kiểm tra trích dẫn |
 | Email | Studio hỗ trợ một người nhận, xem lại và hoàn tác trước khi gửi. Chế độ `local_mock` mô phỏng gửi, `gmail_real` gửi qua SMTP. |
 | Đăng nhập | Các màn hình xem trước; chưa xác thực tài khoản Google, Microsoft, Apple hoặc email/password |
-| Cơ sở dữ liệu | `src/schema.ts` mô tả 12 bảng từ `database/schema.sql`; chưa có kết nối lưu trữ SQL đầy đủ |
+| Cơ sở dữ liệu | Schema MySQL có 11 bảng. `src/schema.ts` khai báo các trường giao diện cần dùng. Backend và frontend hiện dùng lưu trữ cục bộ mô tả bên dưới. |
 
 Nơi lưu dữ liệu:
 

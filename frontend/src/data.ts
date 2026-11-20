@@ -1,5 +1,5 @@
 import type {
-  DocumentPageRow,
+  DocumentPage,
   EmailAuditRow,
   EmailState,
   EngineMode,
@@ -25,7 +25,7 @@ export type Source = {
   mimeType?: string;
   uploadedAt?: string;
   updatedAt?: string;
-  pages?: DocumentPageRow[];
+  pages?: DocumentPage[];
   origin?: "sample" | "local" | "server";
   sourceUrl?: string;
 };
@@ -96,6 +96,7 @@ export type Message = {
   routeType?: RouteType;
   rejectedClaims?: string[];
   quizSourceIds?: string[];
+  stopped?: boolean;
   errorText?: string;
   origin?: "sample" | "server";
   studioResultId?: string;

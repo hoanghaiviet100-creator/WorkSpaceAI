@@ -1,9 +1,13 @@
+import base64
+import binascii
 import csv
 from datetime import datetime
 import hashlib
 import io
 import re
+from threading import Lock
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+import numpy as np
 from rank_bm25 import BM25Okapi
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 
@@ -50,17 +54,28 @@ class WorkspaceRepository:
         self._bm25: Optional[BM25Okapi] = None
         self._embed_fn: Optional[Callable[[List[str]], Any]] = embed_fn
         self.dense_available: bool = embed_fn is not None
+        self._embedding_index_id: str | None = None
+        self._semantic_weight = 0.65
+        self._vectors: dict[str, np.ndarray] = {}
+        self._vector_lock = Lock()
 
-    def set_embed_fn(self, embed_fn: Optional[Callable[[List[str]], Any]]) -> None:
-        """Sets or updates the dense embedding function and updates dense availability status."""
-        self._embed_fn = embed_fn
-        self.dense_available = embed_fn is not None
+    def set_embed_fn(
+        self, embed_fn: Optional[Callable[[List[str]], Any]], *,
+        index_id: str | None = None, semantic_weight: float = 0.65,
+    ) -> None:
+        with self._vector_lock:
+            if embed_fn != self._embed_fn or index_id != self._embedding_index_id:
+                self._vectors.clear()
+            self._embed_fn = embed_fn
+            self._embedding_index_id = index_id
+            self._semantic_weight = semantic_weight
+            self.dense_available = embed_fn is not None
 
     def add_document(self, metadata: DocumentMetadata, chunks: List[DocumentChunk]) -> int:
         """Stores a new document and its chunks in the repository, then rebuilds the index."""
         self.documents[metadata.doc_id] = metadata
         self.chunks.extend(chunks)
-        self._rebuild_index()
+        self._rebuild_index(chunks)
         return len(chunks)
 
     def delete_document(self, doc_id: str) -> bool:
@@ -285,7 +300,7 @@ class WorkspaceRepository:
 
         self.documents[doc_id] = metadata
         self.chunks.extend(added_chunks)
-        self._rebuild_index()
+        self._rebuild_index(added_chunks)
         return len(added_chunks)
 
     def ingest_csv(self, doc_id: str, doc_name: str, csv_content: str) -> int:
@@ -325,16 +340,106 @@ class WorkspaceRepository:
 
         self.documents[doc_id] = metadata
         self.chunks.extend(added_chunks)
-        self._rebuild_index()
+        self._rebuild_index(added_chunks)
         return len(added_chunks)
 
-    def _rebuild_index(self) -> None:
+    def _rebuild_index(self, added: List[DocumentChunk] | None = None) -> None:
         """Rebuilds the BM25 lexical index over all indexed chunks with Vietnamese-English tokenizer."""
         if not self.chunks:
             self._bm25 = None
-            return
-        tokenized = [tokenize_vietnamese_english(c.text) for c in self.chunks]
-        self._bm25 = BM25Okapi(tokenized)
+        else:
+            tokenized = [tokenize_vietnamese_english(c.text) for c in self.chunks]
+            self._bm25 = BM25Okapi(tokenized)
+        with self._vector_lock:
+            if added is None and self._vectors:
+                retained = {self._vector_key(chunk.text) for chunk in self.chunks}
+                self._vectors = {key: row for key, row in self._vectors.items() if key in retained}
+            if added and self._embed_fn:
+                self._index_vectors(added)
+
+    @staticmethod
+    def _vector_key(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    def _index_vectors(self, chunks: List[DocumentChunk], width: int | None = None) -> list[str] | None:
+        """Populate missing vectors while the caller holds the index lock."""
+        if self._embed_fn is None:
+            return None
+        keys = [self._vector_key(chunk.text) for chunk in chunks]
+        missing = {
+            key: chunk.text for key, chunk in zip(keys, chunks)
+            if key not in self._vectors or (width is not None and self._vectors[key].size != width)
+        }
+        if missing:
+            try:
+                rows = np.asarray(self._embed_fn(list(missing.values())), dtype=np.float32)
+            except Exception:
+                return None
+            if (rows.ndim != 2 or rows.shape[0] != len(missing) or not rows.shape[1]
+                or (width is not None and rows.shape[1] != width) or not np.isfinite(rows).all()):
+                return None
+            self._vectors.update(zip(missing, rows))
+        return keys
+
+    def index_existing_passages(self) -> bool:
+        """Backfill saved libraries and report whether the snapshot needs updating."""
+        with self._vector_lock:
+            if self._embedding_index_id is None:
+                return False
+            count = len(self._vectors)
+            self._index_vectors(self.chunks)
+            return len(self._vectors) > count
+
+    def restore_embeddings(self, snapshot: object) -> None:
+        with self._vector_lock:
+            self._vectors.clear()
+            if (
+                self._embedding_index_id is None or not isinstance(snapshot, dict)
+                or snapshot.get("encoder") != self._embedding_index_id
+                or not isinstance(snapshot.get("vectors"), dict)
+            ):
+                return
+            for key, encoded in snapshot["vectors"].items():
+                try:
+                    row = np.frombuffer(base64.b64decode(encoded, validate=True), dtype="<f4")
+                except (binascii.Error, ValueError, TypeError):
+                    continue
+                if row.size and np.isfinite(row).all():
+                    self._vectors[key] = row
+
+    def snapshot_embeddings(self) -> dict | None:
+        with self._vector_lock:
+            if self._embedding_index_id is None or not self._vectors:
+                return None
+            keys = {self._vector_key(chunk.text) for chunk in self.chunks}
+            return {
+                "encoder": self._embedding_index_id,
+                "vectors": {
+                    key: base64.b64encode(self._vectors[key].astype("<f4", copy=False).tobytes()).decode("ascii")
+                    for key in sorted(keys & self._vectors.keys())
+                },
+            }
+
+    def _semantic_scores(self, chunks: List[DocumentChunk], query: str) -> tuple[np.ndarray, float] | None:
+        with self._vector_lock:
+            if self._embed_fn is None:
+                return None
+            try:
+                vectors = np.asarray(self._embed_fn([query]), dtype=np.float32)
+            except Exception:
+                return None
+            if vectors.ndim != 2 or vectors.shape[0] != 1 or not np.isfinite(vectors).all():
+                return None
+            query_vector = vectors[0]
+            if not np.any(query_vector):
+                return None
+            keys = self._index_vectors(chunks, query_vector.size)
+            if keys is None:
+                return None
+            rows = np.stack([self._vectors[key] for key in keys])
+            weight = self._semantic_weight
+        denominator = np.maximum(np.linalg.norm(rows, axis=1) * np.linalg.norm(query_vector), 1e-9)
+        return np.clip((rows @ query_vector) / denominator, 0.0, 1.0), weight
 
     def search(
         self,
@@ -363,12 +468,12 @@ class WorkspaceRepository:
             ]
         else:
             selected_in_repo = {
-                d_id.lower() for d_id, doc in self.documents.items() if doc.is_selected
+                d_id for d_id, doc in self.documents.items() if doc.is_selected
             }
             if selected_in_repo:
                 eligible = [
                     c for c in self.chunks
-                    if c.doc_id.lower() in selected_in_repo or c.doc_name.lower() in selected_in_repo
+                    if c.doc_id in selected_in_repo
                 ]
             else:
                 eligible = self.chunks
@@ -392,19 +497,12 @@ class WorkspaceRepository:
             bm25_model = BM25Okapi(tokenized_eligible)
 
         bm25_scores = list(bm25_model.get_scores(q_tokens))
-        max_bm25 = max(bm25_scores) if len(bm25_scores) > 0 and max(bm25_scores) > 0 else 1.0
-
-        effective_q_set = set(q_tokens)
-
-        overlap_map = {}
-        for i, c in enumerate(eligible):
-            c_toks = set(tokenize_vietnamese_english(c.text))
-            overlap_map[c.chunk_id] = len(effective_q_set & c_toks) / max(1, len(effective_q_set))
-
-        lexical_scores = [
-            0.6 * (float(bm25_scores[i]) / float(max_bm25)) + 0.4 * overlap_map[eligible[i].chunk_id]
-            for i in range(len(eligible))
-        ]
+        max_bm25 = max(bm25_scores)
+        if max_bm25 <= 0:
+            max_bm25 = 1.0
+        q_terms = set(re.findall(r"\w+", query.lower())) - STOP_WORDS
+        if not q_terms:
+            return []
 
         # Downweight Table of Contents / List of Figures when user seeks substantive content/explanation
         query_asks_content = any(
@@ -412,80 +510,35 @@ class WorkspaceRepository:
             for w in ["giải thích", "chi tiết", "nội dung", "như thế nào", "là gì", "yêu cầu", "tính năng", "feature", "explain", "describe", "detail", "how", "what"]
         ) and not any(w in query.lower() for w in ["mục lục", "table of contents", "danh mục"])
 
-        for i, c in enumerate(eligible):
-            c_text_lower = c.text.lower()
-            is_toc = bool(
-                re.search(r"(\.\s*){4,}\s*\d+", c.text)
-                or "list of figures" in c_text_lower
-                or "table of contents" in c_text_lower
-                or ("mục lục" in c_text_lower and re.search(r"\d+$", c.text.strip()))
+        lexical_scores = []
+        penalties = []
+        for i, chunk in enumerate(eligible):
+            text = chunk.text.lower()
+            is_toc = query_asks_content and (
+                re.search(r"(\.\s*){4,}\s*\d+", text)
+                or "list of figures" in text or "table of contents" in text
+                or ("mục lục" in text and re.search(r"\d+$", text.rstrip()))
             )
-            if is_toc and query_asks_content:
-                bm25_scores[i] *= 0.15
-                lexical_scores[i] *= 0.15
+            penalty = 0.15 if is_toc else 1.0
+            penalties.append(penalty)
+            bm25_scores[i] *= penalty
+            lexical_scores.append(penalty * len(q_terms.intersection(re.findall(r"\w+", text))) / len(q_terms))
 
-        bm25_sorted_indices = sorted(
+        keyword_order = sorted(
             range(len(eligible)),
             key=lambda i: (float(bm25_scores[i]), lexical_scores[i]),
             reverse=True,
         )
-        rank_bm25 = {eligible[idx].chunk_id: r for r, idx in enumerate(bm25_sorted_indices, start=1)}
-        norm_bm25_map = {eligible[i].chunk_id: float(bm25_scores[i]) / float(max_bm25) for i in range(len(eligible))}
-
-        # 3. Dense Vector Search (if embed_fn is available)
-        dense_scores_map: Dict[str, float] = {}
-        rank_dense: Dict[str, int] = {}
-
-        if self.dense_available and callable(self._embed_fn):
-            try:
-                q_vec = self._embed_fn([query])
-                if q_vec is not None and len(q_vec) > 0:
-                    c_texts = [c.text for c in eligible]
-                    c_vecs = self._embed_fn(c_texts)
-                    if c_vecs is not None and len(c_vecs) == len(eligible):
-                        import numpy as np
-                        q_arr = np.asarray(q_vec[0], dtype=np.float32)
-                        c_arr = np.asarray(c_vecs, dtype=np.float32)
-                        q_norm = np.linalg.norm(q_arr)
-                        c_norms = np.linalg.norm(c_arr, axis=1)
-                        denom = np.maximum(c_norms * q_norm, 1e-9)
-                        sims = np.dot(c_arr, q_arr) / denom
-                        dense_scores_map = {eligible[i].chunk_id: float(sims[i]) for i in range(len(eligible))}
-                        dense_sorted_indices = sorted(range(len(eligible)), key=lambda i: sims[i], reverse=True)
-                        rank_dense = {eligible[idx].chunk_id: r for r, idx in enumerate(dense_sorted_indices, start=1)}
-            except Exception:
-                dense_scores_map = {}
-                rank_dense = {}
-
-        # 4. Reciprocal Rank Fusion (RRF) & Absolute Relevance Score Calibration
-        scored_chunks: List[DocumentChunk] = []
-
-        for chunk in eligible:
-            cid = chunk.chunk_id
-            r_bm25 = rank_bm25[cid]
-            b_norm = norm_bm25_map[cid]
-            overlap = overlap_map[cid]
-            lex_score = 0.6 * b_norm + 0.4 * overlap
-
-            c_copy = chunk.model_copy()
-            c_copy.bm25_score = round(b_norm, 4)
-
-            if cid in rank_dense:
-                r_d = rank_dense[cid]
-                d_sim = dense_scores_map[cid]
-                c_copy.dense_score = round(d_sim, 4)
-                # Standard RRF formula
-                rrf = 1.0 / (60.0 + r_bm25) + 1.0 / (60.0 + r_d)
-                # Calibrated absolute score in [0.0, 1.0]
-                calibrated_score = max(d_sim, lex_score)
-                c_copy.score = round(min(1.0, max(0.0, calibrated_score)), 4)
-            else:
-                c_copy.dense_score = 0.0
-                rrf = 1.0 / (60.0 + r_bm25)
-                c_copy.score = round(min(1.0, max(0.0, lex_score)), 4)
-
-            c_copy.rrf_score = round(rrf, 6)
-            scored_chunks.append(c_copy)
+        keyword_rank = {index: rank for rank, index in enumerate(keyword_order, start=1)}
+        semantic_result = self._semantic_scores(eligible, query)
+        dense_scores = [0.0] * len(eligible)
+        dense_rank = {}
+        weight = 0.0
+        if semantic_result is not None:
+            similarities, weight = semantic_result
+            dense_scores = [float(value) * penalty for value, penalty in zip(similarities, penalties)]
+            dense_order = sorted(range(len(eligible)), key=dense_scores.__getitem__, reverse=True)
+            dense_rank = {index: rank for rank, index in enumerate(dense_order, start=1)}
 
         # 5. Pinpoint Reranker: Detect specific entities, numbers, dates, or exact phrases
         q_lower = query.lower()
@@ -493,7 +546,22 @@ class WorkspaceRepository:
         is_numeric_q = any(w in q_lower for w in ["bao nhiêu", "mấy", "tỷ lệ", "phần trăm", "điểm", "trang", "pages", "how many", "count"])
         clean_q_phrase = re.sub(r"[^\w\s]", "", q_lower).strip()
 
-        for c_copy in scored_chunks:
+        ranked = []
+        for i, chunk in enumerate(eligible):
+            lexical = lexical_scores[i]
+            semantic = dense_scores[i]
+            if not lexical and not semantic:
+                continue
+            c_copy = chunk.model_copy()
+            c_copy.bm25_score = round(float(bm25_scores[i]) / max_bm25, 4)
+            c_copy.dense_score = round(semantic, 4)
+            rrf = 1.0 / (60.0 + keyword_rank[i])
+            if i in dense_rank:
+                rrf += 1.0 / (60.0 + dense_rank[i])
+            c_copy.rrf_score = round(rrf, 6)
+            # Keep the relevance threshold on the strongest signal; both signals rank the candidates.
+            strength = max(lexical, semantic)
+            blended = weight * semantic + (1.0 - weight) * lexical
             c_text_lower = c_copy.text.lower()
             pinpoint_bonus = 0.0
 
@@ -519,16 +587,15 @@ class WorkspaceRepository:
 
             # Relevance Gate: Pinpoint bonus applies strongly to relevant candidates,
             # while scaling down on completely ungrounded candidates (score < 0.10) to prevent noise takeover
-            if c_copy.score < 0.10:
+            if strength < 0.10:
                 pinpoint_bonus *= 0.2
 
             c_copy.pinpoint_score = round(pinpoint_bonus, 4)
-            c_copy.score = round(min(1.0, c_copy.score + pinpoint_bonus), 4)
+            c_copy.score = round(min(1.0, strength + pinpoint_bonus), 4)
+            ranked.append((blended + pinpoint_bonus, c_copy))
 
-        # Sort by calibrated score (which cleanly merges RRF lexical/dense relevance and pinpoint boost),
-        # using pinpoint_score and rrf_score as deterministic tie-breakers
-        scored_chunks.sort(key=lambda x: (x.score, x.pinpoint_score, x.rrf_score), reverse=True)
-        return scored_chunks[:top_k]
+        ranked.sort(key=lambda item: (item[0], item[1].dense_score, item[1].rrf_score), reverse=True)
+        return [chunk for _, chunk in ranked[:top_k]]
 
     def build_page_lookup(self) -> Dict[Tuple[str, int], Dict[str, Any]]:
         """
@@ -565,6 +632,11 @@ class WorkspaceRepository:
 
         for (doc_id, page_num), lines_dict in page_lines_map.items():
             sorted_line_nos = sorted(lines_dict.keys())
+            windows: list[tuple[int, list[str]]] = []
+            for line_no in sorted_line_nos:
+                if not windows or line_no != windows[-1][0] + len(windows[-1][1]):
+                    windows.append((line_no, []))
+                windows[-1][1].append(lines_dict[line_no])
             if sorted_line_nos:
                 clean_page_text = "\n".join(lines_dict[ln] for ln in sorted_line_nos)
                 min_line = sorted_line_nos[0]
@@ -582,6 +654,7 @@ class WorkspaceRepository:
                 "version_id": meta.get("doc_version", "v1"),
                 "doc_hash": meta.get("doc_hash", ""),
                 "lines": (min_line, max_line),
+                "windows": windows,
             }
 
             # Register standard key

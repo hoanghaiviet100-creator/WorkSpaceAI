@@ -179,13 +179,13 @@ test("landing workspace history follows latest real activity and opens the lates
   assert.equal(empty.thread, undefined);
 });
 
-test("all eight database tables have explicit frontend contracts", () => {
+test("all eleven database tables have explicit frontend contracts", () => {
   const source = readFileSync("src/schema.ts", "utf8");
   const sql = readFileSync("../database/schema.sql", "utf8");
   const tables = [
     ...sql.matchAll(/CREATE TABLE IF NOT EXISTS\s+`(\w+)`/gi),
   ].map((m) => m[1]);
-  assert.equal(tables.length, 8);
+  assert.equal(tables.length, 11);
   for (const table of tables) assert.match(source, new RegExp(`\\b${table}:`));
 });
 test("migration preserves sources, CC and all conversations", () => {

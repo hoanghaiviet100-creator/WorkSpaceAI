@@ -1,0 +1,54 @@
+{
+  "description": "Câu mẫu WorkspaceAI được soạn theo ba hướng dẫn để kiểm thử định tuyến, phạm vi và ngữ cảnh của Feature 1.",
+  "sources": {
+    "microsoft_clu": {
+      "url": "https://learn.microsoft.com/en-us/azure/ai-services/language-service/conversational-language-understanding/concepts/best-practices",
+      "applied_to": "Ghi riêng thao tác mong đợi và đối tượng như tài liệu, chương hoặc tiểu mục."
+    },
+    "dialogflow_design": {
+      "url": "https://docs.cloud.google.com/dialogflow/cx/docs/concept/agent-design#training_phrases_should_be_natural",
+      "applied_to": "Dùng câu hỏi và câu yêu cầu tự nhiên, đa dạng cách diễn đạt cùng một ý định."
+    },
+    "dialogflow_no_match": {
+      "url": "https://docs.cloud.google.com/dialogflow/cx/docs/concept/agent-settings#ml-settings",
+      "applied_to": "Thử các ca thiếu đối tượng, phạm vi mơ hồ hoặc nằm ngoài nguồn đã chọn."
+    }
+  },
+  "cases": [
+    {"id":"overview-topic","source":"dialogflow_design","query":"Tài liệu này nói về gì?","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"document_summary","document":"git-guide.pdf","depth":"standard"}},
+    {"id":"overview-content","source":"dialogflow_design","query":"File này trình bày nội dung gì?","selected_doc_ids":["calculus.pdf"],"expected":{"intent":"document_summary","document":"calculus.pdf","depth":"standard"}},
+    {"id":"overview-contents","source":"dialogflow_design","query":"Tệp này gồm những gì?","selected_doc_ids":["calculus.pdf"],"expected":{"intent":"document_summary","document":"calculus.pdf","depth":"standard"}},
+    {"id":"overview-detailed","source":"dialogflow_design","query":"Hãy nêu chi tiết những gì có trên file","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"document_summary","document":"git-guide.pdf","depth":"detailed"}},
+    {"id":"overview-brief","source":"dialogflow_design","query":"Tóm gọn nội dung tài liệu trong vài ý.","selected_doc_ids":["calculus.pdf"],"expected":{"intent":"document_summary","document":"calculus.pdf","depth":"brief"}},
+    {"id":"overview-named-source","source":"microsoft_clu","query":"Tóm lược calculus.pdf giúp mình.","selected_doc_ids":["git-guide.pdf","calculus.pdf"],"expected":{"intent":"document_summary","document":"calculus.pdf","depth":"standard"}},
+    {"id":"overview-english","source":"dialogflow_design","query":"Give me a concise summary of git-guide.pdf.","selected_doc_ids":["git-guide.pdf","calculus.pdf"],"expected":{"intent":"document_summary","document":"git-guide.pdf","depth":"brief"}},
+
+    {"id":"chapter-summary","source":"microsoft_clu","query":"Tóm tắt chương 8","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"outline","number":"8","depth":"standard"}},
+    {"id":"chapter-detailed","source":"dialogflow_design","query":"Hãy nêu chi tiết những gì trong chương 8","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"outline","number":"8","depth":"detailed"}},
+    {"id":"chapter-detailed-suffix","source":"dialogflow_design","query":"Giải thích chương 8 chi tiết.","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"outline","number":"8","depth":"detailed"}},
+    {"id":"chapter-compound","source":"dialogflow_design","query":"Chương 1 nói về gì? Hãy giải thích theo các tiểu mục trong chương","selected_doc_ids":["calculus.pdf"],"expected":{"intent":"outline","number":"1","depth":"subsections"}},
+    {"id":"subsection-question","source":"microsoft_clu","query":"Tiểu mục 2.4 nói về gì?","selected_doc_ids":["calculus.pdf"],"expected":{"intent":"outline","number":"2.4","depth":"standard"}},
+    {"id":"subsection-explanation","source":"microsoft_clu","query":"Mô tả chi tiết nội dung của mục 8.5.","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"outline","number":"8.5","depth":"detailed"}},
+    {"id":"chapter-contextual-summary","source":"microsoft_clu","query":"Tóm tắt phần đó","selected_doc_ids":["git-guide.pdf"],"history":[{"role":"user","content":"Chương 8 nói về gì?"}],"expected":{"intent":"outline","number":"8","depth":"standard"}},
+    {"id":"subsection-contextual-explanation","source":"dialogflow_design","query":"Giải thích chi tiết tiểu mục đó.","selected_doc_ids":["calculus.pdf"],"history":[{"role":"user","content":"Mục 2.4 có gì?"}],"expected":{"intent":"outline","number":"2.4","depth":"detailed"}},
+    {"id":"chapter-contextual-more","source":"dialogflow_design","query":"Chi tiết hơn giúp tôi","selected_doc_ids":["git-guide.pdf"],"history":[{"role":"user","content":"Tóm tắt chương 8."},{"role":"assistant","content":"Chương này hướng dẫn làm việc với GitHub."},{"role":"user","content":"Tóm tắt phần đó."}],"expected":{"intent":"outline","number":"8","depth":"detailed"}},
+
+    {"id":"qa-git-command","source":"microsoft_clu","query":"Tóm tắt cách git fetch lấy thay đổi từ xa.","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"qa","contains":["git fetch"]}},
+    {"id":"qa-chapter-specific","source":"microsoft_clu","query":"Trong chương 8, vì sao git push bị từ chối?","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"qa","contains":["git push"]}},
+    {"id":"qa-comparison","source":"dialogflow_design","query":"Sự khác nhau giữa git fetch và git pull là gì?","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"qa","contains":["git fetch","git pull"]}},
+    {"id":"qa-condition","source":"microsoft_clu","query":"Có phải miền xác định là toàn bộ mặt phẳng nếu không nêu tập D không?","selected_doc_ids":["calculus.pdf"],"expected":{"intent":"qa","contains":["miền xác định"]}},
+    {"id":"qa-context-more","source":"dialogflow_design","query":"Hãy nói rõ hơn.","selected_doc_ids":["git-guide.pdf"],"history":[{"role":"user","content":"Git fetch hoạt động thế nào?"},{"role":"assistant","content":"Lệnh này lấy dữ liệu từ xa."}],"expected":{"intent":"qa","contains":["git fetch"]}},
+    {"id":"command-reference","source":"microsoft_clu","query":"Hãy nêu những lệnh Git quan trọng","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"command_reference","contains":["git status","git add"]}},
+    {"id":"command-reference-english","source":"dialogflow_design","query":"What are the essential Git commands?","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"command_reference","contains":["git status","git add"]}},
+
+    {"id":"no-section-context","source":"dialogflow_no_match","query":"Tóm tắt phần đó","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"clarification","status":"AWAITING_CLARIFICATION","slot":"topic_or_section"}},
+    {"id":"no-user-context","source":"dialogflow_no_match","query":"Giải thích mục trên.","selected_doc_ids":["git-guide.pdf"],"history":[{"role":"assistant","content":"Bạn muốn tìm hiểu phần nào?"}],"expected":{"intent":"clarification","status":"AWAITING_CLARIFICATION","slot":"topic_or_section"}},
+    {"id":"no-elaboration-context","source":"dialogflow_no_match","query":"Hãy giải thích chi tiết hơn.","selected_doc_ids":["calculus.pdf"],"history":[{"role":"user","content":"Xin chào!"}],"expected":{"intent":"clarification","status":"AWAITING_CLARIFICATION","slot":"topic_or_section"}},
+    {"id":"ambiguous-document","source":"dialogflow_no_match","query":"Tóm tắt file này","selected_doc_ids":["git-guide.pdf","calculus.pdf"],"expected":{"intent":"no_match","status":"ABSTAINED_INSUFFICIENT_EVIDENCE","message_contains":"Có nhiều tài liệu"}},
+    {"id":"document-not-selected","source":"dialogflow_no_match","query":"Tóm tắt calculus.pdf","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"no_match","status":"ABSTAINED_INSUFFICIENT_EVIDENCE","message_contains":"các nguồn đã chọn"}},
+    {"id":"no-source-selected","source":"dialogflow_no_match","query":"Tóm tắt tài liệu","selected_doc_ids":[],"expected":{"intent":"no_match","status":"ABSTAINED_NO_SOURCE_SELECTED"}},
+    {"id":"off-topic","source":"dialogflow_no_match","query":"Ăn cơm chưa?","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"no_match","status":"ABSTAINED_INSUFFICIENT_EVIDENCE"}},
+    {"id":"greeting","source":"dialogflow_design","query":"Xin chào!","selected_doc_ids":[],"expected":{"intent":"conversation","status":"CONVERSATION"}},
+    {"id":"email-boundary","source":"dialogflow_no_match","query":"Soạn thư nhắc nhóm về buổi demo ngày mai.","selected_doc_ids":["git-guide.pdf"],"expected":{"intent":"email_clarification","slot":"recipient_email"}}
+  ]
+}

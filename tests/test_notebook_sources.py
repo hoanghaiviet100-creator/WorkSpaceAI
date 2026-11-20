@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.algorithms.feature1.outline_builder import build_outline
 from backend.core.schemas import RouteType, UserRequest
 from backend.repositories.workspace_repository import WorkspaceRepository
 from backend.services.document_service import DocumentService
@@ -30,6 +31,35 @@ def test_docx_extraction_preserves_paragraphs_and_tabs():
     assert parse_office_pages("source.docx", content) == [(1, "Deadline\tFriday\nRead the rubric.")]
     with pytest.raises(ValueError):
         parse_office_pages("bad.docx", b"not a zip")
+
+
+def test_docx_outline_uses_heading_styles_and_line_coordinates(tmp_path):
+    xml = """<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+    <w:body>
+      <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Access policy</w:t></w:r></w:p>
+      <w:p><w:r><w:t>1. Suggest a reviewer</w:t><w:br/><w:t>2. Request access</w:t></w:r></w:p>
+      <w:p><w:pPr><w:outlineLvl w:val="1"/></w:pPr><w:r><w:t>Exceptions</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Approval is required.</w:t></w:r></w:p>
+      <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Retention policy</w:t></w:r></w:p>
+      <w:p><w:r><w:t>Retain records for one month.</w:t></w:r></w:p>
+    </w:body></w:document>"""
+    library = tmp_path / "library.json"
+    service = DocumentService(WorkspaceRepository(), library_path=library)
+    payload = archive({"word/document.xml": xml})
+    document = service.ingest_file("policy.docx", payload)["document"]
+    restored = DocumentService(WorkspaceRepository(), library_path=library)
+    reloaded = restored.repository.documents[document.doc_id]
+    sections = build_outline(restored.repository.chunks, reloaded.pdf_headings)
+    assert [(section.title, section.level, section.blocks[0].start_line) for section in sections] == [
+        ("Access policy", 1, 1), ("Exceptions", 2, 4), ("Retention policy", 1, 6),
+    ]
+    assert sections[1].parent_id == sections[0].id
+    reloaded.pdf_headings = []
+    restored.set_selected_documents([])
+    same_file = restored.ingest_file("policy.docx", payload)
+    assert same_file["status"] == "ALREADY_EXISTS"
+    assert same_file["document"].doc_id == document.doc_id
+    assert not same_file["document"].is_selected and len(same_file["document"].pdf_headings) == 3
 
 
 def test_pptx_uses_presentation_order_and_keeps_blank_slide_numbers():

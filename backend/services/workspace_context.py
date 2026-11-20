@@ -9,6 +9,7 @@ from backend.repositories.workspace_repository import WorkspaceRepository, works
 from backend.repositories.feature3.draft_repository import DraftRepository, draft_repository
 from backend.services.document_service import DocumentService, document_service
 from backend.services.feature1.qa_service import QAService, qa_service
+from backend.services.feature1.research_index import ResearchIndex
 from backend.services.feature3.email_service import EmailService, email_service
 from backend.services.feature2.f2_practice_service import F2PracticeService
 
@@ -37,10 +38,12 @@ def configure_workspace_storage(root: Path) -> bool:
     global _library_root
     with _context_lock:
         restored = document_service.enable_local_storage(root / "midterm.json")
+        qa_service.summary_cache_dir = root / "summaries" / "midterm"
         for workspace_id, context in _contexts.items():
             if not context.is_default:
                 context.documents.enable_local_storage(root / f"{workspace_id}.json")
                 context.documents.save_library()
+                context.qa.summary_cache_dir = root / "summaries" / workspace_id
         _library_root = root
         return restored
 
@@ -53,12 +56,19 @@ def get_workspace_services(workspace_id: Optional[str] = None) -> WorkspaceServi
     with _context_lock:
         if workspace_id not in _contexts:
             if workspace_id == "midterm":
+                qa_service.research_index = ResearchIndex(workspace_id, workspace_repository)
                 _contexts[workspace_id] = WorkspaceServices(workspace_repository, document_service, qa_service, draft_repository, email_service, True)
             else:
                 repository = WorkspaceRepository()
                 drafts = DraftRepository()
                 library_path = _library_root / f"{workspace_id}.json" if _library_root is not None else None
-                _contexts[workspace_id] = WorkspaceServices(repository, DocumentService(repository, library_path), QAService(repository), drafts, EmailService(drafts, repository))
+                qa = QAService(repository, research_index=ResearchIndex(workspace_id, repository))
+                _contexts[workspace_id] = WorkspaceServices(
+                    repository, DocumentService(repository, library_path), qa, drafts,
+                    EmailService(drafts, repository),
+                )
+                if _library_root is not None:
+                    _contexts[workspace_id].qa.summary_cache_dir = _library_root / "summaries" / workspace_id
         return _contexts[workspace_id]
 
 

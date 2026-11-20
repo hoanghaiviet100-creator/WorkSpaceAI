@@ -31,6 +31,14 @@ class DocumentChunk(BaseModel):
     doc_hash: str = ""
 
 
+class DocumentHeading(BaseModel):
+    title: str
+    page: int
+    level: int = 1
+    origin: Literal["bookmark", "font", "style"]
+    line: Optional[int] = None
+
+
 class DocumentMetadata(BaseModel):
     doc_id: str
     doc_name: str
@@ -43,6 +51,7 @@ class DocumentMetadata(BaseModel):
     uploaded_at: str = ""
     is_selected: bool = True
     source_url: Optional[str] = None
+    pdf_headings: List[DocumentHeading] = Field(default_factory=list, exclude=True)
 
 
 class GeneratedClaim(BaseModel):
@@ -53,6 +62,7 @@ class GeneratedClaim(BaseModel):
     cited_page: int
     evidence_quote: str
     verification_status: str = "UNVERIFIED"
+    semantic_status: Optional[Literal["SUPPORTED", "CONTRADICTED", "INSUFFICIENT", "UNAVAILABLE"]] = None
     cited_start_line: Optional[int] = None
     cited_end_line: Optional[int] = None
     doc_version: Optional[str] = None

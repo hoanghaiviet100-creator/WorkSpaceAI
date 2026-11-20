@@ -22,7 +22,7 @@ Validation Pipeline:
 """
 from dataclasses import dataclass, field
 import re
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
 
 
 @dataclass
@@ -40,6 +40,8 @@ class CitationClaim:
     match_score: float = 0.0
     matched_span: Optional[str] = None
     section: Optional[str] = None
+    subsection: Optional[str] = None
+    semantic_status: Optional[Literal["SUPPORTED", "CONTRADICTED", "INSUFFICIENT", "UNAVAILABLE"]] = None
 
 
 @dataclass
@@ -58,6 +60,10 @@ def _normalize_text(s: str) -> str:
 def _tokenize(s: str) -> List[str]:
     """Extracts alphanumeric word tokens in lowercase."""
     return re.findall(r"\w+", s.lower())
+
+
+_NUMERIC_TOKENS = re.compile(r"(?<!\w)[-+−]?\d+(?:[.,/]\d+)*(?:\s*%)?")
+"""nhận diện các giá trị số trong văn bản"""
 
 
 def _token_lcs_ratio(q_tokens: List[str], s_tokens: List[str]) -> float:
@@ -114,6 +120,8 @@ def _to_claim_dataclass(item: Any) -> CitationClaim:
             match_score=item.match_score,
             matched_span=item.matched_span,
             section=item.section,
+            subsection=item.subsection,
+            semantic_status=item.semantic_status,
         )
 
     if isinstance(item, dict):
@@ -130,6 +138,8 @@ def _to_claim_dataclass(item: Any) -> CitationClaim:
             match_score=float(item.get("match_score", 0.0)),
             matched_span=item.get("matched_span"),
             section=item.get("section"),
+            subsection=item.get("subsection"),
+            semantic_status=item.get("semantic_status"),
         )
 
     # Generic object attribute extraction (non-mutating)
@@ -146,6 +156,8 @@ def _to_claim_dataclass(item: Any) -> CitationClaim:
         match_score=float(getattr(item, "match_score", 0.0)),
         matched_span=getattr(item, "matched_span", None),
         section=getattr(item, "section", None),
+        subsection=getattr(item, "subsection", None),
+        semantic_status=getattr(item, "semantic_status", None),
     )
 
 
@@ -230,6 +242,11 @@ def verify_citations(
             entry_hash = None
 
         # 3. Line Range Validity Check
+        if (c.cited_start_line is None) != (c.cited_end_line is None):
+            c.verification_status = "INVALID_LINE_RANGE"
+            c.match_score = 0.0
+            flagged.append(c)
+            continue
         if c.cited_start_line is not None and c.cited_end_line is not None:
             if c.cited_start_line <= 0 or c.cited_end_line < c.cited_start_line:
                 c.verification_status = "INVALID_LINE_RANGE"
@@ -256,7 +273,18 @@ def verify_citations(
             continue
 
         # 5. Evidence Quotation Match
-        norm_source = _normalize_text(source_text)
+        if isinstance(entry, dict) and "windows" in entry:
+            windows = entry["windows"]
+        else:
+            first_line = entry.get("lines", (1, 1))[0] if isinstance(entry, dict) else 1
+            windows = [(first_line, source_text.splitlines())]
+        snippets = []
+        for start, lines in windows:
+            left = (c.cited_start_line or start) - start
+            right = (c.cited_end_line or start + len(lines) - 1) - start
+            if 0 <= left <= right < len(lines):
+                snippets.append("\n".join(lines[left:right + 1]))
+        normalized_sources = [(snippet, _normalize_text(snippet)) for snippet in snippets]
         norm_quote = _normalize_text(c.evidence_quote)
 
         if not norm_quote:
@@ -266,7 +294,7 @@ def verify_citations(
             continue
 
         # Step 5A: Exact normalized substring match
-        if norm_quote in norm_source:
+        if any(norm_quote in source for _, source in normalized_sources):
             c.verification_status = "VERIFIED_EXACT"
             c.match_score = 1.0
             c.matched_span = c.evidence_quote
@@ -274,25 +302,39 @@ def verify_citations(
             validated.append(c)
             continue
 
+        quote_numbers = {value.replace(" ", "").replace("−", "-") for value in _NUMERIC_TOKENS.findall(norm_quote)}
+        eligible_sources = [
+            (snippet, _tokenize(source)) for snippet, source in normalized_sources
+            if quote_numbers <= {value.replace(" ", "").replace("−", "-") for value in _NUMERIC_TOKENS.findall(source)}
+        ]
+        if not eligible_sources:
+            c.verification_status = "UNGROUNDED_QUOTE"
+            c.match_score = 0.0
+            flagged.append(c)
+            continue
+
         # Step 5B: Token-LCS match
         q_tokens = _tokenize(norm_quote)
-        s_tokens = _tokenize(norm_source)
-        lcs_ratio = _token_lcs_ratio(q_tokens, s_tokens)
+        lcs_ratio, matched_span = max(
+            (_token_lcs_ratio(q_tokens, tokens), snippet) for snippet, tokens in eligible_sources
+        )
 
         if lcs_ratio >= theta_match:
             c.verification_status = "VERIFIED_FUZZY"
             c.match_score = round(lcs_ratio, 4)
-            c.matched_span = c.evidence_quote
+            c.matched_span = matched_span
             verified_count += 1
             validated.append(c)
             continue
 
         # Step 5C: Fallback Token Overlap
-        overlap = _token_overlap_ratio(q_tokens, s_tokens)
+        overlap, matched_span = max(
+            (_token_overlap_ratio(q_tokens, tokens), snippet) for snippet, tokens in eligible_sources
+        )
         if overlap >= theta_match:
             c.verification_status = "VERIFIED_FUZZY"
             c.match_score = round(overlap, 4)
-            c.matched_span = c.evidence_quote
+            c.matched_span = matched_span
             verified_count += 1
             validated.append(c)
         else:

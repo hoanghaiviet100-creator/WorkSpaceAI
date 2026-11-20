@@ -3,7 +3,7 @@ import type { Source, Evidence } from "./data";
 import { Badge, Notice } from "./components";
 import { isVerified } from "./schema";
 import { getDocumentPage } from "./api";
-import type { DocumentPageRow } from "./schema";
+import type { DocumentPage } from "./schema";
 
 export default function DocumentInspector({
   source,
@@ -21,7 +21,7 @@ export default function DocumentInspector({
   );
   const localPage = source?.pages?.find((p) => p.page_number === pageNumber);
   const [remotePage, setRemotePage] = useState<
-    (DocumentPageRow & { doc_hash?: string }) | null
+    (DocumentPage & { doc_hash?: string }) | null
   >(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);

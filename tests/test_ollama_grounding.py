@@ -21,7 +21,7 @@ def test_ollama_never_invents_citations(monkeypatch, response):
     chunk = DocumentChunk(chunk_id='c', doc_id='d', doc_name='d', text='Real source text')
     assert provider.generate_grounded_qa('Question', [chunk]) == []
 
-from backend.services.feature1.qa_service import expand_contextual_query, is_detail_followup, QAService
+from backend.services.feature1.qa_service import expand_contextual_query, is_detail_followup, outline_request, QAService
 
 @pytest.mark.parametrize('followup', ['mô tả một cách chi tiết', 'hãy giải thích chi tiết hơn', 'chi tiết hơn', 'explain in detail'])
 def test_elaboration_keeps_original_topic_across_followups(followup):
@@ -43,6 +43,15 @@ def test_elaboration_keeps_original_topic_across_followups(followup):
 def test_new_subject_is_not_replaced(query):
     assert not is_detail_followup(query)
     assert expand_contextual_query(query, [{'role': 'user', 'content': 'Socket là gì?'}]) == query
+
+
+def test_named_followup_uses_its_previous_topic_after_an_intervening_question():
+    earlier = 'Lệnh git remote -v khác git remote ở điểm nào'
+    chapter = 'Chương 8 hướng dẫn những thao tác nào khi làm việc với GitHub?'
+    followup = 'Giải thích kỹ hơn phần vừa nói về remote và cho ví dụ có trong tài liệu'
+    history = [{'role': 'user', 'content': text} for text in [earlier, chapter]]
+    assert expand_contextual_query(followup, history) == f'{earlier} {followup}'
+    assert outline_request(chapter) == ('8', True, False)
 
 
 def test_unrelated_questions_never_send_ftp_evidence_to_ollama():
@@ -105,6 +114,8 @@ def test_ollama_detail_budget_keeps_context_and_cpu_limits(monkeypatch, query, b
     from types import SimpleNamespace
     import importlib
     provider_module = importlib.import_module("backend.providers.llm_provider")
+    monkeypatch.setattr(settings, 'llm_provider', 'ollama')
+    monkeypatch.setattr(settings, 'offline_only', False)
     provider = LLMProvider()
     monkeypatch.setattr(provider, 'is_ollama_online', lambda: True)
     monkeypatch.setattr(provider, 'get_effective_ollama_model', lambda: 'qwen2.5:7b')
@@ -113,10 +124,13 @@ def test_ollama_detail_budget_keeps_context_and_cpu_limits(monkeypatch, query, b
         captured.update(kwargs)
         return SimpleNamespace(status_code=200, json=lambda: {'response': 'ok'})
     monkeypatch.setattr(provider_module.httpx, 'post', post)
-    provider.call_ollama(build_qa_prompt(query, [DocumentChunk(chunk_id="c", doc_id="d", doc_name="d", text="Socket source")]), enforce_json=True)
+    provider.generate_grounded_qa(query, [DocumentChunk(chunk_id="c", doc_id="d", doc_name="d", text="Socket source")])
     assert captured['json']['options']['num_predict'] == budget
     assert captured['json']['options']['num_ctx'] == 4096
     assert captured['json']['options']['num_thread'] == 4
+    citation = captured['json']['format']['properties']['citations']['items']
+    assert citation['required'] == ['claim', 'source_id', 'excerpt']
+    assert citation['properties']['source_id']['enum'] == [1]
 
 @pytest.mark.parametrize('query', ['alo', 'xin chào!', 'hello'])
 def test_greeting_does_not_retrieve_or_repeat_document(query):
@@ -140,6 +154,7 @@ def test_document_overview_uses_summary_instead_of_random_top_snippets(query, mo
     "Hãy miêu tả chi tiết toàn bộ những thông tin trong file giúp tôi",
     "Hãy nêu chi tiết những gì có ở trong file",
     "Hãy nêu chi tiết những gì có trong file",
+    "Hãy nêu chi tiết những gì có trên file",
     "Cho tôi biết chi tiết tài liệu này có những gì",
 ])
 def test_whole_document_description_uses_detailed_summary(monkeypatch, query):
@@ -154,14 +169,51 @@ def test_whole_document_description_uses_detailed_summary(monkeypatch, query):
     summarize.assert_called_once_with('selected.pdf', detailed=True)
 
 
-def test_specific_question_in_file_uses_retrieval(monkeypatch):
+@pytest.mark.parametrize("query", [
+    "Hãy nêu chi tiết lệnh RETR trong file", "Tóm tắt chương 8 của tài liệu",
+    "Tóm tắt quy trình commit trong file",
+])
+def test_specific_question_in_file_uses_retrieval(monkeypatch, query):
     from unittest.mock import Mock
 
     service = QAService()
     search = Mock(return_value=[])
     monkeypatch.setattr(service.repository, "search", search)
-    service.answer_question("Hãy nêu chi tiết lệnh RETR trong file", selected_doc_ids=["selected.docx"])
+    service.answer_question(query, selected_doc_ids=["selected.docx"])
     search.assert_called_once()
+
+
+def test_long_document_summary_keeps_chapter_openings_and_appendix(monkeypatch):
+    from unittest.mock import Mock
+    from backend.repositories.workspace_repository import WorkspaceRepository
+
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "offline_only", False)
+    repo = WorkspaceRepository()
+    doc = "tutorial.pdf"
+    repo.chunks = [
+        DocumentChunk(
+            chunk_id=str(page), doc_id=doc, doc_name=doc, page_number=page,
+            text={2: "1. Why Version Control?", 4: "2. Working with GitHub",
+                  6: "Appendix A — Command Cheat Sheet"}.get(page, "Exercises"),
+        )
+        for page in range(1, 8)
+    ]
+    for chunk in repo.chunks:
+        chunk.text += "\n" + ("A paragraph describing a Git concept. " * 110)
+        chunk.end_line = 2
+    provider = Mock()
+    provider.get_effective_ollama_model.return_value = "qwen-test"
+    provider.generate_summary_stage.return_value = {}
+    QAService(repository=repo, provider=provider).answer_question(
+        "Hãy nêu chi tiết những gì có trên file", selected_doc_ids=[doc],
+    )
+    calls = provider.generate_summary_stage.call_args_list
+    assert all(call.kwargs["stage"] == "map" for call in calls)
+    prompts = "\n".join(call.args[0] for call in calls)
+    assert all(heading in prompts for heading in (
+        "1. Why Version Control?", "2. Working with GitHub", "Appendix A — Command Cheat Sheet",
+    ))
 
 
 def test_ollama_detailed_summary_receives_more_context_than_chat(monkeypatch):

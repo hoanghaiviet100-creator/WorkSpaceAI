@@ -14,13 +14,14 @@ import io
 import subprocess
 import sys
 import unittest
+from unittest.mock import Mock
 from datetime import date
 from typing import List
 
 from fastapi.testclient import TestClient
 from backend.main import app
 from backend.core.config import settings
-from backend.core.schemas import DocumentSelectRequest, UserRequest
+from backend.core.schemas import DocumentChunk, DocumentSelectRequest, GeneratedClaim, UserRequest
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
 from backend.services.document_service import DocumentService, document_service
 from backend.services.feature1.qa_service import QAService, expand_contextual_query, qa_service
@@ -28,6 +29,220 @@ from backend.algorithms.feature1.citation_verifier import (
     CitationClaim,
     verify_citations,
 )
+
+
+def test_git_command_list_uses_verified_reference_rows_from_selected_source():
+    repo = WorkspaceRepository()
+    source = DocumentChunk(
+        chunk_id="reference",
+        doc_id="guide.pdf",
+        doc_name="guide.pdf",
+        page_number=73,
+        start_line=2,
+        end_line=12,
+        text=(
+            "Appendix A — Command Cheat Sheet\nTask\nCommand\n"
+            "what\n\nchanged?\ngit status, git diff\n"
+            "stage\ngit add <file>\nopen PR\ngh pr create"
+        ),
+    )
+    repo.chunks = [source]
+    repo._rebuild_index()
+    provider = Mock()
+    provider.generate_grounded_qa.return_value = []
+    service = QAService(repo, provider)
+    prompt = "Hãy nêu những lệnh Git quan trọng"
+
+    answer = service.answer_question(prompt, selected_doc_ids=["guide.pdf"])
+    assert answer["status"] == "ANSWER_VERIFIED"
+    claims = answer["validated_claims"]
+    assert len(claims) == 2
+    assert claims[0].cited_page == 73
+    assert "Kiểm tra trạng thái" in claims[0].claim_text
+    assert claims[0].section == "Luồng hằng ngày"
+    assert (claims[0].cited_start_line, claims[0].cited_end_line) == (5, 8)
+    assert claims[0].evidence_quote == "what\n\nchanged?\ngit status, git diff"
+    assert all(claim.verification_status == "VERIFIED_EXACT" for claim in claims)
+    provider.generate_grounded_qa.assert_not_called()
+
+    excluded = service.answer_question(prompt, selected_doc_ids=["other.pdf"])
+    assert excluded["status"] == "ABSTAINED_INSUFFICIENT_EVIDENCE"
+    specific = service.answer_question(
+        "Lệnh git status dùng làm gì?", selected_doc_ids=["guide.pdf"], tau_rel=0,
+    )
+    assert specific["status"] == "ABSTAINED_INSUFFICIENT_EVIDENCE"
+    provider.generate_grounded_qa.assert_called_once()
+
+
+def test_conflicting_sources_are_attributed_and_unselected_quote_cannot_be_verified(monkeypatch):
+    lines = {
+        "annex-a.pdf": "The submission deadline is 14 December at noon.",
+        "annex-b.pdf": "The submission deadline is 21 December at noon.",
+        "hidden.pdf": "The submission deadline is 30 December at noon.",
+    }
+    repo = WorkspaceRepository()
+    repo.chunks = [
+        DocumentChunk(
+            chunk_id=doc, doc_id=doc, doc_name=doc, page_number=1, text=line,
+            start_line=8, end_line=8,
+        )
+        for doc, line in lines.items()
+    ]
+    monkeypatch.setattr(repo, "search", lambda _q, **_options: repo.chunks[:2])
+    provider = Mock()
+    provider.generate_grounded_qa.return_value = [
+        GeneratedClaim(
+            claim_text=line, cited_doc_id=doc, cited_page=1,
+            cited_start_line=8, cited_end_line=8, evidence_quote=line,
+        )
+        for doc, line in lines.items()
+    ] + [
+        GeneratedClaim(
+            claim_text=lines["annex-b.pdf"], cited_doc_id="annex-a.pdf", cited_page=1,
+            cited_start_line=8, cited_end_line=8, evidence_quote=lines["annex-b.pdf"],
+        )
+    ]
+    service = QAService(repo, provider)
+    selected = ["annex-a.pdf", "annex-b.pdf"]
+    result = service.answer_question("When is the submission deadline?", selected_doc_ids=selected, tau_rel=0)
+    assert [(claim.section, claim.claim_text) for claim in result["validated_claims"]] == [
+        (doc, lines[doc]) for doc in selected
+    ]
+    assert {claim.cited_doc_id for claim in result["hallucination_flags"]} == {"hidden.pdf", "annex-a.pdf"}
+    summary = service.answer_question("Tóm gọn nội dung tài liệu", selected_doc_ids=selected)
+    assert "Có nhiều tài liệu" in summary["message"]
+    mismatched = service.answer_question("Tóm tắt file hidden.pdf", selected_doc_ids=["annex-a.pdf"])
+    assert "Không xác định được tài liệu" in mismatched["message"]
+    assert not mismatched["validated_claims"]
+
+
+def test_damaged_exercise_is_rejected_only_in_selected_source():
+    repo = WorkspaceRepository()
+    repo.chunks = [
+        DocumentChunk(
+            chunk_id="broken", doc_id="math.pdf", doc_name="math.pdf",
+            page_number=72, text="40. Tính độ dài cung.\n0\x14\x19=4",
+            start_line=2, end_line=3,
+        ),
+    ]
+    provider = Mock()
+    service = QAService(repo, provider)
+    result = service.answer_question("Giải bài tập số 40", selected_doc_ids=["math.pdf"])
+    assert not result["validated_claims"] and "trang PDF 72" in result["message"]
+    missing = service.answer_question("Giải bài số 40", selected_doc_ids=["other.pdf"])
+    assert "math.pdf" not in missing["message"]
+    provider.generate_grounded_qa.assert_not_called()
+
+
+def test_qa_rejects_ambiguous_alias_and_quote_stitched_across_context_gaps(monkeypatch):
+    repo = WorkspaceRepository()
+    rows = [("revision-a", 1, "Deadline is 14 December."),
+            ("revision-a", 20, "Submit via the portal."),
+            ("revision-b", 1, "Deadline is 21 December.")]
+    repo.chunks = [DocumentChunk(
+        chunk_id=f"{doc}-{line}", doc_id=doc, doc_name="policy.pdf",
+        page_number=1, text=text, start_line=line, end_line=line,
+    ) for doc, line, text in rows]
+    monkeypatch.setattr(repo, "search", lambda _q, **_options: repo.chunks)
+    provider = Mock()
+    provider.generate_grounded_qa.return_value = [
+        GeneratedClaim(claim_text="Wrong alias", cited_doc_id="policy.pdf", cited_page=1,
+                       evidence_quote=rows[0][2], cited_start_line=1, cited_end_line=1),
+        GeneratedClaim(claim_text="Stitched quote", cited_doc_id="revision-a", cited_page=1,
+                       evidence_quote=f"{rows[0][2]} {rows[1][2]}", cited_start_line=1, cited_end_line=20),
+    ]
+    result = QAService(repo, provider).answer_question(
+        "When is the deadline?", selected_doc_ids=["revision-a", "revision-b"], tau_rel=0,
+    )
+    assert not result["validated_claims"] and len(result["hallucination_flags"]) == 2
+
+
+def test_damaged_chapter_uses_verified_headings_instead_of_incomplete_equations():
+    repo = WorkspaceRepository()
+    text = "Chương 1\nHàm nhiều biến\n1.1 Miền xác định\n0\x14\x19=4\n1.2 Giới hạn"
+    repo.chunks = [DocumentChunk(
+        chunk_id="math", doc_id="math.pdf", doc_name="math.pdf",
+        page_number=4, text=text, start_line=1, end_line=5,
+    )]
+    provider = Mock()
+    result = QAService(repo, provider).answer_question("Tóm gọn chương 1", selected_doc_ids=["math.pdf"])
+    assert result["status"] == "ANSWER_VERIFIED"
+    assert [claim.claim_text for claim in result["validated_claims"]] == ["Miền xác định", "Giới hạn"]
+    assert [claim.cited_start_line for claim in result["validated_claims"]] == [3, 5]
+    provider.generate_summary_stage.assert_not_called()
+
+
+def test_generated_claims_need_semantic_support_even_with_exact_quote(monkeypatch):
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "feature1_semantic_verify", True)
+    monkeypatch.setattr(settings, "offline_only", False)
+    repo = WorkspaceRepository()
+    quote = "Nếu không chỉ rõ D, miền xác định gồm các điểm mà biểu thức có nghĩa."
+    repo.ingest_text_document("math.pdf", "math.pdf", [(1, quote)])
+    provider = Mock()
+    provider.generate_grounded_qa.return_value = [
+        GeneratedClaim(claim_text=text, cited_doc_id="math.pdf", cited_page=1, evidence_quote=quote,
+                       cited_start_line=1, cited_end_line=1)
+        for text in ("Mọi biểu thức đều xác định ở mọi điểm.",
+                     "Miền xác định gồm các điểm mà biểu thức có nghĩa.",
+                     "Miền xác định là tập đóng.", "Miền xác định là tập hữu hạn.")
+    ]
+    provider.judge_claim_support.return_value = {"1": "CONTRADICTED", "2": "SUPPORTED", "3": "INSUFFICIENT"}
+    result = QAService(repo, provider).answer_question(
+        "Quy tắc miền xác định là gì?", selected_doc_ids=["math.pdf"], tau_rel=0,
+    )
+    assert [claim.semantic_status for claim in result["validated_claims"]] == ["SUPPORTED"]
+    assert [claim.semantic_status for claim in result["hallucination_flags"]] == [
+        "CONTRADICTED", "INSUFFICIENT", "UNAVAILABLE",
+    ]
+    assert result["grounding_score"] == 0.25
+
+
+def test_domain_condition_is_not_widened_even_when_the_model_judge_would_accept(monkeypatch):
+    from backend.services.feature1.claim_support import review_claims
+
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "feature1_semantic_verify", True)
+    monkeypatch.setattr(settings, "offline_only", False)
+    provider = Mock()
+    claim = GeneratedClaim(claim_text="Miền xác định là toàn bộ mặt phẳng nếu đề không chỉ rõ D.",
+                           cited_doc_id="math.pdf", cited_page=1,
+                           evidence_quote="Miền xác định gồm các điểm mà tại đó biểu thức có nghĩa.")
+    accepted, rejected = review_claims(provider, [claim])
+    assert not accepted and rejected[0].semantic_status == "INSUFFICIENT"
+    provider.judge_claim_support.assert_not_called()
+    provider.judge_claim_support.return_value = {"1": "SUPPORTED"}
+    explicit = claim.model_copy(update={"evidence_quote": "Biểu thức có nghĩa trên D = ℝ²."})
+    accepted, rejected = review_claims(provider, [explicit])
+    assert accepted and not rejected
+
+
+def test_short_summary_rejects_quote_from_unsupplied_lines_on_same_page(monkeypatch):
+    import importlib
+
+    monkeypatch.setattr(settings, "llm_provider", "ollama")
+    monkeypatch.setattr(settings, "feature1_semantic_verify", False)
+    repo = WorkspaceRepository()
+    repo.chunks = [
+        DocumentChunk(chunk_id=str(line), doc_id="data.txt", doc_name="data.txt", page_number=1,
+                      text=f"Evidence at line {line}: " + "sample text " * 60, start_line=line, end_line=line)
+        for line in range(1, 17)
+    ]
+    provider = Mock()
+
+    def generate(_query, sampled, **_kwargs):
+        visible = {chunk.chunk_id for chunk in sampled}
+        hidden = next(chunk for chunk in repo.chunks if chunk.chunk_id not in visible)
+        return [GeneratedClaim(claim_text="Claim outside context", cited_doc_id=hidden.doc_id, cited_page=1,
+                               evidence_quote=hidden.text, cited_start_line=hidden.start_line,
+                               cited_end_line=hidden.end_line)]
+
+    provider.generate_grounded_qa.side_effect = generate
+    qa_module = importlib.import_module("backend.services.feature1.qa_service")
+    monkeypatch.setattr(qa_module, "extract_summary_passages", lambda *_args, **_kwargs: [])
+    result = QAService(repo, provider).summarize_document("data.txt", brief=True)
+    assert result["status"] == "ABSTAINED_INSUFFICIENT_EVIDENCE"
+    assert not result["validated_claims"]
 
 
 class TestFeature1GroundedQA(unittest.TestCase):
@@ -69,7 +284,7 @@ class TestFeature1GroundedQA(unittest.TestCase):
             cited_page=1,
             evidence_quote="Báo cáo kỹ thuật bao gồm 12-18 trang",
             cited_start_line=1,
-            cited_end_line=5,
+            cited_end_line=1,
             doc_version="v1",
             doc_hash="hash_a",
         )
@@ -85,7 +300,7 @@ class TestFeature1GroundedQA(unittest.TestCase):
             cited_page=1,
             evidence_quote="Báo cáo kỹ thuật 12-18 trang sơ đồ kiến trúc",
             cited_start_line=1,
-            cited_end_line=5,
+            cited_end_line=1,
             doc_version="v1",
             doc_hash="hash_a",
         )
@@ -109,6 +324,18 @@ class TestFeature1GroundedQA(unittest.TestCase):
         self.assertEqual(len(res_hall.validated_claims), 0)
         self.assertEqual(len(res_hall.hallucination_flags), 1)
         self.assertEqual(res_hall.hallucination_flags[0].verification_status, "UNGROUNDED_QUOTE")
+
+    def test_verifier_rejects_correct_quote_with_wrong_absolute_line(self):
+        text = "\n".join("Hạn nộp là thứ Sáu." if line == 40 else f"Dòng {line}." for line in range(1, 41))
+        claim = CitationClaim(
+            claim_text="Nộp thứ Sáu", cited_doc_id="d.pdf", cited_page=1,
+            evidence_quote="Hạn nộp là thứ Sáu.", cited_start_line=10, cited_end_line=12,
+        )
+        result = verify_citations([claim], {("d.pdf", 1): {"text": text, "total_lines": 40}})
+        assert not result.validated_claims
+        claim.cited_start_line = claim.cited_end_line = 40
+        result = verify_citations([claim], {("d.pdf", 1): {"text": text, "total_lines": 40}})
+        assert result.validated_claims[0].verification_status == "VERIFIED_EXACT"
 
     def test_03_citation_verifier_boundaries_and_hashes(self):
         """Tests line out of bounds, page out of bounds, and hash mismatch."""

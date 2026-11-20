@@ -1,16 +1,20 @@
 from datetime import datetime
 import hashlib
 import io
+import logging
 from pathlib import Path
 import re
 from threading import RLock
 from typing import Any, Dict, List, Optional, Tuple
 import pypdf
 
-from backend.core.schemas import DocumentChunk, DocumentMetadata
+from backend.core.schemas import DocumentChunk, DocumentHeading, DocumentMetadata
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
 from backend.repositories.local_library_store import LocalLibraryStore
 from backend.services.source_formats import parse_office_pages, MAX_SOURCE_BYTES
+
+
+logger = logging.getLogger(__name__)
 
 
 def format_chunk_with_lines(chunk: DocumentChunk) -> str:
@@ -55,6 +59,11 @@ class DocumentService:
         with self._library_lock:
             store = LocalLibraryStore(path)
             restored = store.restore(self.repository)
+            if restored and self.repository.index_existing_passages():
+                try:
+                    store.save(self.repository)
+                except OSError:
+                    logger.warning("Could not persist the rebuilt embedding index.", exc_info=True)
             self._store = store
             return restored
 
@@ -87,7 +96,9 @@ class DocumentService:
             cleaned_lines.append(cleaned)
         return "\n".join(cleaned_lines)
 
-    def parse_pdf_pages(self, filename: str, content_bytes: bytes) -> List[Tuple[int, str]]:
+    def parse_pdf_pages(
+        self, filename: str, content_bytes: bytes, *, headings: Optional[List[DocumentHeading]] = None,
+    ) -> List[Tuple[int, str]]:
         """
         Extracts extractable text layer from a PDF file.
         Rejects scanned image-only PDFs with an explicit ValueError.
@@ -96,12 +107,45 @@ class DocumentService:
         pages: List[Tuple[int, str]] = []
         has_any_text = False
 
+        def collect_bookmarks(items, level: int = 1) -> None:
+            for item in items:
+                if isinstance(item, list):
+                    collect_bookmarks(item, level + 1)
+                else:
+                    try:
+                        page = reader.get_destination_page_number(item)
+                        title = item.title.strip()
+                        if page >= 0 and title and headings is not None:
+                            headings.append(DocumentHeading(title=title, page=page + 1, level=level, origin="bookmark"))
+                    except (AttributeError, TypeError, ValueError, KeyError):
+                        continue
+
+        if headings is not None:
+            try:
+                collect_bookmarks(reader.outline)
+            except (pypdf.errors.PdfReadError, ValueError, KeyError):
+                pass
+        scan_fonts = headings is not None and not headings
         for page_idx, page in enumerate(reader.pages, start=1):
-            extracted = page.extract_text() or ""
+            spans: list[tuple[str, float, bool]] = []
+
+            def visit(text, _cm, _tm, font, size) -> None:
+                if text.strip() and size > 0:
+                    name = str(font.get("/BaseFont", "")) if font else ""
+                    spans.append((text.strip(), size, "bold" in name.lower()))
+
+            extracted = page.extract_text(visitor_text=visit if scan_fonts else None) or ""
             cleaned = self._clean_page_lines(extracted)
             if cleaned.strip():
                 has_any_text = True
                 pages.append((page_idx, cleaned))
+            if scan_fonts and spans and headings is not None:
+                body_size = sorted(size for _, size, _ in spans)[len(spans) // 2]
+                for text, size, bold in spans:
+                    if 2 <= len(text.split()) <= 14 and "\n" not in text and not text.endswith(".") and (
+                        size >= body_size * 1.2 or (bold and size > body_size)
+                    ):
+                        headings.append(DocumentHeading(title=text, page=page_idx, origin="font"))
 
         if not has_any_text:
             raise ValueError(
@@ -277,6 +321,10 @@ class DocumentService:
         # Check deduplication: same content hash -> skip re-ingestion
         existing_doc = self.repository.get_document_by_hash(file_hash)
         if existing_doc:
+            if existing_doc.file_type == "docx" and not existing_doc.pdf_headings:
+                headings: List[DocumentHeading] = []
+                parse_office_pages(existing_doc.doc_name, content_bytes, headings=headings)
+                existing_doc.pdf_headings = headings
             return {
                 "status": "ALREADY_EXISTS",
                 "message": f"Tài liệu '{filename}' với nội dung này đã tồn tại trong workspace (phiên bản {existing_doc.version_id}).",
@@ -294,11 +342,12 @@ class DocumentService:
             doc_id = f"{clean_name}_{version_id}"
 
         # Extract pages
+        pdf_headings: List[DocumentHeading] = []
         if lower.endswith(".pdf"):
-            pages = self.parse_pdf_pages(clean_name, content_bytes)
+            pages = self.parse_pdf_pages(clean_name, content_bytes, headings=pdf_headings)
             file_type = "pdf"
         elif lower.endswith((".docx", ".pptx")):
-            pages = parse_office_pages(clean_name, content_bytes)
+            pages = parse_office_pages(clean_name, content_bytes, headings=pdf_headings)
             file_type = "docx" if lower.endswith(".docx") else "pptx"
         elif lower.endswith(".csv"):
             csv_text = content_bytes.decode("utf-8-sig", errors="ignore")
@@ -348,6 +397,7 @@ class DocumentService:
             version_id=version_id,
             uploaded_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             is_selected=True,
+            pdf_headings=pdf_headings,
         )
 
         self.repository.add_document(metadata, all_chunks)

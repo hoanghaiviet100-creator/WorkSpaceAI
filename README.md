@@ -15,6 +15,12 @@ The browser reads extracted text from the selected sources through the workspace
 
 Flashcards track which cards you have mastered. Quizzes show scores and mistakes, and you can turn missed questions into a review deck. Study sets and progress are saved in the browser for each workspace. The number of items depends on how much usable text the selected sources contain.
 
+## Notebook research
+
+Select your sources in a notebook and ask in Chat. The standard Docker stack runs a private search service with a local embedding model. Chat tries that index when its first search finds insufficient evidence. It sends only selected passages and maps returned matches to the original WorkspaceAI document, page, and line before verifying the answer. The first search may need time to index those passages. Studio creates quizzes and flashcards through WorkspaceAI.
+
+The internal service extends [SurfSense 2.3.1](https://github.com/MODSetter/SurfSense/releases/tag/v2.3.1) under Apache 2.0. To inspect the upstream source and its license, run `.\scripts\get_surfsense_source.ps1` from the project root. The script checks out commit `b764f2838969974fd1b0e8c386326039a0f3ad3a` into `vendor/surfsense`.
+
 ## 📧 Feature 3: Context-Aware Email Reporting & Finite State Machine (FSM)
 
 Feature 3 provides human-in-the-loop, cryptographically secured academic and progress email reporting. It is governed by a 100% pure Python standard-library Finite State Machine with SHA-256 tamper detection and duplicate-send prevention.
@@ -130,6 +136,16 @@ curl -X GET "http://localhost:8000/api/email/audit-log?workspace_id=9b1deb4d-3b7
 
 ## 🧪 Running the Test Suite Locally
 
+### Feature 1 prompt cases
+
+The [prompt dataset](tests/fixtures/feature1_prompt_cases.json) records example questions, selected sources, optional chat history, and expected routing. Edit this fixture to add new phrasings or regressions.
+
+```bash
+python -m pytest -q tests/test_feature1_prompt_cases.py
+```
+
+The test runs the router and QA dispatcher locally with synthetic documents. It replaces answer generation to check routing without calling a model.
+
 ### Single-Command Feature 3 Test Suite
 To run the Feature 3 unit and integration test suite:
 ```bash
@@ -179,6 +195,24 @@ React is served at http://localhost:8501. `/api` requests are forwarded to FastA
 
 Backend document libraries persist in `./.workspace_data` on the host; back up this folder. Ollama models persist in the `workspaceai_ollama_models` volume. UI conversations use browser local storage: keep the same browser profile and URL. Data from `http://127.0.0.1:5174` is not automatically transferred to `http://localhost:8501`.
 
+### MySQL database
+
+Start the MySQL 8.4 database separately from the application. From the repository root in PowerShell 7, create a local password file on the first run and start the database.
+
+```powershell
+$dbEnv = '.workspace_data/mysql.env'
+if (-not (Test-Path -LiteralPath $dbEnv)) {
+    New-Item -ItemType Directory -Path .workspace_data -Force | Out-Null
+    $dbPassword = [Convert]::ToBase64String([System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+    New-Item -ItemType File -Path $dbEnv -Value "WORKSPACEAI_DB_PASSWORD=$dbPassword`n" | Out-Null
+}
+docker compose --env-file $dbEnv -f database/compose.yml up -d --wait
+```
+
+Connect to `127.0.0.1:3307`, database `workspace_ai`, as `workspaceai`. The password is in `.workspace_data/mysql.env`, which Git ignores. The database persists in the `workspaceai-db_mysql_data` volume. Keep the password file with that volume because MySQL sets the password and loads the schema only when it initializes an empty volume.
+
+The [schema](database/schema.sql) creates eleven tables on a fresh database. The runtime application still uses JSON and browser storage. See the [database design](database/DESIGN.md) for the SQL relationships and planned data migration.
+
 Stop without deleting data: `docker compose down`. Start again: `docker compose up -d`. Do not use `down --volumes` unless you intend to delete model storage. Keep original documents as backups.
 
 To use the 1.5B model, set `OLLAMA_MODEL=qwen2.5:1.5b` in `.env`, pull that exact model, and recreate app with `docker compose up -d`. No Node.js, Python or Ollama installation is needed on the host.
@@ -224,7 +258,7 @@ Feature modules live under `feature1/`, `feature2/`, or `feature3/` within each 
 
 | Feature | Scope & Algorithms | Core Files |
 |---|---|---|
-| **Feature 1: Evidence-Grounded Q&A** | Ingestion (PDF/TXT/MD), SHA-256 deduplication, Hybrid RRF retrieval (BM25 + Dense), 5-step strict Citation Verifier ($S_{verify} \ge \theta_{match}$), Table-of-Contents penalty | `backend/services/document_service.py`<br>`backend/services/feature1/qa_service.py`<br>`backend/algorithms/feature1/citation_verifier.py`<br>`backend/repositories/workspace_repository.py` |
+| **Feature 1: Evidence-Grounded Q&A** | SHA-256 deduplication, persisted passage embeddings, hybrid ranking by keyword coverage and cosine similarity, citation verification, and summaries by chapter | `backend/services/document_service.py`<br>`backend/services/feature1/qa_service.py`<br>`backend/algorithms/feature1/citation_verifier.py`<br>`backend/repositories/workspace_repository.py` |
 | **Feature 2: Flashcards and Quizzes from Sources** | Source-scoped text extraction, excerpt and page citations, progress tracking, quiz scoring and review decks | `backend/api/feature2/study_routes.py`<br>`backend/services/feature2/`<br>`backend/algorithms/feature2/`<br>`frontend/src/Studio.tsx` |
 | **Feature 3: Context-Aware Email Assistant** | 100% Pure stdlib Finite State Machine (`DRAFT` $\to$ `APPROVED` $\to$ `SENT`), canonical SHA-256 draft integrity lock, duplicate-send prevention, Gmail SMTP TLS dispatch with NFR-04 unknown delivery protection | `backend/algorithms/feature3/email_state_machine.py`<br>`backend/services/feature3/email_service.py`<br>`backend/api/feature3/email_routes.py` |
 | **Safeguards & Guardrails** | Prompt injection detection ($R_7$), recipient validation, untrusted context framing | `backend/core/guardrails.py`<br>`backend/services/router_service.py` |

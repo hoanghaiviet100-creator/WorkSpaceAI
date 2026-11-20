@@ -26,6 +26,7 @@ class LocalLibraryStore:
             raise ValueError("The saved document library has inconsistent document IDs.")
         repository.documents = by_id
         repository.chunks = chunks
+        repository.restore_embeddings(data.get("embeddings"))
         repository._rebuild_index()
         return True
 
@@ -33,9 +34,15 @@ class LocalLibraryStore:
         """Replace atomically so an interrupted write cannot truncate the last good copy."""
         data = {
             "version": 1,
-            "documents": [doc.model_dump(mode="json") for doc in repository.documents.values()],
+            "documents": [
+                {**doc.model_dump(mode="json"), "pdf_headings": [heading.model_dump() for heading in doc.pdf_headings]}
+                for doc in repository.documents.values()
+            ],
             "chunks": [chunk.model_dump(mode="json") for chunk in repository.chunks],
         }
+        embeddings = repository.snapshot_embeddings()
+        if embeddings is not None:
+            data["embeddings"] = embeddings
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = None
         try:

@@ -727,8 +727,12 @@ export default function Sources({
           )}
           <div className="nb-source-list" aria-busy={!!pendingSelection}>
             {jobs.map((job) => (
-              <div className="nb-upload-job" key={job.id}>
-                <Upload size={18} />
+              <div
+                className="nb-upload-job"
+                key={job.id}
+                role={job.error ? undefined : "status"}
+              >
+                <Upload size={18} aria-hidden="true" />
                 <span>
                   <strong>{job.file.name}</strong>
                   <small>{job.error || "Uploading and processing…"}</small>
@@ -748,7 +752,11 @@ export default function Sources({
                     <RefreshCw size={16} />
                   </button>
                 ) : (
-                  <LoaderCircle size={16} />
+                  <LoaderCircle
+                    className="nb-upload-spinner"
+                    size={18}
+                    aria-hidden="true"
+                  />
                 )}
               </div>
             ))}

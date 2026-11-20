@@ -2,7 +2,7 @@ import type {
   CitationClaimRow,
   RouteType,
   EmailState,
-  DocumentPageRow,
+  DocumentPage,
 } from "./schema";
 import type { Draft, Source, Workspace } from "./data";
 import {
@@ -53,7 +53,7 @@ async function request<T>(
   const controller = new AbortController();
   const timeout = setTimeout(
     () => controller.abort(),
-    path === "/chat" ? 150_000 : path === "/study" ? 330_000 : 60_000,
+    path === "/chat" ? 550_000 : path === "/study" ? 330_000 : 60_000,
   );
   try {
     const headers = new Headers(options.headers);
@@ -61,7 +61,9 @@ async function request<T>(
     const response = await fetch(`${apiConfig.base}${path}`, {
       ...options,
       headers,
-      signal: controller.signal,
+      signal: options.signal
+        ? AbortSignal.any([controller.signal, options.signal])
+        : controller.signal,
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
@@ -186,18 +188,22 @@ export function chatRequest(
   studioTool?: "email",
   studioDelivery = false,
   quizExplanation = false,
+  signal?: AbortSignal,
 ) {
   return request<ChatResponse>(
     "/chat",
-    json({
-      query,
-      selected_doc_ids: selectedDocIds,
-      conversation_history: history,
-      ...(recipient ? { recipient_email: recipientAddress(recipient) } : {}),
-      ...(studioTool ? { studio_tool: studioTool } : {}),
-      ...(studioDelivery ? { studio_delivery: true } : {}),
-      ...(quizExplanation ? { quiz_explanation: true } : {}),
-    }),
+    {
+      ...json({
+        query,
+        selected_doc_ids: selectedDocIds,
+        conversation_history: history,
+        ...(recipient ? { recipient_email: recipientAddress(recipient) } : {}),
+        ...(studioTool ? { studio_tool: studioTool } : {}),
+        ...(studioDelivery ? { studio_delivery: true } : {}),
+        ...(quizExplanation ? { quiz_explanation: true } : {}),
+      }),
+      signal,
+    },
     workspaceId,
   );
 }
@@ -252,7 +258,7 @@ export async function importSourceLink(
 }
 export function getDocumentPage(id: string, page: number, workspaceId: string) {
   return request<
-    DocumentPageRow & {
+    DocumentPage & {
       doc_hash: string;
       doc_version: string;
       partial: boolean;

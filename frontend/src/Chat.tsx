@@ -8,10 +8,10 @@ import {
 } from "react";
 import {
   ArrowUp,
+  Square,
   ArrowDown,
   ArrowRight,
   X,
-  Paperclip,
   ChevronDown,
   Mail,
   Bookmark,
@@ -96,6 +96,15 @@ function answerFindings(
   return groups;
 }
 
+function formatFinding(text: string) {
+  return text.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/g).map((part, index) => {
+    if (index % 2 === 0) return part;
+    return part.startsWith("`")
+      ? <code key={index}>{part.slice(1, -1)}</code>
+      : <strong key={index}>{part.slice(2, -2)}</strong>;
+  });
+}
+
 function FindingList({
   findings,
   notebook,
@@ -117,7 +126,7 @@ function FindingList({
   }
   const renderFinding = ({ id, index, evidence }: AnswerFinding) => (
     <li key={id}>
-      {evidence?.finding}{" "}
+      {formatFinding(evidence?.finding ?? "")}{" "}
       <Citation
         id={id}
         onOpen={onEvidence}
@@ -180,10 +189,7 @@ export default function Chat({
   const latestMessage = messages.at(-1);
   const suggestion =
     onStudy && latestMessage ? studySuggestion(workspace, latestMessage) : null;
-  const [pending, setPending] = useState<Pick<
-    Message,
-    "request" | "mode" | "at"
-  > | null>(null);
+  const [pending, setPending] = useState<Message | null>(null);
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [showLatestButton, setShowLatestButton] = useState(false);
   const transcriptId = useId();
@@ -191,7 +197,7 @@ export default function Chat({
   const loading = pending !== null;
   const live = apiFor(workspace.id);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
-  const requestLock = useRef(false);
+  const activeRequest = useRef<AbortController | null>(null);
   const submittedIntake = useRef(false);
   const submittedQuizQuestion = useRef<typeof quizQuestion>(undefined);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -213,6 +219,8 @@ export default function Chat({
   );
   useEffect(
     () => () => {
+      activeRequest.current?.abort();
+      activeRequest.current = null;
       if (timer.current) clearTimeout(timer.current);
     },
     [],
@@ -293,7 +301,7 @@ export default function Chat({
     forced?: Message["state"],
     quizSources?: string[],
   ) => {
-    if (!request.trim() || loading || requestLock.current) return;
+    if (!request.trim() || loading || activeRequest.current) return;
     followLatest.current = true;
     const quizSourceSet = new Set(
       quizSources?.map((id) => resolveCitedSource(id, workspace.sources)?.id),
@@ -318,23 +326,31 @@ export default function Chat({
           item.id === thread.id ? { ...item, composerDraft: undefined } : item,
         ),
       }));
-    setPending({ request: request.trim(), mode: activeMode, at });
+    const controller = new AbortController();
+    activeRequest.current = controller;
+    const result: Message = {
+      id: crypto.randomUUID(),
+      request: request.trim(),
+      mode: activeMode,
+      state: "answer",
+      sourceIds: ids,
+      evidenceIds: [],
+      quizSourceIds: quizSources,
+      at,
+      origin: live ? "server" : "sample",
+    };
+    setPending({ ...result });
+    const finish = () => {
+      if (activeRequest.current !== controller) return;
+      activeRequest.current = null;
+      setPending(null);
+    };
     if (live) {
-      requestLock.current = true;
-      const result: Message = {
-        id: crypto.randomUUID(),
-        request: request.trim(),
-        mode: activeMode,
-        state: "answer",
-        sourceIds: ids,
-        evidenceIds: [],
-        quizSourceIds: quizSources,
-        at,
-        origin: "server",
-      };
       try {
         if (quizSources && !ids.length)
-          throw new Error("The quiz source is unavailable. Restore it in Sources, then retry.");
+          throw new Error(
+            "The quiz source is unavailable. Restore it in Sources, then retry.",
+          );
         if (sources.some((s) => s.origin !== "server"))
           throw new Error(
             "Sync the server library and select server documents before asking a live question.",
@@ -370,7 +386,9 @@ export default function Chat({
           undefined,
           false,
           !!quizSources,
+          controller.signal,
         );
+        if (controller.signal.aborted) return;
         result.routeType = response.route;
         result.groundingScore =
           typeof response.grounding_score === "number" &&
@@ -462,6 +480,7 @@ export default function Chat({
           ),
         }));
       } catch (err) {
+        if (controller.signal.aborted) return;
         result.state = "error";
         result.errorText =
           err instanceof Error
@@ -476,17 +495,16 @@ export default function Chat({
           ),
         }));
       } finally {
-        requestLock.current = false;
-        setPending(null);
+        finish();
       }
       return;
     }
     timer.current = setTimeout(() => {
+      timer.current = null;
+      if (controller.signal.aborted) return;
       update((w) => {
-        const result: Message = {
-          id: crypto.randomUUID(),
-          request: request.trim(),
-          mode: activeMode,
+        const sample: Message = {
+          ...result,
           state:
             forced ??
             (activeMode === "Email"
@@ -512,12 +530,12 @@ export default function Chat({
                   title: t.messages.length
                     ? t.title
                     : request.trim().slice(0, 70),
-                  messages: [...t.messages, result],
+                  messages: [...t.messages, sample],
                 }
               : t,
           ),
         };
-        if (result.state === "draft") {
+        if (sample.state === "draft") {
           const withRecipients = evidenceIds.includes("cc");
           next.draft = {
             ...blankDraft(),
@@ -535,16 +553,43 @@ export default function Chat({
         }
         return next;
       });
-      setPending(null);
+      finish();
     }, 550);
+  };
+  const stop = () => {
+    if (!pending || !activeRequest.current) return;
+    activeRequest.current.abort();
+    activeRequest.current = null;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+    setPending(null);
+    update((current) => ({
+      ...current,
+      threads: current.threads.map((item) =>
+        item.id === thread.id
+          ? {
+              ...item,
+              updated: pending.at,
+              messages: [
+                ...item.messages,
+                { ...pending, state: "error", stopped: true },
+              ],
+            }
+          : item,
+      ),
+    }));
   };
   const sendRef = useRef(send);
   sendRef.current = send;
   useEffect(() => {
     if (
-      !active || !quizQuestion || loading || requestLock.current ||
+      !active ||
+      !quizQuestion ||
+      loading ||
+      activeRequest.current ||
       submittedQuizQuestion.current === quizQuestion
-    ) return;
+    )
+      return;
     submittedQuizQuestion.current = quizQuestion;
     onQuizQuestionSent?.();
     void sendRef.current(
@@ -682,7 +727,9 @@ export default function Chat({
                           : m.state === "abstention"
                             ? "Evidence check"
                             : m.state === "error"
-                              ? "Generation interrupted"
+                              ? m.stopped
+                                ? "Stopped"
+                                : "Generation interrupted"
                               : "For your review"}
                       </span>
                     </div>
@@ -771,7 +818,7 @@ export default function Chat({
                                 )}
                                 <h3>{e.title}</h3>
                               </div>
-                              <p>{e.finding}</p>
+                              <p>{formatFinding(e.finding)}</p>
                               <Badge
                                 tone={
                                   e.origin === "server" &&
@@ -851,15 +898,21 @@ export default function Chat({
                       </div>
                     </div>
                   ) : m.state === "error" ? (
-                    <Notice tone="danger">
-                      <strong>The answer couldn’t be generated.</strong>
+                    <Notice tone={m.stopped ? undefined : "danger"}>
+                      <strong>
+                        {m.stopped
+                          ? "Response stopped."
+                          : "The answer couldn’t be generated."}
+                      </strong>
                       <p>
                         {m.errorText ||
                           "Your question is preserved. Try again when you’re ready."}
                       </p>
                       <button
                         className="button"
-                        onClick={() => send(m.request, undefined, m.quizSourceIds)}
+                        onClick={() =>
+                          send(m.request, undefined, m.quizSourceIds)
+                        }
                       >
                         <RotateCcw size={14} />
                         Retry
@@ -1030,15 +1083,6 @@ export default function Chat({
           }}
         >
           <div className="composer-main">
-            <button
-              type="button"
-              className="composer-sources-button"
-              aria-label="Open Sources"
-              title="Open Sources"
-              onClick={onFiles}
-            >
-              <Paperclip size={17} aria-hidden="true" />
-            </button>
             <textarea
               ref={inputRef}
               rows={1}
@@ -1057,14 +1101,30 @@ export default function Chat({
                 }
               }}
             />
-            <button
-              className="send-button"
-              type="submit"
-              aria-label="Send message"
-              disabled={!input.trim() || loading}
-            >
-              <ArrowUp size={19} aria-hidden="true" />
-            </button>
+            {loading ? (
+              <button
+                key="stop"
+                className="send-button"
+                type="button"
+                aria-label="Stop response"
+                title="Stop response"
+                onClick={(event) => {
+                  if (event.detail <= 1) stop();
+                }}
+              >
+                <Square size={13} fill="currentColor" aria-hidden="true" />
+              </button>
+            ) : (
+              <button
+                key="send"
+                className="send-button"
+                type="submit"
+                aria-label="Send message"
+                disabled={!input.trim()}
+              >
+                <ArrowUp size={19} aria-hidden="true" />
+              </button>
+            )}
           </div>
           {filesExpanded && selected.length > 0 && (
             <div className="composer-file-chips" id={sourceListId}>

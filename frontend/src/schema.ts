@@ -1,4 +1,4 @@
-/** Database contracts from database/schema.sql. UI-only preferences stay outside these rows. */
+/** Frontend-facing database contracts. Credential fields stay on the server. */
 export type EngineMode = "offline" | "ollama" | "gemini";
 export type RouteType =
   | "QA_FLOW"
@@ -20,7 +20,29 @@ export type EmailState =
   | "APPROVED"
   | "SENT"
   | "FAILED_RETRYABLE";
+
+export interface UserRow {
+  user_id: string;
+  email: string;
+  display_name: string;
+  email_verified_at: string | null;
+  created_at: string;
+}
+export interface WorkspaceRow {
+  workspace_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface WorkspaceMemberRow {
+  workspace_id: string;
+  user_id: string;
+  role: "owner" | "editor" | "viewer";
+  joined_at: string;
+}
+
 export interface DocumentRow {
+  workspace_id: string;
   doc_id: string;
   doc_name: string;
   file_type: string;
@@ -32,11 +54,15 @@ export interface DocumentRow {
   total_chunks: number;
   is_selected: boolean;
   storage_path: string | null;
+  source_url: string | null;
+  headings: unknown[] | null;
   mime_type: string;
   uploaded_at: string;
   updated_at: string;
+  archived_at: string | null;
 }
 export interface DocumentPageRow {
+  workspace_id: string;
   page_id: number;
   doc_id: string;
   page_number: number;
@@ -45,7 +71,10 @@ export interface DocumentPageRow {
   page_hash: string;
   created_at: string;
 }
+export type DocumentPage = Omit<DocumentPageRow, "workspace_id">;
+
 export interface DocumentChunkRow {
+  workspace_id: string;
   chunk_id: string;
   doc_id: string;
   doc_name: string;
@@ -58,9 +87,11 @@ export interface DocumentChunkRow {
   token_count: number;
   doc_version: string;
   embedding: number[] | null;
+  embedding_encoder: string | null;
   created_at: string;
 }
 export interface ChatSessionRow {
+  workspace_id: string;
   session_id: string;
   session_name: string;
   active_mode: EngineMode;
@@ -68,6 +99,7 @@ export interface ChatSessionRow {
   updated_at: string;
 }
 export interface ChatMessageRow {
+  workspace_id: string;
   message_id: string;
   session_id: string;
   role: "user" | "assistant" | "system";
@@ -79,6 +111,7 @@ export interface ChatMessageRow {
   created_at: string;
 }
 export interface CitationClaimRow {
+  workspace_id: string;
   claim_id: string;
   message_id: string;
   claim_text: string;
@@ -88,6 +121,7 @@ export interface CitationClaimRow {
   cited_end_line: number | null;
   evidence_quote: string;
   verification_status: VerificationStatus;
+  semantic_status: "SUPPORTED" | "CONTRADICTED" | "INSUFFICIENT" | "UNAVAILABLE" | null;
   match_score: number;
   matched_span: string | null;
   doc_version: string;
@@ -95,6 +129,7 @@ export interface CitationClaimRow {
   verified_at: string;
 }
 export interface EmailDraftRow {
+  workspace_id: string;
   draft_id: string;
   session_id: string | null;
   recipient_email: string;
@@ -102,14 +137,15 @@ export interface EmailDraftRow {
   body: string;
   attachment_ids: string[];
   citations: string[];
-  current_state: EmailState;
-  payload_hash: string;
-  hmac_signature: string;
+  current_state: EmailState | "DRAFT" | "FAILED" | "DELIVERY_UNKNOWN";
+  payload_hash: string | null;
+  hmac_signature: string | null;
   created_at: string;
   updated_at: string;
   sent_at: string | null;
 }
 export interface EmailAuditRow {
+  workspace_id: string;
   log_id: number;
   draft_id: string;
   from_state: string;
@@ -121,6 +157,9 @@ export interface EmailAuditRow {
   recorded_at: string;
 }
 export interface SchemaTables {
+  users: UserRow[];
+  workspaces: WorkspaceRow[];
+  workspace_members: WorkspaceMemberRow[];
   documents: DocumentRow[];
   document_pages: DocumentPageRow[];
   document_chunks: DocumentChunkRow[];

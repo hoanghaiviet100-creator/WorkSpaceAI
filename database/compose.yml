@@ -1,0 +1,30 @@
+name: workspaceai-db
+
+services:
+  db:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: workspace_ai
+      MYSQL_USER: workspaceai
+      MYSQL_PASSWORD: ${WORKSPACEAI_DB_PASSWORD:?Set WORKSPACEAI_DB_PASSWORD in the database env file}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    ports:
+      - "127.0.0.1:3307:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          MYSQL_PWD="$$MYSQL_PASSWORD" mysql --protocol=TCP -h 127.0.0.1
+          -u "$$MYSQL_USER" "$$MYSQL_DATABASE"
+          -e 'SELECT 1 FROM email_audit_logs LIMIT 0'
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 45s
+
+volumes:
+  mysql_data:

@@ -25,6 +25,8 @@ class Settings:
     # Citation verification threshold (theta_match)
     citation_verify_threshold: float = float(os.getenv("CITATION_VERIFY_THRESHOLD", "0.75"))
     theta_match: float = float(os.getenv("THETA_MATCH", os.getenv("CITATION_VERIFY_THRESHOLD", "0.75")))
+    feature1_semantic_verify: bool = os.getenv("FEATURE1_SEMANTIC_VERIFY", "false").lower() in {"1", "true", "yes", "on"}
+    feature1_selective_thinking: bool = os.getenv("FEATURE1_SELECTIVE_THINKING", "false").lower() in {"1", "true", "yes", "on"}
     
     # Gmail SMTP Real Email Configuration
     email_dispatch_mode: str = os.getenv("EMAIL_DISPATCH_MODE", "local_mock")

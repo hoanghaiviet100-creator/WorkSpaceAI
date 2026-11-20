@@ -551,6 +551,20 @@
   flex: 1;
   min-width: 0;
 }
+.nb-upload-spinner {
+  flex: none;
+  color: var(--accent-ink);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .nb-upload-spinner {
+    animation: nb-upload-spin 850ms linear infinite;
+  }
+}
+@keyframes nb-upload-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
 .nb-source-error,
 .nb-result-error {
   color: var(--danger-ink);
@@ -1427,7 +1441,7 @@
 }
 .notebook .composer-main {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(0, 1fr) 44px;
   align-items: end;
   gap: 10px;
   padding: 5px;
@@ -1449,22 +1463,13 @@
   display: block;
   min-width: 0;
   min-height: 44px;
-  padding: 10px 0;
+  padding: 10px 0 10px 12px;
   font-size: 16px;
   line-height: 1.6;
   background: transparent;
 }
 .notebook .composer textarea:focus-visible {
   outline: none;
-}
-.composer-sources-button {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--nb-panel);
-  color: var(--nb-ink);
 }
 .notebook .composer-bottom {
   padding-top: 4px;

@@ -23,6 +23,7 @@ tests/
 report/
 reports/
 .workspace_data/
+vendor/surfsense/
 
 **/node_modules
 **/dist

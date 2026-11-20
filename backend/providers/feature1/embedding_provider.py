@@ -4,9 +4,8 @@ R3 Dense Embedding Provider with Lazy Loading & Fallback Subword Hash Vectorizer
 
 Architecture Rules:
 - Lazy loading: Attempts sentence_transformers if available.
-- Resilient fallback: Includes a 384-dimensional Character N-gram + Subword Hash
-  Vectorizer using pure NumPy and Python hashlib, ensuring Dense Cosine Similarity
-  is ALWAYS active without requiring PyTorch or heavy external dependencies.
+- Resilient fallback at load time: a 384-dimensional subword hash vectorizer
+  using pure NumPy and Python hashlib.
 - Decoupled from Repository: WorkspaceRepository does NOT import this file directly;
   the service layer injects the embed_fn.
 """
@@ -105,10 +104,7 @@ class EmbeddingProvider:
             return True
 
     def embed_texts(self, texts: List[str]) -> Optional[np.ndarray]:
-        """
-        Encodes a list of string passages into unit-normalized numpy vectors (384 dimensions).
-        Always returns a valid (N, 384) array.
-        """
+        """Encode with the same vector space for every batch."""
         if not texts:
             return np.empty((0, 384), dtype=np.float32)
 
@@ -116,21 +112,24 @@ class EmbeddingProvider:
             self.load_model()
 
         if self._model is not None:
-            try:
-                embeddings = self._model.encode(
-                    texts,
-                    convert_to_numpy=True,
-                    normalize_embeddings=True,
-                    show_progress_bar=False,
-                )
-                return embeddings
-            except Exception:
-                pass
+            return self._model.encode(
+                texts,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+                show_progress_bar=False,
+            )
 
         # Use robust subword hash vectorizer
         if self._hash_vectorizer is None:
             self._hash_vectorizer = SubwordHashVectorizer(dim=384)
         return self._hash_vectorizer.encode(texts)
+
+    @property
+    def index_id(self) -> str:
+        """Identify the encoder selected by load_model()."""
+        if self.using_hash_fallback:
+            return "subword-hash:384:v1"
+        return f"sentence-transformers:{self.model_name}:v1"
 
     def get_embed_fn(self) -> Optional[Callable[[List[str]], Optional[np.ndarray]]]:
         """
