@@ -19,15 +19,22 @@ Guarantees NFR-04:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from email.mime.application import MIMEApplication
+from email.mime.base import MIMEBase
+from email import encoders
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+import io
 import logging
+import mimetypes
+import os
 import re
 import smtplib
 import socket
 from typing import Any, Dict, List, Optional, Union
 import uuid
 from uuid import UUID
+import zipfile
 
 from backend.algorithms.email_state_machine import (
     APPROVED,
@@ -60,7 +67,45 @@ from backend.repositories.workspace_repository import WorkspaceRepository, works
 logger = logging.getLogger("workspaceai.email_service")
 
 
-def send_real_email_via_smtp(to_email: str, subject: str, body_text: str) -> Dict[str, Any]:
+def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
+    """Helper to attach local files, images, or compress directories into a MIMEMultipart message."""
+    for att_path in attachments:
+        if not att_path or not os.path.exists(att_path):
+            continue
+        if os.path.isdir(att_path):
+            zip_buffer = io.BytesIO()
+            dir_name = os.path.basename(os.path.normpath(att_path)) or "folder"
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                for root, _, files in os.walk(att_path):
+                    for f in files:
+                        full_path = os.path.join(root, f)
+                        rel_path = os.path.relpath(full_path, att_path)
+                        zf.write(full_path, rel_path)
+            zip_buffer.seek(0)
+            part = MIMEApplication(zip_buffer.read(), Name=f"{dir_name}.zip")
+            part["Content-Disposition"] = f'attachment; filename="{dir_name}.zip"'
+            msg.attach(part)
+        else:
+            ctype, encoding = mimetypes.guess_type(att_path)
+            if ctype is None or encoding is not None:
+                ctype = "application/octet-stream"
+            maintype, subtype = ctype.split("/", 1)
+            with open(att_path, "rb") as f:
+                file_content = f.read()
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(file_content)
+            encoders.encode_base64(part)
+            filename = os.path.basename(att_path)
+            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            msg.attach(part)
+
+
+def send_real_email_via_smtp(
+    to_email: str,
+    subject: str,
+    body_text: str,
+    attachments: Optional[List[str]] = None,
+) -> Dict[str, Any]:
     """
     Sends real email via Gmail SMTP using Python standard libraries (smtplib & MIMEText).
     Connects to smtp.gmail.com:587 with STARTTLS authentication.
@@ -86,6 +131,9 @@ def send_real_email_via_smtp(to_email: str, subject: str, body_text: str) -> Dic
     msg["To"] = clean_recipient
     msg["Subject"] = subject
     msg.attach(MIMEText(body_text, "plain", "utf-8"))
+
+    if attachments:
+        _attach_files_to_msg(msg, attachments)
 
     host = settings.smtp_host or "smtp.gmail.com"
     port = settings.smtp_port or 587
@@ -134,6 +182,7 @@ class EmailService:
         body: Optional[str] = None,
         citations: Optional[List[str]] = None,
         req: Optional[UserRequest] = None,
+        attachments: Optional[List[str]] = None,
     ) -> Union[EmailDraftRecord, Dict[str, Any]]:
         """
         Creates an email draft in DRAFT state.
@@ -209,6 +258,7 @@ class EmailService:
             sha256_digest=None,
             audit_timestamp=datetime.now(timezone.utc),
             citations=citations or [],
+            attachments=attachments or [],
         )
         self.draft_repo.save(new_draft)
         logger.info(
@@ -227,6 +277,7 @@ class EmailService:
         recipients: Optional[Union[List[str], str]] = None,
         subject: Optional[str] = None,
         body: Optional[str] = None,
+        attachments: Optional[List[str]] = None,
         user_confirmed: bool = True,
     ) -> EmailDraftRecord:
         """
@@ -261,6 +312,8 @@ class EmailService:
             stored.subject = final_subject
         if hasattr(stored, "body"):
             stored.body = final_body
+        if hasattr(stored, "attachments") and attachments is not None:
+            stored.attachments = attachments
         if hasattr(stored, "fsm_state"):
             stored.fsm_state = EmailFSMState.APPROVED
         if hasattr(stored, "sha256_digest"):
@@ -334,6 +387,7 @@ class EmailService:
         recipients = getattr(stored, "recipients", None) or getattr(stored, "recipient_email", "")
         subject = getattr(stored, "subject", "")
         body = getattr(stored, "body", "")
+        attachments = getattr(stored, "attachments", None) or []
 
         # Verify integrity and duplicate-send gate (raises SecurityError or FSMStateError)
         verify_and_lock_for_send(
@@ -364,6 +418,7 @@ class EmailService:
             )
             return {
                 "status": EmailFSMState.SENT.value,
+                "fsm_state": EmailFSMState.SENT.value,
                 "draft_id": str(draft_id),
                 "dispatch_mode": "local_mock",
                 "sha256_digest": expected_digest,
@@ -397,6 +452,9 @@ class EmailService:
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
+        if attachments:
+            _attach_files_to_msg(msg, attachments)
+
         host = settings.smtp_host or "smtp.gmail.com"
         port = settings.smtp_port or 587
 
@@ -421,6 +479,7 @@ class EmailService:
             )
             return {
                 "status": EmailFSMState.SENT.value,
+                "fsm_state": EmailFSMState.SENT.value,
                 "draft_id": str(draft_id),
                 "dispatch_mode": "gmail_real",
                 "sha256_digest": expected_digest,

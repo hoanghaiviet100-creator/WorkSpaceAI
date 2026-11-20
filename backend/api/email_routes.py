@@ -17,10 +17,22 @@ from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, HTTPException
 
 from backend.algorithms.email_state_machine import FSMStateError, SecurityError
-from backend.core.schemas import ApproveDraftRequest, CreateDraftRequest, EmailDraftRecord
+from backend.core.config import settings
+from backend.core.schemas import ApproveDraftRequest, CreateDraftRequest, EmailDraftRecord, EmailFSMState
 from backend.services.email_service import email_service
 
 router = APIRouter(prefix="/api/email", tags=["Email Reporting & FSM Send Gate"])
+
+
+@router.get("/connection")
+def get_email_connection():
+    """Returns whether Gmail SMTP is configured or if local mock mode is active."""
+    mock = settings.email_dispatch_mode != "gmail_real"
+    configured = bool(settings.gmail_sender_email.strip() and settings.gmail_app_password.strip())
+    return {
+        "mode": "local_mock" if mock else "gmail_real",
+        "configured": configured,
+    }
 
 
 @router.post("/draft", response_model=Union[EmailDraftRecord, Dict[str, Any]])
@@ -36,6 +48,7 @@ def create_draft_endpoint(req: CreateDraftRequest) -> Union[EmailDraftRecord, Di
             subject=req.subject,
             body=req.body,
             citations=req.citations,
+            attachments=req.attachments,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -59,6 +72,7 @@ def approve_snapshot_endpoint(
         target_recipients = (req.recipients if req and req.recipients is not None else recipients)
         target_subject = (req.subject if req and req.subject is not None else subject)
         target_body = (req.body if req and req.body is not None else body)
+        target_attachments = (req.attachments if req and req.attachments is not None else None)
         target_confirmed = (req.user_confirmed if req is not None else user_confirmed)
 
         return email_service.approve_draft_snapshot(
@@ -66,6 +80,7 @@ def approve_snapshot_endpoint(
             recipients=target_recipients,
             subject=target_subject,
             body=target_body,
+            attachments=target_attachments,
             user_confirmed=target_confirmed,
         )
     except KeyError as exc:
@@ -145,6 +160,31 @@ def approve_email(
         raise HTTPException(status_code=404, detail=str(exc))
     except (PermissionError, ValueError, RuntimeError, SecurityError, FSMStateError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/studio/{draft_id}/send")
+def send_studio_draft(draft_id: str, expected_mode: Optional[str] = None):
+    """Studio send endpoint compatible with StudioEmail React component."""
+    draft = email_service.draft_repo.get(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="This draft has expired. Generate it again.")
+    conn_mode = "local_mock" if settings.email_dispatch_mode != "gmail_real" else "gmail_real"
+    if expected_mode is not None and expected_mode != conn_mode:
+        raise HTTPException(status_code=412, detail="Email delivery mode changed. Review the draft again.")
+    try:
+        current_state = getattr(draft, "fsm_state", None) or getattr(draft, "state", "")
+        if current_state != EmailFSMState.APPROVED and current_state != "APPROVED":
+            recipients = getattr(draft, "recipients", None) or getattr(draft, "recipient_email", "")
+            subject = getattr(draft, "subject", "")
+            body = getattr(draft, "body", "")
+            email_service.approve_draft_snapshot(draft_id, recipients=recipients, subject=subject, body=body, user_confirmed=True)
+        return email_service.dispatch_email(draft_id)
+    except FSMStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except (PermissionError, ValueError, SecurityError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # Export alias

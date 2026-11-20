@@ -315,3 +315,24 @@ export function approveAndSend(draft: Draft, workspaceId?: string) {
     workspaceId,
   );
 }
+
+export const getEmailConnection = () =>
+  request<{ mode: "local_mock" | "gmail_real"; configured: boolean }>(
+    "/email/connection",
+  );
+
+export const sendStudioEmail = (
+  draftId: string,
+  workspaceId: string,
+  mode: "local_mock" | "gmail_real",
+) =>
+  request<{
+    status: "SENT" | "FAILED" | "DELIVERY_UNKNOWN";
+    dispatch_mode?: "local_mock" | "gmail_real";
+    audit_timestamp?: string;
+    error?: string;
+  }>(
+    `/email/studio/${encodeURIComponent(draftId)}/send?expected_mode=${mode}`,
+    { method: "POST" },
+    workspaceId,
+  );

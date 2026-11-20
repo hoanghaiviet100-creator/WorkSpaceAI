@@ -564,6 +564,8 @@ export default function NotebookWorkspace({
                 clearLaunch={clearStudyLaunch}
                 onSource={setStudyCitation}
                 onClose={closeStudio}
+                onComposeEmail={() => setEmailOpen(true)}
+                onOpenEmail={openEmail}
                 motionRef={studioPanel}
               />
             </div>

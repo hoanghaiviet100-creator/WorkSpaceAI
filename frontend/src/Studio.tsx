@@ -27,6 +27,19 @@ import {
 import { sampleStudy } from "./study-sample";
 import flashcardIcon from "./flashcard-icon.svg";
 import quizIcon from "./quiz-icon.svg";
+import emailIcon from "./email-icon.svg";
+import { visibleStudioResults, type StudioResult } from "./notebook-model";
+
+function emailStatus(result: StudioResult) {
+  if (result.status === "generating") return "Drafting…";
+  if (result.delivery === "sending") return "Sending…";
+  if (result.delivery === "sent")
+    return result.dispatchMode === "local_mock" ? "Sent · Simulation" : "Sent";
+  if (result.delivery === "unknown") return "Delivery unconfirmed";
+  if (result.status === "error" || result.delivery === "failed")
+    return "Failed";
+  return "Draft";
+}
 
 const tools = {
   flashcard: {
@@ -61,6 +74,8 @@ export default function Studio({
   clearLaunch,
   onSource,
   motionRef,
+  onComposeEmail,
+  onOpenEmail,
 }: {
   workspace: Workspace;
   update: (change: (current: Workspace) => Workspace) => void;
@@ -73,6 +88,8 @@ export default function Studio({
   clearLaunch: () => void;
   onSource: (citation: StudyCitation) => void;
   motionRef: RefObject<HTMLDivElement | null>;
+  onComposeEmail?: () => void;
+  onOpenEmail?: (id: string) => void;
 }) {
   const [config, setConfig] = useState<StudyConfig | null>(null);
   const [dialog, setDialog] = useState<{
@@ -82,6 +99,13 @@ export default function Studio({
   const [title, setTitle] = useState("");
   const [menu, setMenu] = useState<string | null>(null);
   const sets = workspace.studySets ?? [];
+  const emails = useMemo(
+    () =>
+      visibleStudioResults(workspace).sort(
+        (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
+      ),
+    [workspace],
+  );
   const available = useMemo(() => studySources(workspace), [workspace]);
   const working = sets.some((set) => set.status === "generating");
   useEffect(() => {
@@ -228,6 +252,27 @@ export default function Studio({
                     </button>
                   </div>
                 ))}
+                <div className="study-tool" data-kind="email">
+                  <button className="study-tool-main" onClick={onComposeEmail}>
+                    <img
+                      className="study-tool-icon"
+                      src={emailIcon}
+                      width={44}
+                      height={44}
+                      alt=""
+                    />
+                    <strong>Draft &amp; send email</strong>
+                    <span>Write an email from this note.</span>
+                  </button>
+                  <button
+                    className="icon-button study-tool-settings"
+                    aria-label="Customize email"
+                    title="Customize email"
+                    onClick={onComposeEmail}
+                  >
+                    <Settings2 size={16} />
+                  </button>
+                </div>
               </div>
               <section className="study-history" aria-label="Study set history">
                 <div className="study-history-title">
@@ -426,6 +471,48 @@ export default function Studio({
                         </button>
                       ))}
                   </div>
+                )}
+              </section>
+              <section className="study-history" aria-label="Email history">
+                <div className="study-history-title">
+                  <h3>Email history</h3>
+                  <span>{emails.length}</span>
+                </div>
+                {emails.length ? (
+                  <ul className="study-history-list">
+                    {emails.map((email) => (
+                      <li key={email.id}>
+                        <div className="study-history-row studio-email-row">
+                          <img
+                            className="study-history-icon"
+                            src={emailIcon}
+                            width={24}
+                            height={24}
+                            alt=""
+                          />
+                          <button
+                            className="study-open"
+                            onClick={() => onOpenEmail?.(email.id)}
+                          >
+                            <strong title={email.title}>{email.title}</strong>
+                            <span>
+                              {email.draft?.to ||
+                                email.config.recipient ||
+                                "No recipient"}
+                            </span>
+                            <span>
+                              {emailStatus(email)} ·{" "}
+                              {dateFormat.format(new Date(email.updatedAt))}
+                            </span>
+                          </button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="studio-email-empty" style={{ padding: "8px 16px", color: "var(--muted)", fontSize: "0.85rem" }}>
+                    Emails you draft or send appear here.
+                  </p>
                 )}
               </section>
             </div>

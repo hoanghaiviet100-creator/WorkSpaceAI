@@ -105,23 +105,42 @@ def build_qa_prompt(
 def detect_document_domain(chunks: List[DocumentChunk], doc_name: str = "") -> str:
     """
     Classifies a document into one of three distinct domains:
-    - 'ACADEMIC_STUDY': Math, physics, science, lecture notes, exercises, theorems, problem sets.
+    - 'ACADEMIC_STUDY': University higher math, computer science, engineering, sciences, lecture notes, exercises, theorems.
     - 'PROJECT_MANAGEMENT': Project briefs, requirements (R1-R5), taskboards, deliverables, deadlines.
     - 'GENERAL_REPORT': Administrative documents, policy reports, general articles.
     """
-    corpus = (doc_name + " " + " ".join(c.text[:200] for c in chunks[:5])).lower()
+    corpus = (doc_name + " " + " ".join(c.text[:250] for c in chunks[:6])).lower()
 
-    # Academic / Study / Math / Science signals
+    # Academic & University signals (Math, Higher Math, CS, Networking, Engineering, Sciences)
     study_signals = [
-        "chuyên đề", "bài giảng", "giáo trình", "lý thuyết", "bài tập", "câu hỏi", "ôn tập", "ôn thi",
-        "đề thi", "kiểm tra", "toán", "đại số", "hình học", "giải tích", "vật lý", "hóa học", "sinh học",
-        "phương trình", "hệ phương trình", "bậc hai", "bậc nhất", "hệ thức", "viét", "vi-ét",
-        "định lý", "định lí", "hệ quả", "tam thức", "bất đẳng thức", "nghiệm", "biệt thức", "delta",
-        "hàm số", "đạo hàm", "tích phân", "công thức", "dạng bài", "dạng 1", "dạng 2", "ví dụ",
-        "chứng minh", "tìm hai số", "học sinh", "lớp 9", "lớp 10", "lớp 11", "lớp 12",
+        # University & Education terms
+        "bài giảng", "giáo trình", "chuyên đề", "lý thuyết", "bài tập", "câu hỏi", "ôn tập", "ôn thi",
+        "đề thi", "kiểm tra", "học phần", "tín chỉ", "sinh viên", "học sinh", "giảng viên", "chương",
+        "chapter", "slide", "lecture", "khoa", "đại học", "university", "hcmus", "khtn", "bách khoa",
+        "lab", "thực hành", "đề cương",
+        # Higher Math & STEM terms
+        "toán", "toán cao cấp", "đại số", "đại số tuyến tính", "linear algebra", "giải tích", "calculus",
+        "hình học", "xác suất", "thống kê", "probability", "statistics", "toán rời rạc", "discrete math",
+        "ma trận", "matrix", "định thức", "determinant", "không gian vector", "vector", "hệ phương trình",
+        "hạng", "rank", "cơ sở", "basis", "số chiều", "dimension", "ánh xạ tuyến tính", "trị riêng",
+        "eigenvalue", "vector riêng", "eigenvector", "chéo hóa", "dạng toàn phương", "chuỗi số",
+        "chuỗi fourier", "chuỗi taylor", "hội tụ", "phân kỳ", "tích phân", "tích phân suy rộng",
+        "tích phân kép", "phương trình vi phân", "biến ngẫu nhiên", "kỳ vọng", "phương sai", "phân phối chuẩn",
+        "bổ đề", "lemma", "tiên đề", "định lý", "định lí", "hệ quả", "chứng minh", "phương trình bậc hai",
+        "viét", "vi-ét", "delta", "nghiệm", "hàm số", "đạo hàm",
+        # Computer Science, Networking & Engineering terms
+        "mạng máy tính", "computer network", "tầng", "layer", "giao thức", "protocol", "packet",
+        "frame", "router", "switch", "data link", "hamming", "parity", "crc", "fdm", "tdm", "cdma",
+        "arp", "ip", "mac", "tcp", "udp", "dns", "http", "hệ điều hành", "operating system",
+        "tiến trình", "process", "luồng", "thread", "deadlock", "mutex", "semaphore", "bộ nhớ ảo",
+        "cơ sở dữ liệu", "database", "sql", "bcnf", "cấu trúc dữ liệu", "data structure", "thuật toán",
+        "algorithm", "độ phức tạp", "o(n)", "đồ thị", "graph", "dijkstra", "kiến trúc máy tính",
     ]
     study_count = sum(1 for s in study_signals if s in corpus)
-    if study_count >= 2 or any(k in doc_name.lower() for k in ["chuyên đề", "viét", "toán", "phương trình", "bài tập", "lý thuyết"]):
+    if study_count >= 2 or any(k in doc_name.lower() for k in [
+        "chuyên đề", "viét", "toán", "phương trình", "bài tập", "lý thuyết", "bài giảng", "giáo trình",
+        "giải tích", "đại số", "ma trận", "xác suất", "mạng", "network", "data link", "slide", "chapter"
+    ]):
         return "ACADEMIC_STUDY"
 
     # Project management signals
@@ -139,35 +158,35 @@ def detect_document_domain(chunks: List[DocumentChunk], doc_name: str = "") -> s
 
 def build_study_summary_prompt(doc_name: str, chunks: List[DocumentChunk]) -> str:
     """
-    Builds a high-impact, pedagogical Study Companion prompt (NotebookLM style)
-    designed specifically for students studying/reviewing academic material.
+    Builds a high-impact, pedagogical University Study Companion prompt (NotebookLM style)
+    designed specifically for higher education (Advanced Math, Computer Science, Engineering, Sciences).
     """
     combined_text = "\n\n".join(
         f"[Trang {c.page_number}, Dòng {c.start_line}-{c.end_line}]:\n{c.text}"
         for c in chunks
     )
     return (
-        f"Bạn là Trợ lý Học thuật & Sư phạm Chuyên sâu WorkspaceAI (phong cách trực quan, sư phạm, chuẩn mực tương đương NotebookLM).\n"
-        f"Dưới đây là các phần nội dung trích xuất từ tài liệu học tập/chuyên đề '{doc_name}'.\n"
-        f"Hãy tổng hợp và tạo bản Cẩm nang Học tập & Tóm tắt Kiến thức (Study Guide & Knowledge Synthesis) bằng tiếng Việt theo định dạng Markdown chuẩn mực sau.\n\n"
+        f"Bạn là Trợ lý Học thuật & Sư phạm Chuyên sâu WorkspaceAI (phong cách trực quan, trình độ Đại học, chuẩn mực tương đương NotebookLM).\n"
+        f"Dưới đây là các phần nội dung trích xuất từ tài liệu học tập/bài giảng đại học '{doc_name}'.\n"
+        f"Hãy tổng hợp và tạo bản Cẩm nang Học tập & Tóm tắt Kiến thức Đại học (University Study Companion & Deep Knowledge Synthesis) bằng tiếng Việt theo định dạng Markdown chuẩn mực sau.\n\n"
         f"QUY TẮC ĐỊNH DẠNG BẮT BUỘC:\n"
-        f"1. CÔNG THỨC TOÁN HỌC: BẮT BUỘC dùng định dạng LaTeX cho mọi công thức, biến số, phương trình (ví dụ: $x_1+x_2 = -\\frac{{b}}{{a}}$, $x_1 x_2 = \\frac{{c}}{{a}}$, $\\Delta = b^2 - 4ac$, $\\Delta \\ge 0$, $x_1, x_2 > 0$).\n"
-        f"2. Mỗi phần '#### 1.', '#### 2.', '#### 3.', '#### 4.', '#### 5.' BẮT BUỘC nằm trên dòng riêng và cách đoạn trước 2 dấu xuống dòng.\n"
-        f"3. TUYỆT ĐỐI KHÔNG đưa vào các mục dự án như 'hạn chót', 'taskboard', 'bàn giao' nếu tài liệu là bài học/toán học.\n\n"
+        f"1. CÔNG THỨC TOÁN HỌC & KỸ THUẬT: BẮT BUỘC dùng định dạng LaTeX cho mọi công thức, ma trận, tích phân, biến số, phương trình (ví dụ: $x_1, x_2$, $\\det(A)$, $\\lambda$, $\\int_{{a}}^{{b}} f(x)dx$, $\\sum_{{n=1}}^{{\\infty}} a_n$, $2^r \\ge m+r+1$).\n"
+        f"2. GIẢI THÍCH CƠ CHẾ KỸ THUẬT: Với các môn kỹ thuật (Mạng máy tính, Hệ điều hành, Thuật toán), BẮT BUỘC giải thích cơ chế hoạt động (How it works) và luồng dữ liệu (Protocol flow) thay vì chỉ liệt kê định nghĩa một dòng.\n"
+        f"3. Mỗi phần '#### 1.', '#### 2.', '#### 3.', '#### 4.', '#### 5.' BẮT BUỘC nằm trên dòng riêng và cách đoạn trước 2 dấu xuống dòng.\n"
+        f"4. TUYỆT ĐỐI KHÔNG đưa vào các mục dự án như 'hạn chót', 'taskboard', 'bàn giao' nếu tài liệu là bài học/giáo trình.\n\n"
         f"### 📚 Cẩm nang Học tập & Tóm tắt Kiến thức: **{doc_name}**\n\n"
-        f"#### 1. 🎯 Tổng quan Chuyên đề & Mục tiêu Học tập\n"
-        f"- Nêu rõ chủ đề chính, mục tiêu kiến thức cần nắm vững và phạm vi áp dụng của bài học/chuyên đề.\n\n"
-        f"#### 2. 📐 Khung Lý thuyết & Hệ thống Công thức Cốt lõi\n"
-        f"- Liệt kê đầy đủ các định nghĩa, định lý, hệ quả và công thức toán học/khoa học quan trọng nhất trích xuất từ tài liệu.\n"
-        f"- Định dạng mọi công thức toán học bằng LaTeX ($...$). Kèm điều kiện áp dụng rõ ràng (ví dụ: $a \\ne 0$, $\\Delta \\ge 0$).\n"
-        f"- Ghi chú nguồn tham chiếu dòng/trang dạng `[Trang X]`.\n\n"
-        f"#### 3. 🧩 Phân loại Dạng bài & Phương pháp Giải mẫu\n"
-        f"- Phân loại các dạng bài tập tiêu biểu có trong tài liệu (ví dụ: Tính giá trị biểu thức đối xứng, Tìm hai số biết tổng và tích, Xét dấu các nghiệm, Tìm tham số...).\n"
-        f"- Trình bày phương pháp giải từng bước kèm ví dụ hoặc câu hỏi minh họa từ tài liệu.\n\n"
-        f"#### 4. ⚠️ Bẫy Sai lầm Phổ biến & Mẹo Thi cử\n"
-        f"- Chỉ rõ những lỗi sai kinh điển học sinh hay mắc phải (quên điều kiện $\\Delta \\ge 0$, nhầm dấu của $-b/a$, quên điều kiện $a \\ne 0$...). Gợi ý mẹo phòng tránh.\n\n"
+        f"#### 1. 🎯 Tổng quan Chuyên đề, Vị trí Kiến trúc & Mục tiêu Học tập\n"
+        f"- Nêu rõ chủ đề chính, mục tiêu kiến thức cần nắm vững, kiến thức tiên quyết và vị trí trong mô hình hệ thống/chương trình đào tạo.\n\n"
+        f"#### 2. 📐 Khung Lý thuyết, Định lý & Hệ thống Công thức/Giao thức Cốt lõi\n"
+        f"- Trình bày chi tiết, chính xác các định nghĩa, định lý, hệ quả, công thức toán học (định dạng LaTeX) hoặc cơ chế giao thức/kỹ thuật cốt lõi.\n"
+        f"- Nêu rõ điều kiện áp dụng, ý nghĩa các tham số/đại lượng và ghi chú nguồn tham chiếu dạng `[Trang X]`.\n\n"
+        f"#### 3. 🧩 Phân loại Dạng bài tập / Thuật toán & Phương pháp Giải mẫu\n"
+        f"- Phân loại các dạng bài toán hoặc bài tập thực hành điển hình trong tài liệu.\n"
+        f"- Trình bày phương pháp giải từng bước (Step-by-step) kèm ví dụ hoặc câu hỏi minh họa cụ thể.\n\n"
+        f"#### 4. ⚠️ Bẫy Đề thi, Sai lầm Phổ biến & Trường hợp Biên\n"
+        f"- Chỉ rõ những lỗi sai kinh điển sinh viên thường mắc phải trong phòng thi (quên điều kiện, nhầm lẫn công thức, bẫy trắc nghiệm, trường hợp biên/ngoại lệ). Gợi ý mẹo phòng tránh.\n\n"
         f"#### 5. 💡 Câu hỏi Tự ôn luyện & Flashcard Nhớ nhanh\n"
-        f"- Đưa ra 3-4 câu hỏi trọng tâm dạng flashcard để học sinh tự kiểm tra lại bài học.\n\n"
+        f"- Đưa ra 3-4 câu hỏi trọng tâm (kèm đáp án/gợi ý ngắn) để người học tự kiểm tra lại bài học.\n\n"
         f"Dữ liệu nguồn:\n"
         f"<untrusted_document_data>\n{combined_text}\n</untrusted_document_data>"
     )

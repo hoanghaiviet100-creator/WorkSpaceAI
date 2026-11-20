@@ -584,6 +584,84 @@ class LLMProvider:
                 f"- **Câu 3:** Hai số $u, v$ thỏa mãn $u + v = 5$ và $u \\cdot v = 6$ là nghiệm của phương trình nào? Giải tìm hai số đó."
             )
 
+        # Check for Computer Networks topic
+        is_network = any(w in full_corpus or w in doc_name.lower() for w in [
+            "mạng máy tính", "data link", "hamming", "arp", "fdm", "tầng liên kết", "computer network",
+            "tcp", "ip", "tầng mạng", "mô hình osi", "ethernet"
+        ])
+        if is_network:
+            return (
+                f"### 📚 Cẩm nang Học tập & Tóm tắt Kiến thức: **{doc_name}**\n\n"
+                f"#### 1. 🎯 Tổng quan Chuyên đề & Vị trí Kiến trúc\n"
+                f"Tài liệu **{doc_name}** ({page_summary}, {len(chunks)} phân đoạn) tập trung vào các kiến trúc then chốt của **Tầng Liên kết Dữ liệu (Data Link Layer - Tầng 2)** "
+                f"trong mô hình mạng máy tính. Mục tiêu cốt lõi giúp sinh viên nắm vững cơ chế tạo khung (Framing), kỹ thuật kiểm soát và sửa lỗi bit (Error Control), "
+                f"cơ chế phân chia kênh truyền đa truy cập (Multiple Access), và giao thức phân giải địa chỉ logic sang vật lý (ARP).\n\n"
+                f"#### 2. 📐 Khung Lý thuyết, Định lý & Hệ thống Giao thức Cốt lõi\n"
+                f"- **Kỹ thuật Kiểm soát & Sửa lỗi (EDC - Error Detection & Correction):**\n"
+                f"  + Bên gửi bổ sung thêm $r$ bit kiểm tra vào $m$ bit dữ liệu để tạo chuỗi mã $n = m + r$.\n"
+                f"  + **Mã Hamming (Sửa lỗi đơn - Single-bit Error Correction):**\n"
+                f"    * Số bit kiểm tra tối thiểu thỏa mãn bất đẳng thức: $$2^r \\ge m + r + 1$$\n"
+                f"    * Các bit kiểm tra $p_k$ được đặt tại các vị trí lũy thừa của 2: $1, 2, 4, 8, \\dots$ ($2^{{k-1}}$).\n"
+                f"    * Cơ chế: Mỗi bit kiểm tra phụ trách tính Parity chẵn/lẻ cho các vị trí bit có biểu diễn nhị phân tương ứng. Bên nhận tính syndrome để chỉ ra đúng vị trí bit bị lỗi.\n"
+                f"- **Đa truy cập phân chia theo tần số (FDM - Frequency Division Multiplexing):**\n"
+                f"  + Toàn bộ dải băng thông của kênh truyền được chia thành các dải tần con (sub-bands). Mỗi trạm truyền trên một dải tần số cố định $\\rightarrow$ Hoàn toàn không xảy ra xung đột (Collision-free).\n"
+                f"- **Giao thức Phân giải Địa chỉ (ARP - Address Resolution Protocol):**\n"
+                f"  + *Chức năng:* Chuyển đổi từ địa chỉ logic tầng mạng (IP: 32-bit) sang địa chỉ vật lý tầng Data Link (MAC: 48-bit) trong cùng một mạng cục bộ (LAN).\n"
+                f"  + *ARP Request:* Gửi dưới dạng **Broadcast** (địa chỉ MAC đích: `FF:FF:FF:FF:FF:FF`) để tìm chủ sở hữu IP.\n"
+                f"  + *ARP Reply:* Máy đích có IP trùng khớp trả lời trực tiếp bằng **Unicast** chứa địa chỉ MAC của nó.\n"
+                f"  + *ARP Cache:* Lưu trữ bảng ánh xạ IP $\\rightarrow$ MAC kèm thời gian sống (TTL) để giảm thiểu số lần broadcast trên đường truyền.\n\n"
+                f"#### 3. 🧩 Phân loại Dạng bài tập & Phương pháp Giải mẫu\n"
+                f"- **Dạng 1: Tính toán bit kiểm tra và giải mã sửa lỗi Hamming:**\n"
+                f"  + *Phương pháp:* Bước 1: Xác định vị trí các bit dữ liệu và bit kiểm tra $p_1, p_2, p_4\\dots$ Bước 2: Thiết lập phương trình Parity chẵn/lẻ theo bảng nhị phân. Bước 3: Tìm vector kiểm tra lỗi (Syndrome) để kết luận bit bị lật.\n"
+                f"- **Dạng 2: Phân tích đường đi của gói tin qua Router kết hợp ARP:**\n"
+                f"  + *Phương pháp:* Khi Host A gửi gói tin cho Host B ở mạng khác, Host A không ARP hỏi MAC của Host B mà bắt buộc phải ARP hỏi MAC của **Default Gateway (Router)**.\n\n"
+                f"#### 4. ⚠️ Bẫy Đề thi & Sai lầm Phổ biến\n"
+                f"- 🚨 **Bẫy 1 (Phạm vi ARP):** ARP là giao thức phát sóng quảng bá (Broadcast) chỉ hoạt động trong nội bộ một Broadcast Domain (Subnet). Router không bao giờ chuyển tiếp gói tin ARP Request sang mạng khác.\n"
+                f"- 🚨 **Bẫy 2 (Nhầm số bit Hamming):** Nhầm lẫn giữa số bit kiểm tra $r$, số bit dữ liệu $m$ và tổng độ dài từ mã $n = m + r$.\n"
+                f"- 🚨 **Bẫy 3 (FDM vs TDM):** FDM chia phổ tần số, TDM chia các khe thời gian luân phiên.\n\n"
+                f"#### 5. 💡 Câu hỏi Tự ôn luyện & Flashcard Nhớ nhanh\n"
+                f"- **Câu 1:** Để mã hóa chuỗi dữ liệu 7-bit bằng mã Hamming sửa lỗi đơn, ta cần tối thiểu bao nhiêu bit kiểm tra $r$? *(Đáp án: $r=4$ vì $2^4 = 16 \\ge 7 + 4 + 1 = 12$)*.\n"
+                f"- **Câu 2:** Tại sao ARP Request gửi broadcast nhưng ARP Reply lại gửi unicast?\n"
+                f"- **Câu 3:** Khi gói tin đi qua mỗi hop router, địa chỉ IP nguồn/đích và địa chỉ MAC nguồn/đích thay đổi như thế nào?"
+            )
+
+        # Check for Higher Mathematics / Linear Algebra / Calculus topic
+        is_higher_math = any(w in full_corpus or w in doc_name.lower() for w in [
+            "toán cao cấp", "đại số tuyến tính", "ma trận", "định thức", "không gian vector",
+            "trị riêng", "vector riêng", "giải tích", "tích phân", "chuỗi số", "đạo hàm riêng",
+            "xác suất", "thống kê", "phương trình vi phân"
+        ])
+        if is_higher_math:
+            return (
+                f"### 📚 Cẩm nang Học tập & Tóm tắt Kiến thức: **{doc_name}**\n\n"
+                f"#### 1. 🎯 Tổng quan Chuyên đề & Vị trí Kiến thức\n"
+                f"Tài liệu **{doc_name}** ({page_summary}, {len(chunks)} phân đoạn) thuộc chương trình **Toán Cao cấp / Đại học** (Đại số Tuyến tính & Giải tích). "
+                f"Nội dung trọng tâm trang bị cho sinh viên các công cụ giải tích ma trận, ánh xạ tuyến tính, giải hệ phương trình nhiều ẩn và tính toán các phép vi tích phân đa biến.\n\n"
+                f"#### 2. 📐 Khung Lý thuyết, Định lý & Hệ thống Công thức Cốt lõi\n"
+                f"- **Phép toán Ma trận & Định thức (Matrix & Determinant):**\n"
+                f"  + Điều kiện nhân hai ma trận $A_{{m \\times k}} \\times B_{{k \\times n}} = C_{{m \\times n}}$. Tính chất: $A(BC) = (AB)C$, nhưng nói chung $AB \\ne BA$.\n"
+                f"  + Định thức: $\\det(AB) = \\det(A) \\cdot \\det(B)$. Ma trận $A$ khả nghịch khi và chỉ khi $\\det(A) \\ne 0$, khi đó: $$A^{{-1}} = \\frac{{1}}{{\\det(A)}} \\cdot P_A^T$$\n"
+                f"- **Không gian Vector & Ánh xạ Tuyến tính:**\n"
+                f"  + Hệ vector $\{{\\mathbf{{v}}_1, \\dots, \\mathbf{{v}}_k\}}$ độc lập tuyến tính nếu $\\sum_{{i=1}}^k c_i \\mathbf{{v}}_i = \\mathbf{{0}} \\iff c_1 = \\dots = c_k = 0$.\n"
+                f"  + Hạng của hệ vector $r(A)$ bằng số vector độc lập tuyến tính tối đa (số phần tử cơ sở của không gian sinh).\n"
+                f"- **Trị riêng & Vector riêng (Eigenvalues & Eigenvectors):**\n"
+                f"  + Phương trình đặc trưng: $$\\det(A - \\lambda I) = 0$$\n"
+                f"  + Với mỗi trị riêng $\\lambda$, vector riêng tương ứng $\\mathbf{{x}} \\ne \\mathbf{{0}}$ thỏa mãn hệ: $$(A - \\lambda I)\\mathbf{{x}} = \\mathbf{{0}}$$\n\n"
+                f"#### 3. 🧩 Phân loại Dạng bài tập & Phương pháp Giải mẫu\n"
+                f"- **Dạng 1: Biện luận nghiệm hệ phương trình tuyến tính theo tham số (Định lý Kronecker-Capelli):**\n"
+                f"  + *Phương pháp:* Đưa ma trận mở rộng $\\bar{{A}} = [A | B]$ về dạng bậc thang bằng các phép biến đổi sơ cấp. Hệ có nghiệm duy nhất khi $r(A) = r(\\bar{{A}}) = n$; vô số nghiệm khi $r(A) = r(\\bar{{A}}) < n$; vô nghiệm khi $r(A) < r(\\bar{{A}})$.\n"
+                f"- **Dạng 2: Tìm trị riêng, vector riêng và chéo hóa ma trận:**\n"
+                f"  + *Phương pháp:* Bước 1: Giải phương trình đặc trưng $\\det(A - \\lambda I) = 0$ tìm các $\\lambda_i$. Bước 2: Tìm cơ sở không gian nghiệm cho từng $(A - \\lambda_i I)\\mathbf{{x}} = \\mathbf{{0}}$. Bước 3: Kiểm tra điều kiện chéo hóa (tổng số vector riêng độc lập tuyến tính bằng cấp của ma trận).\n\n"
+                f"#### 4. ⚠️ Bẫy Đề thi, Sai lầm Phổ biến & Trường hợp Biên\n"
+                f"- 🚨 **Bẫy 1 (Phép nhân ma trận):** Không giao hoán ($AB \\ne BA$). Quên kiểm tra kích thước số cột ma trận trước bằng số hàng ma trận sau.\n"
+                f"- 🚨 **Bẫy 2 (Tính định thức bằng biến đổi sơ cấp):** Nhân một hàng với số $k$ thì định thức tăng $k$ lần; đổi chỗ hai hàng thì định thức đổi dấu.\n"
+                f"- 🚨 **Bẫy 3 (Trị riêng bội):** Nếu trị riêng có bội đại số $k > 1$, số vector riêng độc lập tuyến tính tìm được phải đúng bằng $k$ thì ma trận mới chéo hóa được.\n\n"
+                f"#### 5. 💡 Câu hỏi Tự ôn luyện & Flashcard Nhớ nhanh\n"
+                f"- **Câu 1:** Nêu điều kiện cần và đủ để một ma trận vuông $A$ cấp $n$ chéo hóa được?\n"
+                f"- **Câu 2:** Cho ma trận $A$ vuông cấp 3 có $\\det(A) = 4$. Tính $\\det(2A)$ và $\\det(A^{{-1}})$? *(Đáp án: $\\det(2A) = 2^3 \\cdot 4 = 32$; $\\det(A^{{-1}}) = 1/4$)*.\n"
+                f"- **Câu 3:** Trình bày định lý Kronecker-Capelli về sự tồn tại nghiệm của hệ phương trình đại số tuyến tính."
+            )
+
         # General Academic summary for other subjects
         sections = []
         for c in chunks:
