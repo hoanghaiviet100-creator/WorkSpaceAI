@@ -199,7 +199,7 @@ def test_real_q02_ingestion_to_quiz_flow_preserves_selected_document_refs():
     '[]', '{"questions": {}}', '{"questions": [], "verified": true}',
     '{"questions": [], "questions": []}', '{"questions": [NaN]}',
     b'{"questions": []}', "x" * (MAX_QUIZ_RESPONSE_BYTES + 1),
-])
+], ids=lambda val: "oversized" if isinstance(val, (str, bytes)) and len(val) > 100 else None)
 def test_malformed_ambiguous_or_oversized_provider_output_is_an_error(output):
     result = F2QuizService(StubProvider(output)).generate_quiz(prepared())
     assert result.status == "ERROR"

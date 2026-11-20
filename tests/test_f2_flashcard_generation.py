@@ -220,7 +220,7 @@ def test_card_missing_a_required_field_is_rejected(missing):
     '{"cards": {}}', '{"questions": []}', '{"cards": [], "verified": true}',
     '{"cards": [], "cards": []}', '{"cards": [NaN]}', '{"cards": [Infinity]}',
     b'{"cards": []}', "x" * (MAX_FLASHCARD_RESPONSE_BYTES + 1),
-])
+], ids=lambda val: "oversized" if isinstance(val, (str, bytes)) and len(val) > 100 else None)
 def test_malformed_or_ambiguous_payload_returns_error(raw):
     result = F2FlashcardService(StubProvider(raw)).generate_flashcards(prepared())
     assert result.status == "ERROR"
