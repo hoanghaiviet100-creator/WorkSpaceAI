@@ -291,6 +291,11 @@ class LLMProvider:
         # 1. Deterministic Mock mode for automated tests
         if settings.llm_provider == "mock":
             synth_text = self.synthesize_smart_answer(query, chunks)
+            mock_thinking = (
+                f"Phân tích câu hỏi '{query}': Nhận diện tài liệu nguồn [{top.doc_name}], "
+                f"đối chiếu ngữ cảnh [Trang {top.page_number}], trích xuất luận điểm và "
+                f"chuẩn hóa công thức toán/kỹ thuật phù hợp."
+            )
             return [
                 GeneratedClaim(
                     claim_text=synth_text,
@@ -301,6 +306,7 @@ class LLMProvider:
                     doc_version=top.doc_version,
                     doc_hash=top.doc_hash,
                     evidence_quote=top.text[:120],
+                    thinking=mock_thinking,
                 )
             ]
 
@@ -319,6 +325,7 @@ class LLMProvider:
         if raw_response:
             parsed = _safe_parse_json(raw_response)
             if parsed and isinstance(parsed, dict) and "answer" in parsed:
+                thinking_text = str(parsed.get("thinking") or parsed.get("reasoning") or "").strip()
                 answer_text = str(parsed.get("answer", "")).strip()
                 raw_cits = parsed.get("citations", [])
 
@@ -371,6 +378,7 @@ class LLMProvider:
                                     doc_version=top.doc_version,
                                     doc_hash=top.doc_hash,
                                     evidence_quote=excerpt or top.text[:120],
+                                    thinking=thinking_text or None,
                                 )
                             )
 
@@ -388,6 +396,7 @@ class LLMProvider:
                         doc_version=top.doc_version,
                         doc_hash=top.doc_hash,
                         evidence_quote=top.text[:120],
+                        thinking=thinking_text or None,
                     )
                 ]
 
@@ -710,8 +719,9 @@ class LLMProvider:
             try:
                 resp_text = self.call_ollama(prompt)
                 if resp_text and "SUBJECT:" in resp_text and "BODY:" in resp_text:
-                    parts = resp_text.split("BODY:", 1)
-                    subj = parts[0].replace("SUBJECT:", "").strip()
+                    after_subj = resp_text.split("SUBJECT:", 1)[1]
+                    parts = after_subj.split("BODY:", 1)
+                    subj = parts[0].strip()
                     body = parts[1].strip()
                     if subj and body:
                         return subj, body

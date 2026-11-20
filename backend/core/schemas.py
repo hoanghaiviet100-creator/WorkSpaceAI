@@ -109,6 +109,7 @@ class GeneratedClaim(BaseModel):
     match_score: float = 0.0
     matched_span: Optional[str] = None
     evidence_span: Optional[Dict[str, Any]] = None
+    thinking: Optional[str] = None
 
 
 class CitationVerificationResult(BaseModel):

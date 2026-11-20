@@ -434,6 +434,11 @@ export default function Chat({
         }
         result.rejectedClaims = rejected;
         result.suggestedQuestions = response.suggested_questions;
+        if (response.thinking) {
+          result.thinking = response.thinking;
+        } else if (response.validated_claims?.[0]?.thinking) {
+          result.thinking = response.validated_claims[0].thinking;
+        }
         let draft: Draft | undefined;
         if (response.draft) {
           draft = draftFromServer(response.draft, thread.id, workspace);
@@ -710,6 +715,49 @@ export default function Chat({
                   </div>
                   {m.state === "answer" ? (
                     <>
+                      {m.thinking && (
+                        <details
+                          className="reasoning-box"
+                          style={{
+                            marginBottom: "12px",
+                            borderRadius: "8px",
+                            border: "1px solid rgba(139, 92, 246, 0.3)",
+                            background: "rgba(139, 92, 246, 0.06)",
+                            padding: "10px 14px",
+                            fontSize: "12px",
+                            color: "#c4b5fd",
+                          }}
+                        >
+                          <summary
+                            style={{
+                              cursor: "pointer",
+                              fontWeight: 600,
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              userSelect: "none",
+                              color: "#a78bfa",
+                            }}
+                          >
+                            <Sparkles size={14} />
+                            <span>💭 Quá trình suy luận (Reasoning Process)</span>
+                          </summary>
+                          <div
+                            style={{
+                              marginTop: "8px",
+                              paddingLeft: "12px",
+                              borderLeft: "2px solid rgba(139, 92, 246, 0.4)",
+                              fontFamily: "monospace",
+                              fontSize: "11px",
+                              lineHeight: "1.6",
+                              whiteSpace: "pre-wrap",
+                              opacity: 0.95,
+                            }}
+                          >
+                            {m.thinking}
+                          </div>
+                        </details>
+                      )}
                       {m.answerText && (
                         <p className="server-answer-text">{renderFormattedMarkdown(m.answerText)}</p>
                       )}

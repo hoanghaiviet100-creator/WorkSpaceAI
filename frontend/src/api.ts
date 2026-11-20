@@ -94,6 +94,7 @@ export type ServerClaim = Partial<CitationClaimRow> & {
   cited_doc_id: string;
   cited_page: number;
   evidence_quote: string;
+  thinking?: string;
 };
 export type ChatResponse = {
   route: RouteType;
@@ -104,6 +105,7 @@ export type ChatResponse = {
   validated_claims?: ServerClaim[];
   hallucination_flags?: ServerClaim[];
   suggested_questions?: string[];
+  thinking?: string;
   draft?: {
     draft_id: string;
     recipient_email: string;

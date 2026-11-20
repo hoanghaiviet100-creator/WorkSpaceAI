@@ -32,8 +32,10 @@ CÁC NGUYÊN TẮC BẮT BUỘC (KHÔNG ĐƯỢC VI PHẠM):
 5. Ý KHẲNG ĐỊNH RIÊNG BIỆT (CLAIM): Với mỗi trích dẫn trong "citations", cung cấp trường "claim" là ý khẳng định hoặc câu kết luận cụ thể mà trích dẫn đó hỗ trợ.
 6. TRÍCH NGUYÊN VĂN (EXCERPT): Trường "excerpt" trong mảng "citations" PHẢI LÀ TRÍCH ĐOẠN NGUYÊN VĂN 100% từng câu chữ từ tài liệu gốc, không sửa đổi hay tóm tắt, để hệ thống đối soát tự động kiểm tra.
 7. TỌA ĐỘ DÒNG VÀ TRANG: Lấy chính xác số trang (page) và số dòng (line_start, line_end) từ các nhãn [Dòng K] được gắn sẵn trong từng đoạn tài liệu.
-8. ĐỊNH DẠNG ĐẦU RA: Bạn BẮT BUỘC phải trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm lời dẫn) theo cấu trúc:
+8. QUY TRÌNH SUY LUẬN (THINKING / REASONING): Trước khi đưa ra câu trả lời, bạn BẮT BUỘC phải tư duy suy luận trong trường "thinking": phân tích câu hỏi, liên kết các đoạn tài liệu nguồn, xác định công thức/bước giải và kiểm tra tọa độ dòng trích dẫn trước khi chốt đáp án.
+9. ĐỊNH DẠNG ĐẦU RA: Bạn BẮT BUỘC phải trả về DUY NHẤT một đối tượng JSON hợp lệ (không kèm lời dẫn) theo cấu trúc:
 {{
+  "thinking": "Phân tích câu hỏi, liên kết bằng chứng từ [{sample_doc_id}, Trang {sample_page}, Dòng {sample_start}-{sample_end}], suy luận logic từng bước giải quyết vấn đề trước khi chốt câu trả lời...",
   "answer": "Câu trả lời chi tiết, sư phạm và dễ hiểu bằng tiếng Việt. Công thức toán định dạng bằng LaTeX ($...$). Cuối mỗi ý có gắn nhãn [{sample_doc_id}, Trang {sample_page}, Dòng {sample_start}-{sample_end}]...",
   "citations": [
     {{
@@ -175,6 +177,8 @@ def build_study_summary_prompt(doc_name: str, chunks: List[DocumentChunk]) -> st
         f"3. Mỗi phần '#### 1.', '#### 2.', '#### 3.', '#### 4.', '#### 5.' BẮT BUỘC nằm trên dòng riêng và cách đoạn trước 2 dấu xuống dòng.\n"
         f"4. TUYỆT ĐỐI KHÔNG đưa vào các mục dự án như 'hạn chót', 'taskboard', 'bàn giao' nếu tài liệu là bài học/giáo trình.\n\n"
         f"### 📚 Cẩm nang Học tập & Tóm tắt Kiến thức: **{doc_name}**\n\n"
+        f"> 💭 **Tư duy Sư phạm & Phân tích Cấu trúc (Reasoning Process)**:\n"
+        f"> [Tóm tắt chuỗi suy luận: nhận định tổng quan bản chất tài liệu, kết nối các chủ đề then chốt và định hướng tiếp cận cho người học]\n\n"
         f"#### 1. 🎯 Tổng quan Chuyên đề, Vị trí Kiến trúc & Mục tiêu Học tập\n"
         f"- Nêu rõ chủ đề chính, mục tiêu kiến thức cần nắm vững, kiến thức tiên quyết và vị trí trong mô hình hệ thống/chương trình đào tạo.\n\n"
         f"#### 2. 📐 Khung Lý thuyết, Định lý & Hệ thống Công thức/Giao thức Cốt lõi\n"
@@ -206,6 +210,8 @@ def build_project_summary_prompt(doc_name: str, chunks: List[DocumentChunk]) -> 
         f"1. Mỗi phần '#### 1.', '#### 2.', '#### 3.', '#### 4.' BẮT BUỘC phải nằm trên dòng riêng và cách đoạn trước 2 dấu xuống dòng.\n"
         f"2. Mỗi gạch đầu dòng '- **Tên mục**:' phải nằm trên một dòng riêng biệt.\n\n"
         f"### 📄 Tóm tắt Tài liệu Toàn diện: **{doc_name}**\n\n"
+        f"> 💭 **Phân tích Kiến trúc & Chuỗi Suy luận (Reasoning Process)**:\n"
+        f"> [Tóm tắt chuỗi suy luận: nhận định tổng quan về mục tiêu điều hành, liên kết các tiêu chuẩn kỹ thuật với mốc thời hạn và chỉ ra các rủi ro cốt lõi trước khi đi vào chi tiết]\n\n"
         f"#### 1. 🎯 Tổng quan Điều hành & Bản chất Tài liệu (Executive Briefing)\n"
         f"- Nêu rõ mục đích, phạm vi, đối tượng áp dụng và bối cảnh chính của tài liệu.\n\n"
         f"#### 2. 📌 Các Trọng tâm Kỹ thuật & Yêu cầu Cốt lõi (Core Themes & Requirements)\n"
@@ -269,15 +275,19 @@ def build_email_prompt(
     chunks: List[DocumentChunk],
     recipient_email: Optional[str] = None,
 ) -> str:
-    """Builds email drafting prompt."""
+    """Builds email drafting prompt with explicit reasoning step."""
     context_str = "\n".join(f"- [{c.doc_name} p.{c.page_number}]: {c.text}" for c in chunks)
     prompt = (
         "Bạn là trợ lý ảo hỗ trợ soạn thảo email học thuật cho đồ án môn học CSC10014 (WorkspaceAI).\n"
         f"Yêu cầu của người dùng: \"{query}\"\n"
         f"Người nhận dự kiến: {recipient_email or 'Giảng viên'}\n"
         f"Dữ liệu liên quan từ workspace:\n{context_str}\n\n"
+        "QUY TRÌNH SUY LUẬN (REASONING PROCESS):\n"
+        "Trước khi tạo Tiêu đề và Nội dung, bạn PHẢI tư duy logic: phân tích vai trò người nhận, bối cảnh yêu cầu, mục tiêu email và chọn lọc thông tin từ workspace.\n\n"
         "Hãy tạo 1 Tiêu đề (Subject) và Nội dung email (Body) bằng tiếng Việt thật trang trọng, lịch sự và rõ ràng.\n"
         "Định dạng kết quả trả về CHÍNH XÁC theo cấu trúc sau:\n"
+        "THINKING:\n"
+        "<Suy luận logic: Phân tích đối tượng người nhận, bối cảnh yêu cầu, mục tiêu email và chọn lọc thông tin từ tài liệu đính kèm>\n"
         "SUBJECT: <tiêu đề bắt đầu bằng [CSC10014]>\n"
         "BODY:\n"
         "<nội dung email có lời chào, nội dung chi tiết, lời cảm ơn và chữ ký Nhóm sinh viên CSC10014>"

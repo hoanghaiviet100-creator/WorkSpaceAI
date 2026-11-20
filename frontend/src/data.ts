@@ -133,6 +133,7 @@ export type Message = {
   errorText?: string;
   origin?: "sample" | "server";
   suggestedQuestions?: string[];
+  thinking?: string;
   studioResultId?: string;
   feedback?: "helpful" | "unhelpful";
   legacyThreadId?: string;

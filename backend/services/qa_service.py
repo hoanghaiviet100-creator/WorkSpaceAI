@@ -501,6 +501,24 @@ class QAService:
         section_claims = parse_summary_into_section_claims(summary_text, chunks)
         suggested = generate_suggested_prompts(doc_name, section_claims)
 
+        thinking_text = None
+        if "> 💭" in summary_text:
+            thinking_lines = []
+            for line in summary_text.splitlines():
+                if line.startswith(">"):
+                    clean_l = (
+                        line.lstrip("> ")
+                        .replace("**Tư duy Sư phạm & Phân tích Cấu trúc (Reasoning Process)**:", "")
+                        .replace("**Phân tích Kiến trúc & Chuỗi Suy luận (Reasoning Process)**:", "")
+                        .strip()
+                    )
+                    if clean_l and not clean_l.startswith("["):
+                        thinking_lines.append(clean_l)
+                elif thinking_lines:
+                    break
+            if thinking_lines:
+                thinking_text = "\n".join(thinking_lines)
+
         return {
             "route": RouteType.QA_FLOW,
             "status": "SUMMARY_GENERATED",
@@ -510,6 +528,7 @@ class QAService:
             "validated_claims": section_claims,
             "hallucination_flags": [],
             "suggested_questions": suggested,
+            "thinking": thinking_text,
         }
 
     def answer_question(
@@ -634,9 +653,18 @@ class QAService:
                 }
 
         citations = []
+        # Preserve reasoning/thinking from raw claims
+        thinking_text = None
+        for rc in raw_claims:
+            if getattr(rc, "thinking", None):
+                thinking_text = rc.thinking
+                break
+
         for c in verification.validated_claims:
             line_str = f", Dòng {c.cited_start_line}-{c.cited_end_line}" if c.cited_start_line and c.cited_end_line else ""
             citations.append(f"{c.cited_doc_id} (Trang {c.cited_page}{line_str})")
+            if not getattr(c, "thinking", None) and thinking_text:
+                c.thinking = thinking_text
 
         primary_doc = verification.validated_claims[0].cited_doc_id if verification.validated_claims else "Tài liệu"
         suggested = generate_suggested_prompts(primary_doc, verification.validated_claims, query)
@@ -650,6 +678,7 @@ class QAService:
             "validated_claims": verification.validated_claims,
             "hallucination_flags": verification.hallucination_flags,
             "suggested_questions": suggested,
+            "thinking": thinking_text,
         }
 
 

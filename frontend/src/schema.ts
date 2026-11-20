@@ -139,6 +139,7 @@ export interface ChatMessageRow {
   selected_docs: string[];
   citations: string[];
   created_at: string;
+  thinking?: string;
 }
 export interface CitationClaimRow {
   claim_id: string;
@@ -155,6 +156,7 @@ export interface CitationClaimRow {
   doc_version: string;
   doc_hash: string;
   verified_at: string;
+  thinking?: string;
 }
 export interface EmailDraftRow {
   draft_id: string;
