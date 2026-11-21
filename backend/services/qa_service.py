@@ -466,10 +466,11 @@ class QAService:
         self.repository = repository or workspace_repository
         self.provider = provider or llm_provider
         self.embed_provider = embed_provider or embedding_provider
-        # Inject embed_fn into repository if available
-        embed_fn = self.embed_provider.get_embed_fn()
-        if embed_fn is not None:
-            self.repository.set_embed_fn(embed_fn)
+        # Inject embed_fn into repository if repository does not already have an active embed_fn
+        if getattr(self.repository, "_embed_fn", None) is None:
+            embed_fn = self.embed_provider.get_embed_fn()
+            if embed_fn is not None:
+                self.repository.set_embed_fn(embed_fn)
 
     def summarize_document(self, doc_id: str) -> Dict[str, Any]:
         """Summarizes a specific document in the workspace using the active LLM or deterministic engine."""
@@ -586,8 +587,11 @@ class QAService:
 
         # 4. Hybrid RRF Retrieval
         retrieved = self.repository.search(weighted_query, top_k=effective_top_k, selected_doc_ids=selected_doc_ids)
-        # Adaptive threshold: allow top-ranked chunks with score >= 0.20 when dense active
-        effective_min_score = min(min_score, 0.20 if dense_active else 0.25) if (retrieved and len(query.strip()) >= 4) else min_score
+        # Adaptive threshold: allow top-ranked chunks with score >= 0.20 when dense active, unless caller explicitly enforces tau_rel
+        if tau_rel is not None:
+            effective_min_score = tau_rel
+        else:
+            effective_min_score = min(min_score, 0.20 if dense_active else 0.25) if (retrieved and len(query.strip()) >= 4) else min_score
 
         if not retrieved or retrieved[0].score < effective_min_score:
             return {

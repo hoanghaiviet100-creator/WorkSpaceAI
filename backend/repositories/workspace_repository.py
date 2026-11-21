@@ -486,7 +486,15 @@ class WorkspaceRepository:
 
         if self.dense_available and callable(self._embed_fn):
             try:
-                q_vec = self._embed_fn([query])
+                if not hasattr(self, "_query_embeddings"):
+                    self._query_embeddings = {}
+                if query in self._query_embeddings:
+                    q_vec = self._query_embeddings[query]
+                else:
+                    q_vec = self._embed_fn([query])
+                    if q_vec is not None and len(q_vec) > 0:
+                        self._query_embeddings[query] = q_vec
+
                 if q_vec is not None and len(q_vec) > 0:
                     if not hasattr(self, "_chunk_embeddings"):
                         self._chunk_embeddings = {}

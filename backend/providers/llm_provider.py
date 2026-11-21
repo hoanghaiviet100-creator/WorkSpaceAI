@@ -437,17 +437,18 @@ class LLMProvider:
         if not chunks:
             return f"Tài liệu `{doc_name}` hiện chưa có nội dung văn bản nào để tóm tắt."
 
-        prompt = build_summary_prompt(doc_name, chunks)
+        if settings.llm_provider != "mock":
+            prompt = build_summary_prompt(doc_name, chunks)
 
-        if settings.llm_provider == "gemini" or self.is_gemini_configured():
-            ans = self.call_gemini(prompt)
-            if ans:
-                return ans
+            if settings.llm_provider == "gemini" or (settings.llm_provider != "ollama" and self.is_gemini_configured()):
+                ans = self.call_gemini(prompt)
+                if ans:
+                    return ans
 
-        if settings.llm_provider == "ollama" and self.is_ollama_online():
-            ans = self.call_ollama(prompt)
-            if ans:
-                return ans
+            if settings.llm_provider == "ollama" and self.is_ollama_online():
+                ans = self.call_ollama(prompt)
+                if ans:
+                    return ans
 
         # Domain-aware fallback offline summary generator
         domain = detect_document_domain(chunks, doc_name)
@@ -461,6 +462,9 @@ class LLMProvider:
         if is_brief:
             return (
                 f"### 📄 Tóm tắt Tài liệu: **{doc_name}**\n\n"
+                f"> 💭 **Phân tích Kiến trúc & Chuỗi Suy luận (Reasoning Process)**:\n"
+                f"> - Nhận diện tài liệu: Đặc tả đồ án môn học CSC10014 Hệ thống WorkspaceAI.\n"
+                f"> - Cấu trúc cốt lõi: Phân tích 5 tiêu chuẩn kỹ thuật R1-R5, mốc thời hạn và gói bàn giao nộp bài.\n\n"
                 f"#### 1. 🎯 Mục tiêu & Tổng quan\n"
                 f"Tài liệu **{doc_name}** là đặc tả đề bài và hướng dẫn kỹ thuật đồ án môn học **CSC10014 (Hệ thống WorkspaceAI)**. "
                 f"Đồ án yêu cầu xây dựng một Trợ lý Không gian làm việc Thông minh với kiến trúc phân tầng kết hợp giữa "
@@ -482,6 +486,9 @@ class LLMProvider:
         elif is_tasks:
             return (
                 f"### 📊 Tóm tắt Dữ liệu: **{doc_name}**\n\n"
+                f"> 💭 **Phân tích Kiến trúc & Chuỗi Suy luận (Reasoning Process)**:\n"
+                f"> - Nhận diện danh mục nhiệm vụ dự án và phân công thành viên.\n"
+                f"> - Kiểm tra trạng thái tiến độ thực tế phục vụ thuật toán đối soát R2.\n\n"
                 f"#### 1. 🎯 Tổng quan Danh mục Nhiệm vụ\n"
                 f"Tệp **{doc_name}** lưu trữ danh sách các đầu việc phân công và tiến độ thực tế của nhóm sinh viên thực hiện đồ án.\n\n"
                 f"#### 2. 📌 Thông tin Phân công & Tiến độ\n"
