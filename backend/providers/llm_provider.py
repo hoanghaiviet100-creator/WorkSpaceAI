@@ -79,7 +79,7 @@ class LLMProvider:
         key = (settings.gemini_api_key or "").strip()
         return bool(key and key != "your_gemini_api_key_here" and len(key) > 10)
 
-    def call_gemini(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
+    def call_gemini(self, prompt: str, enforce_json: bool = False, temperature: float = 0.1) -> Optional[str]:
         """
         Calls Google Gemini REST API with explicit timeout and safety parameters.
         Includes automatic fallback across available Flash endpoints (e.g. gemini-flash-lite-latest).
@@ -94,7 +94,7 @@ class LLMProvider:
                 models_to_try.append(fallback_m)
 
         gen_config: Dict[str, Any] = {
-            "temperature": 0.1,
+            "temperature": temperature,
             "maxOutputTokens": 2048,
         }
         if enforce_json:
@@ -191,8 +191,8 @@ class LLMProvider:
 
     def synthesize_smart_answer(self, query: str, chunks: List[DocumentChunk]) -> str:
         """
-        Synthesizes a clean, user-friendly, well-formatted answer in natural Vietnamese
-        from retrieved document chunks when offline or in fallback mode.
+        Synthesizes a clean, user-friendly answer in natural Vietnamese from
+        retrieved document chunks (offline / fallback mode). Always returns str.
         """
         if not chunks:
             return "Không tìm thấy nội dung liên quan trong các tài liệu hiện có."
@@ -487,6 +487,84 @@ class LLMProvider:
                 f"- Nếu tài liệu có chứa yêu cầu đề bài, bạn có thể chuyển sang tab **'Taskboard & Đối soát'** và bấm *'Trích xuất Yêu cầu từ Tài liệu'* để tự động đối chiếu với bảng công việc nhóm."
             )
 
+    def _generate_email_deterministic(self, query: str, recipient_email: Optional[str] = None) -> Tuple[str, str]:
+        """
+        Pure deterministic email generator – NO LLM required.
+        Parses the user's intent from the query and generates a natural-sounding email.
+        """
+        q = query.strip()
+        q_lower = q.lower()
+
+        # Strip meta-command prefixes ("tạo mail xin...", "soạn thư xin...", etc.)
+        core = re.sub(
+            r"^(soạn mail|soạn thư|viết mail|viết thư|gửi mail|tạo mail|tạo email|draft email|hãy soạn|hãy viết)\s*",
+            "", q, flags=re.IGNORECASE
+        ).strip()
+        if not core:
+            core = q
+
+        # Detect intent
+        is_nghi = any(w in q_lower for w in ["nghỉ học", "nghỉ buổi", "xin nghỉ", "vắng", "không đến", "không thể đến"])
+        is_benh = any(w in q_lower for w in ["bệnh", "ốm", "sốt", "không khoẻ", "không khỏe", "mệt", "đau"])
+        is_xin_phep = any(w in q_lower for w in ["xin phép", "xin phep", "mong thầy", "mong thay"])
+        is_bao_cao = any(w in q_lower for w in ["báo cáo", "tiến độ", "progress", "update", "report"])
+
+        # Extract môn học nếu có
+        mon_match = re.search(
+            r"môn\s+([\w\s]+?)(?:\s+hôm|\s+ngày|\s+buổi|\s+vì|\s+do|$)",
+            q_lower
+        )
+        mon = mon_match.group(1).strip().title() if mon_match else ""
+
+        greeting = "Dạ thầy/cô ơi"
+        if recipient_email:
+            name_part = recipient_email.split("@")[0]
+            if "." in name_part:
+                # e.g. an.nguyen → "thầy/cô Nguyễn"
+                last = name_part.split(".")[-1].title()
+                greeting = f"Dạ thầy/cô {last} ơi"
+
+        if is_nghi or is_xin_phep:
+            ly_do = ""
+            if is_benh:
+                ly_do = "do hôm nay em bị ốm/sốt, không khoẻ"
+            elif "việc cá nhân" in q_lower:
+                ly_do = "do em có việc cá nhân đột xuất"
+            else:
+                # extract lý do từ "vì..." hoặc "do..."
+                reason_match = re.search(r"(?:vì|do|bởi vì)\s+(.+?)(?:\.|$)", q_lower)
+                if reason_match:
+                    ly_do = reason_match.group(1).strip()
+                else:
+                    ly_do = "do có việc bận"
+
+            mon_str = f" môn {mon}" if mon else ""
+            subject = f"Xin nghỉ học{mon_str}"
+            body = (
+                f"{greeting}, hôm nay em xin phép nghỉ buổi học{mon_str} ạ, {ly_do}. "
+                f"Em sẽ tự ôn lại bài và bù đắp đầy đủ. "
+                f"Mong thầy/cô thông cảm cho em ạ, em cảm ơn thầy/cô nhiều!"
+            )
+
+        elif is_bao_cao:
+            subject = core[:70] if len(core) <= 70 else core[:70] + "..."
+            body = (
+                f"{greeting}, em muốn báo cáo về: {core}. "
+                f"Em sẽ gửi chi tiết theo yêu cầu của thầy/cô ạ. "
+                f"Mong thầy/cô xem và phản hồi cho em. Em cảm ơn ạ!"
+            )
+
+        else:
+            # Generic natural fallback
+            subject = core[:70] if len(core) <= 70 else core[:70] + "..."
+            body = (
+                f"{greeting}, em muốn liên hệ về: {core}. "
+                f"Mong thầy/cô hỗ trợ và phản hồi cho em ạ. "
+                f"Em cảm ơn thầy/cô rất nhiều!"
+            )
+
+        return subject, body
+
     def generate_email_draft(
         self,
         query: str,
@@ -494,114 +572,67 @@ class LLMProvider:
         recipient_email: Optional[str] = None,
     ) -> Tuple[str, str]:
         """
-        Generates context-aware email subject and body leveraging workspace context.
+        Generates a fully dynamic email subject and body from the user's prompt.
+        Uses LLM (Gemini or Ollama) – NO static template fallback.
         """
         prompt = build_email_prompt(query, chunks, recipient_email)
 
-        # 1. Ollama Provider
-        if settings.llm_provider == "ollama" and self.is_ollama_online():
-            try:
-                resp_text = self.call_ollama(prompt)
-                if resp_text and "SUBJECT:" in resp_text and "BODY:" in resp_text:
-                    parts = resp_text.split("BODY:", 1)
-                    subj = parts[0].replace("SUBJECT:", "").strip()
-                    body = parts[1].strip()
-                    if subj and body:
+        # Markers that indicate the LLM generated the old CSC10014 static template
+        _STATIC_MARKERS = [
+            "Em đại diện nhóm thực hiện đồ án môn học CSC10014",
+            "Nhóm sinh viên thực hiện đồ án CSC10014",
+            "Dựa trên các thông tin đã được tổng hợp trong hồ sơ đồ án",
+            "Chi tiết nội dung yêu cầu:\n",
+        ]
+
+        def _is_static_template(body: str) -> bool:
+            return any(m in body for m in _STATIC_MARKERS)
+
+        def _parse_subject_body(text: str) -> Optional[Tuple[str, str]]:
+            """Parse SUBJECT:/BODY: format from LLM output. Reject static templates."""
+            if not text:
+                return None
+            # Try SUBJECT:/BODY: format (from build_email_prompt)
+            if "SUBJECT:" in text and "BODY:" in text:
+                parts = text.split("BODY:", 1)
+                subj = parts[0].replace("SUBJECT:", "").strip()
+                body = parts[1].strip()
+                if subj and body and not _is_static_template(body):
+                    return subj, body
+            # Try Subject:/Body: format (alternative LLM output)
+            if "Subject:" in text and "Body:" in text:
+                subj_match = re.search(r"Subject:\s*(.*)", text, re.IGNORECASE)
+                body_match = re.search(r"Body:\s*([\s\S]*)", text, re.IGNORECASE)
+                if subj_match and body_match:
+                    subj = subj_match.group(1).strip()
+                    body = body_match.group(1).strip()
+                    if subj and body and not _is_static_template(body):
                         return subj, body
+            return None
+
+        # 1. Try Gemini (preferred – usually faster and higher quality)
+        if self.is_gemini_configured():
+            try:
+                resp_text = self.call_gemini(prompt)
+                result = _parse_subject_body(resp_text or "")
+                if result:
+                    return result
             except Exception:
                 pass
 
-        # 2. Smart Contextual Generator fallback
-        q_lower = query.lower()
+        # 2. Try Ollama
+        if settings.llm_provider == "ollama" and self.is_ollama_online():
+            try:
+                resp_text = self.call_ollama(prompt)
+                result = _parse_subject_body(resp_text or "")
+                if result:
+                    return result
+            except Exception:
+                pass
 
-        if any(w in q_lower for w in ["deadline", "gia hạn", "dời", "hoãn", "lùi", "thời hạn", "trễ"]):
-            subject = "[CSC10014] Đơn xin gia hạn thời hạn nộp bài tập / đồ án"
-            body = (
-                "Kính gửi Quý Thầy/Cô,\n\n"
-                "Em là đại diện nhóm thực hiện đồ án môn học CSC10014 (Hệ thống WorkspaceAI).\n\n"
-                f"Liên quan đến yêu cầu: \"{query.strip()}\"\n\n"
-                "Hiện tại nhóm em đã triển khai các tính năng cốt lõi theo Project Brief, tuy nhiên trong quá trình hoàn thiện, "
-                "nhóm nhận thấy một số hạng mục đối soát tất định (R2) và kiểm chứng trích lục cần được tối ưu và kiểm thử thêm "
-                "để đảm bảo chất lượng kỹ thuật cao nhất.\n\n"
-                "Vì vậy, nhóm em kính xin phép Thầy/Cô cho phép nhóm được lùi thời hạn nộp bài thêm một khoảng thời gian ngắn "
-                "để nhóm có thể rà soát lại toàn bộ Submission Package và hoàn thiện báo cáo kỹ thuật chỉn chu nhất.\n\n"
-                "Nhóm em xin cam kết sẽ hoàn thành đúng theo hạn mới và nộp đầy đủ các tài liệu theo quy định.\n\n"
-                "Em xin chân thành cảm ơn sự thông cảm và hướng dẫn tận tình của Quý Thầy/Cô!\n\n"
-                "Trân trọng,\n"
-                "Nhóm sinh viên thực hiện đồ án CSC10014"
-            )
-            return subject, body
+        # 3. Deterministic fallback – natural email without static CSC10014 template
+        return self._generate_email_deterministic(query, recipient_email)
 
-        if any(w in q_lower for w in ["điểm", "kết quả", "phúc khảo", "grade", "score", "nhận xét", "feedback"]):
-            subject = "[CSC10014] Thắc mắc & Xin phản hồi đánh giá đồ án môn học"
-            body = (
-                "Kính gửi Quý Thầy/Cô,\n\n"
-                "Em đại diện nhóm sinh viên thực hiện đồ án WorkspaceAI môn học CSC10014.\n\n"
-                f"Em viết email này liên quan đến nội dung: \"{query.strip()}\".\n\n"
-                "Sau khi nhận được thông báo về kết quả đánh giá sơ bộ của đồ án, nhóm em rất mong muốn được lắng nghe thêm "
-                "các nhận xét chi tiết của Thầy/Cô về các thành phần trong Submission Package (báo cáo kỹ thuật, mã nguồn, "
-                "kiến trúc hệ thống và bộ benchmark) để nhóm hiểu rõ những điểm cần khắc phục và cải thiện sản phẩm tốt hơn.\n\n"
-                "Nếu thuận tiện, nhóm em kính xin phép Thầy/Cô một buổi trao đổi ngắn qua Google Meet hoặc phản hồi qua email này ạ.\n\n"
-                "Nhóm em xin chân thành cảm ơn Thầy/Cô rất nhiều!\n\n"
-                "Trân trọng,\n"
-                "Nhóm sinh viên CSC10014"
-            )
-            return subject, body
-
-        task_match = re.search(r"t-0[1-9]", q_lower)
-        if task_match:
-            task_id = task_match.group(0).upper()
-            subject = f"[CSC10014] Báo cáo tiến độ chi tiết hạng mục {task_id}"
-            body = (
-                "Kính gửi Quý Thầy/Cô,\n\n"
-                f"Nhóm em xin trân trọng gửi báo cáo cập nhật tiến độ liên quan đến đầu việc {task_id} của đồ án CSC10014.\n\n"
-                f"Chi tiết yêu cầu: {query.strip()}\n\n"
-                f"Theo dữ liệu ghi nhận trên Taskboard (`team_tasks.csv`), hạng mục {task_id} đã được phân công và đang được triển khai "
-                "theo đúng các tiêu chí yêu cầu trong Project Brief. Nhóm em đã thiết lập đầy đủ cơ chế đối soát và kiểm chứng tự động.\n\n"
-                "Nhóm em sẽ tiếp tục cập nhật tiến độ định kỳ và hoàn thiện các bước nghiệm thu kỹ thuật tiếp theo.\n\n"
-                "Kính chúc Quý Thầy/Cô nhiều sức khỏe và công tác tốt!\n\n"
-                "Trân trọng,\n"
-                "Nhóm sinh viên CSC10014"
-            )
-            return subject, body
-
-        if any(w in q_lower for w in ["tiến độ", "báo cáo", "progress", "update", "deliverable"]):
-            subject = "[CSC10014] Báo cáo tiến độ đồ án WorkspaceAI"
-            body = (
-                "Kính gửi Quý Thầy/Cô,\n\n"
-                "Nhóm em xin phép gửi bản tóm tắt cập nhật tiến độ thực hiện đồ án môn CSC10014 dựa trên hồ sơ dữ liệu workspace:\n\n"
-                "- Yêu cầu R1 (Problem boundary & 10 use cases): Đã hoàn thành 100% (Task T-01 do Minh phụ trách).\n"
-                "- Yêu cầu R2 (Deterministic reconciliation engine): Đang thực hiện đạt 60% (Task T-02 do Lan phụ trách).\n"
-                "- Đã tích hợp cổng bảo vệ Safeguard R7 và quy trình phê duyệt Human-in-the-Loop (Tính năng 3).\n\n"
-                "Nhóm em đang tiếp tục hoàn thiện các tiêu chí kiểm thử benchmark và sẽ nộp Submission Package đúng thời hạn quy định.\n\n"
-                "Nhóm em xin chân thành cảm ơn sự đồng hành của Thầy/Cô!\n\n"
-                "Trân trọng,\n"
-                "WorkspaceAI Project Team"
-            )
-            return subject, body
-
-        clean_topic = re.sub(
-            r"^(soạn mail|soạn thư|viết mail|viết thư|gửi mail|draft email|draft an email|gửi thư|nháp mail|hãy soạn email|hãy soạn mail)\s*",
-            "",
-            query,
-            flags=re.IGNORECASE,
-        ).strip()
-        if not clean_topic:
-            clean_topic = "Trao đổi về đồ án môn học"
-        clean_topic = clean_topic[0].upper() + clean_topic[1:]
-
-        subject = f"[CSC10014] {clean_topic[:65]}"
-        body = (
-            "Kính gửi Quý Thầy/Cô,\n\n"
-            f"Em đại diện nhóm thực hiện đồ án môn học CSC10014 xin phép gửi thư liên hệ về: \"{clean_topic}\".\n\n"
-            f"Chi tiết nội dung yêu cầu:\n{query.strip()}\n\n"
-            "Dựa trên các thông tin đã được tổng hợp trong hồ sơ đồ án, nhóm em kính gửi để Thầy/Cô nắm bắt thông tin "
-            "và rất mong nhận được những chỉ dẫn, phản hồi quý báu từ Thầy/Cô.\n\n"
-            "Nhóm em xin chân thành cảm ơn Quý Thầy/Cô!\n\n"
-            "Trân trọng,\n"
-            "Nhóm sinh viên thực hiện đồ án CSC10014"
-        )
-        return subject, body
 
 
 # Singleton instance for application access
