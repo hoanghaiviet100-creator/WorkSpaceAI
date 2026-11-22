@@ -71,9 +71,10 @@ class SubwordHashVectorizer:
 class EmbeddingProvider:
     """
     Local multilingual embedding provider.
-    Prioritizes SentenceTransformer ('paraphrase-multilingual-MiniLM-L12-v2') if installed;
-    seamlessly falls back to SubwordHashVectorizer (384-d) so Dense Cosine Similarity
-    never fails.
+    Priority order:
+    1. Local Ollama embedding service ('nomic-embed-text' 768-d).
+    2. SentenceTransformer ('paraphrase-multilingual-MiniLM-L12-v2' 384-d).
+    3. Pure NumPy SubwordHashVectorizer (384-d) as deterministic offline fallback.
     """
 
     def __init__(self, model_name: str = "paraphrase-multilingual-MiniLM-L12-v2") -> None:
@@ -82,39 +83,90 @@ class EmbeddingProvider:
         self._hash_vectorizer: Optional[SubwordHashVectorizer] = None
         self._load_attempted: bool = False
         self.is_available: bool = False
+        self.using_ollama: bool = False
         self.using_hash_fallback: bool = False
 
+    def _try_embed_ollama(self, texts: List[str]) -> Optional[np.ndarray]:
+        if not texts:
+            return np.empty((0, 768), dtype=np.float32)
+        try:
+            import json
+            import urllib.request
+            from backend.core.config import settings
+
+            payload = json.dumps({"model": settings.ollama_embed_model, "input": texts}).encode("utf-8")
+            req = urllib.request.Request(
+                f"{settings.ollama_base_url}/api/embed",
+                data=payload,
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(req, timeout=20.0) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                embeddings = data.get("embeddings")
+                if embeddings and len(embeddings) == len(texts):
+                    arr = np.asarray(embeddings, dtype=np.float32)
+                    norms = np.linalg.norm(arr, axis=1, keepdims=True)
+                    norms = np.maximum(norms, 1e-9)
+                    return arr / norms
+        except Exception:
+            return None
+        return None
+
     def load_model(self) -> bool:
-        """Attempts to import sentence_transformers or loads 384-d hash vectorizer."""
+        """Probes Ollama nomic-embed-text first, then sentence_transformers, then hash vectorizer."""
         if self._load_attempted:
             return self.is_available
 
         self._load_attempted = True
+
+        # 1. Probe local Ollama embed service (nomic-embed-text)
+        try:
+            probe = self._try_embed_ollama(["workspace ai test probe"])
+            if probe is not None and len(probe) == 1 and probe.shape[1] > 0:
+                self.using_ollama = True
+                self.is_available = True
+                self.using_hash_fallback = False
+                return True
+        except Exception:
+            pass
+
+        # 2. Probe sentence_transformers
         try:
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self.model_name)
             self.is_available = True
+            self.using_ollama = False
             self.using_hash_fallback = False
             return True
         except Exception:
-            # Fallback to pure NumPy Subword Hash Vectorizer (384 dimensions)
-            self._model = None
-            self._hash_vectorizer = SubwordHashVectorizer(dim=384)
-            self.is_available = True
-            self.using_hash_fallback = True
-            return True
+            pass
+
+        # 3. Fallback to pure NumPy Subword Hash Vectorizer (384 dimensions)
+        self._model = None
+        self._hash_vectorizer = SubwordHashVectorizer(dim=384)
+        self.is_available = True
+        self.using_ollama = False
+        self.using_hash_fallback = True
+        return True
 
     def embed_texts(self, texts: List[str]) -> Optional[np.ndarray]:
         """
-        Encodes a list of string passages into unit-normalized numpy vectors (384 dimensions).
-        Always returns a valid (N, 384) array.
+        Encodes a list of string passages into unit-normalized numpy vectors.
+        Always returns a valid (N, D) array.
         """
         if not texts:
-            return np.empty((0, 384), dtype=np.float32)
+            return np.empty((0, 768 if self.using_ollama else 384), dtype=np.float32)
 
         if not self._load_attempted:
             self.load_model()
 
+        # Try Ollama if enabled
+        if self.using_ollama:
+            vecs = self._try_embed_ollama(texts)
+            if vecs is not None:
+                return vecs
+
+        # Try SentenceTransformer if loaded
         if self._model is not None:
             try:
                 embeddings = self._model.encode(
@@ -127,7 +179,7 @@ class EmbeddingProvider:
             except Exception:
                 pass
 
-        # Use robust subword hash vectorizer
+        # Use robust subword hash vectorizer fallback
         if self._hash_vectorizer is None:
             self._hash_vectorizer = SubwordHashVectorizer(dim=384)
         return self._hash_vectorizer.encode(texts)

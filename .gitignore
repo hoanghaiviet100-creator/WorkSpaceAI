@@ -18,16 +18,22 @@ htmlcov/
 .vscode/
 .idea/
 
-# Temporary files & Logs
+# Temporary files
 *.log
 *.tmp
-
-# Workspace data and generated reports
-report/
-reports/
-.workspace_data/
 
 # Deployment / Environment variables
 .env
 .env.*.local
 .DS_Store
+
+# Local SQLite databases
+workspace_ai.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Frontend build & dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/.env

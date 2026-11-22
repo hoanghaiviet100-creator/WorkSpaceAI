@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from backend.core.schemas import DocumentSelectRequest
+from backend.core.schemas import DocumentImportUrlRequest, DocumentRenameRequest, DocumentSelectRequest
 from backend.services.document_service import document_service
 
 router = APIRouter(prefix="/api/documents", tags=["Document Library"])
@@ -72,3 +72,36 @@ def select_documents(req: DocumentSelectRequest) -> Dict[str, Any]:
         "selected_doc_ids": req.selected_doc_ids,
         "active_count": len(req.selected_doc_ids),
     }
+
+
+@router.patch("/{doc_id}")
+def rename_document(doc_id: str, req: DocumentRenameRequest) -> Dict[str, Any]:
+    """
+    PATCH /api/documents/{doc_id}
+    Renames an existing document in the workspace library.
+    """
+    updated = document_service.rename_document(doc_id, req.name)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy tài liệu '{doc_id}' để đổi tên.")
+    return updated
+
+
+@router.post("/import-url")
+def import_document_url(req: DocumentImportUrlRequest) -> Dict[str, Any]:
+    """
+    POST /api/documents/import-url
+    Imports web reference link as a document in the library.
+    """
+    return document_service.import_url(req.url, req.title)
+
+
+@router.get("/{doc_id}/pages/{page}")
+def get_document_page(doc_id: str, page: int) -> Dict[str, Any]:
+    """
+    GET /api/documents/{doc_id}/pages/{page}
+    Retrieves full raw text and line count of a specific document page for citation highlighting.
+    """
+    page_data = document_service.get_document_page(doc_id, page)
+    if not page_data:
+        raise HTTPException(status_code=404, detail=f"Không tìm thấy trang {page} của tài liệu '{doc_id}'.")
+    return page_data

@@ -6,15 +6,20 @@ Endpoints:
 - POST /api/email/draft: Creates draft (DRAFT state)
 - POST /api/email/{draft_id}/approve: Approves snapshot, computes SHA-256 (APPROVED state)
 - POST /api/email/{draft_id}/send: Dispatches email via mock/SMTP (SENT/FAILED/DELIVERY_UNKNOWN)
-- GET  /api/email/audit-log: Queries transmission audit trail (filterable by workspace_id)
+- GET  /api/email/audit-log: Queries transmission audit trail (PII-redacted, filterable by workspace_id)
 - POST /api/email/approve/{draft_id}: Legacy combined approve & send endpoint
 """
-from typing import Optional
+from __future__ import annotations
+
+import smtplib
+import socket
+from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from backend.algorithms.email_state_machine import FSMStateError, SecurityError
-from backend.core.schemas import ApproveDraftRequest, CreateDraftRequest
+from backend.core.config import settings
+from backend.core.schemas import ApproveDraftRequest, CreateDraftRequest, EmailDraftRecord, EmailFSMState
 from backend.services.email_service import email_service
 
 class GenerateEmailRequest(BaseModel):
@@ -55,8 +60,19 @@ def generate_email_endpoint(prompt: Optional[str] = None, req: Optional[Generate
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.post("/draft")
-def create_draft_endpoint(req: CreateDraftRequest):
+@router.get("/connection")
+def get_email_connection():
+    """Returns whether Gmail SMTP is configured or if local mock mode is active."""
+    mock = settings.email_dispatch_mode != "gmail_real"
+    configured = bool(settings.gmail_sender_email.strip() and settings.gmail_app_password.strip())
+    return {
+        "mode": "local_mock" if mock else "gmail_real",
+        "configured": configured,
+    }
+
+
+@router.post("/draft", response_model=Union[EmailDraftRecord, Dict[str, Any]])
+def create_draft_endpoint(req: CreateDraftRequest) -> Union[EmailDraftRecord, Dict[str, Any]]:
     """
     POST /api/email/draft
     Creates a new email draft in DRAFT state. Validates recipient format per RFC-5322.
@@ -74,7 +90,7 @@ def create_draft_endpoint(req: CreateDraftRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/{draft_id}/approve")
+@router.post("/{draft_id}/approve", response_model=EmailDraftRecord)
 def approve_snapshot_endpoint(
     draft_id: str,
     req: Optional[ApproveDraftRequest] = None,
@@ -82,7 +98,7 @@ def approve_snapshot_endpoint(
     subject: Optional[str] = None,
     body: Optional[str] = None,
     user_confirmed: bool = True,
-):
+) -> EmailDraftRecord:
     """
     POST /api/email/{draft_id}/approve
     UC-08: Review and Approve Email Snapshot.
@@ -111,8 +127,8 @@ def approve_snapshot_endpoint(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/{draft_id}/send")
-def send_email_endpoint(draft_id: str):
+@router.post("/{draft_id}/send", response_model=Dict[str, Any])
+def send_email_endpoint(draft_id: str) -> Dict[str, Any]:
     """
     POST /api/email/{draft_id}/send
     UC-09: Send Email and Track Outcome.
@@ -125,22 +141,38 @@ def send_email_endpoint(draft_id: str):
         raise HTTPException(status_code=404, detail=str(exc))
     except (FSMStateError, SecurityError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
+    except (smtplib.SMTPAuthenticationError, smtplib.SMTPException, socket.timeout, TimeoutError, OSError, RuntimeError) as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.get("/audit-log")
-def get_audit_log_endpoint(workspace_id: Optional[str] = None):
+@router.get("/audit-log", response_model=List[Dict[str, Any]])
+def get_audit_log_endpoint(workspace_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     GET /api/email/audit-log?workspace_id=...
     Retrieves transmission audit trail with snapshot hashes, timestamps, and delivery states.
+    PII-protected: Excludes plaintext recipient email addresses and body content.
     """
     if workspace_id:
-        return email_service.draft_repo.list_by_workspace(workspace_id)
-    return email_service.draft_repo.list_all()
+        records = email_service.draft_repo.list_by_workspace(workspace_id)
+    else:
+        records = email_service.draft_repo.list_all()
+
+    sanitized: List[Dict[str, Any]] = []
+    for r in records:
+        entry = {
+            "id": getattr(r, "id", None) or getattr(r, "draft_id", ""),
+            "draft_id": str(getattr(r, "id", None) or getattr(r, "draft_id", "")),
+            "workspace_id": getattr(r, "workspace_id", None),
+            "fsm_state": getattr(r, "fsm_state", None) or getattr(r, "state", ""),
+            "state": getattr(r, "fsm_state", None) or getattr(r, "state", ""),
+            "sha256_digest": getattr(r, "sha256_digest", None) or getattr(r, "payload_hash", None),
+            "audit_timestamp": getattr(r, "audit_timestamp", None),
+        }
+        sanitized.append(entry)
+    return sanitized
 
 
-@router.post("/approve/{draft_id}")
+@router.post("/approve/{draft_id}", response_model=Dict[str, Any])
 def approve_email(
     draft_id: str,
     recipient_email: str,
@@ -148,7 +180,7 @@ def approve_email(
     body: str,
     attachments: Optional[list[str]] = None,
     user_confirmed: bool = True,
-):
+) -> Dict[str, Any]:
     """
     Legacy POST /api/email/approve/{draft_id}
     Maintained for backward compatibility: coordinates snapshot approval and dispatch.
@@ -166,6 +198,31 @@ def approve_email(
         raise HTTPException(status_code=404, detail=str(exc))
     except (PermissionError, ValueError, RuntimeError, SecurityError, FSMStateError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/studio/{draft_id}/send")
+def send_studio_draft(draft_id: str, expected_mode: Optional[str] = None):
+    """Studio send endpoint compatible with StudioEmail React component."""
+    draft = email_service.draft_repo.get(draft_id)
+    if not draft:
+        raise HTTPException(status_code=404, detail="This draft has expired. Generate it again.")
+    conn_mode = "local_mock" if settings.email_dispatch_mode != "gmail_real" else "gmail_real"
+    if expected_mode is not None and expected_mode != conn_mode:
+        raise HTTPException(status_code=412, detail="Email delivery mode changed. Review the draft again.")
+    try:
+        current_state = getattr(draft, "fsm_state", None) or getattr(draft, "state", "")
+        if current_state != EmailFSMState.APPROVED and current_state != "APPROVED":
+            recipients = getattr(draft, "recipients", None) or getattr(draft, "recipient_email", "")
+            subject = getattr(draft, "subject", "")
+            body = getattr(draft, "body", "")
+            email_service.approve_draft_snapshot(draft_id, recipients=recipients, subject=subject, body=body, user_confirmed=True)
+        return email_service.dispatch_email(draft_id)
+    except FSMStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except (PermissionError, ValueError, SecurityError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # Export alias

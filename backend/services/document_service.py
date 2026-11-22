@@ -169,7 +169,7 @@ class DocumentService:
 
         # Target parameters
         target_max_chars = 950
-        min_chars = 400
+        min_chars = 300
         overlap_lines = 2
 
         while curr_idx < n_lines:
@@ -190,10 +190,9 @@ class DocumentService:
                 char_count += len(line_str) + 1
                 end_idx += 1
 
-                # If reached minimum characters and hit a paragraph break (empty line or line ending with period)
-                # or exceeded target max characters (or 18 lines)
+                # If reached minimum characters and hit a paragraph or sentence break
                 line_count = len(window_lines)
-                is_break = (not line_str.strip()) or (line_count >= 8 and line_str.strip().endswith("."))
+                is_break = (not line_str.strip()) or (line_count >= 6 and bool(re.search(r"[.!?:;]\s*$", line_str.strip())))
                 if char_count >= min_chars and is_break:
                     break
                 if char_count >= target_max_chars or line_count >= 18:
@@ -322,6 +321,26 @@ class DocumentService:
             "document": metadata,
             "chunks_count": len(all_chunks),
         }
+
+    def get_document_page(self, doc_id: str, page_number: int) -> Optional[Dict[str, Any]]:
+        """Retrieves page text and metadata for a specific document page."""
+        return self.repository.get_document_page(doc_id, page_number)
+
+    def rename_document(self, doc_id: str, new_name: str) -> Optional[Dict[str, Any]]:
+        """Renames a document in the repository."""
+        doc = self.repository.rename_document(doc_id, new_name)
+        return doc.model_dump() if doc else None
+
+    def import_url(self, url: str, title: str) -> Dict[str, Any]:
+        """Imports text content from a web URL or creates a reference entry."""
+        content = f"Tài liệu nhập từ URL: {url}\nTiêu đề: {title}\nNội dung được lập chỉ mục tham chiếu."
+        filename = f"{title.strip() or 'imported_link'}.txt"
+        result = self.ingest_file(filename, content.encode("utf-8"))
+        if "document" in result and isinstance(result["document"], DocumentMetadata):
+            doc_dict = result["document"].model_dump()
+            doc_dict["source_url"] = url
+            result["document"] = doc_dict
+        return result
 
     def delete_document(self, doc_id: str) -> bool:
         """Deletes a document from the workspace repository."""

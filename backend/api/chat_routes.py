@@ -1,3 +1,4 @@
+from typing import Any, Dict
 from fastapi import APIRouter
 from backend.core.schemas import RouteType, UserRequest
 from backend.services.email_service import email_service
@@ -9,7 +10,7 @@ router = APIRouter(prefix="/api", tags=["Chat & Orchestration"])
 
 
 @router.post("/chat")
-def handle_user_request(req: UserRequest):
+def handle_user_request(req: UserRequest) -> Dict[str, Any]:
     """
     POST /api/chat
     Router endpoint: Receives user request, classifies route, and delegates to corresponding service.

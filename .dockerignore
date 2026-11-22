@@ -3,13 +3,13 @@
 .venv
 venv
 env
-__pycache__
+__pycache__/
 *.pyc
 *.pyo
 *.pyd
-.pytest_cache
+.pytest_cache/
 .coverage
-htmlcov
+htmlcov/
 *.log
 .DS_Store
 Thumbs.db
@@ -17,6 +17,9 @@ Thumbs.db
 Computational Thinking Report/
 WorkspaceAI_Report_LaTeX_Package.zip
 .env
+*.env
+*.env.*
+tests/
 report/
 reports/
 .workspace_data/

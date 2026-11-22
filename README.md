@@ -7,6 +7,139 @@ $$\text{REQUEST} \longrightarrow \text{UNDERSTAND} \longrightarrow \text{ROUTE} 
 
 ---
 
+## 📧 Feature 3: Context-Aware Email Reporting & Finite State Machine (FSM)
+
+Feature 3 provides human-in-the-loop, cryptographically secured academic and progress email reporting. It is governed by a 100% pure Python standard-library Finite State Machine with SHA-256 tamper detection and duplicate-send prevention.
+
+### FSM State Transitions
+```text
+  [DRAFT] ──(approve_snapshot)──> [APPROVED] ──(dispatch_email)──> [SENT] (Terminal)
+     │                                │                                │
+     │                                ├──(tamper detected)────────────> [DRAFT] (revocation)
+     │                                ├──(auth error)─────────────────> [FAILED]
+     │                                └──(network timeout)────────────> [DELIVERY_UNKNOWN]
+```
+
+- **`DRAFT`**: Initial mutable draft state created from chat or direct composition.
+- **`APPROVED`**: Cryptographically locked snapshot with a canonical SHA-256 digest over the normalized tuple `(recipients, subject, body)`. Requires explicit human confirmation (`user_confirmed=True`).
+- **`SENT`**: Terminal state. Message accepted by the SMTP relay. Duplicate sends are strictly prohibited (`FSMStateError`).
+- **`FAILED`**: Delivery rejected due to authentication or invalid parameters (`SMTPAuthenticationError`).
+- **`DELIVERY_UNKNOWN`**: Network timeout or disconnection during SMTP handoff. In accordance with **NFR-04**, automatic retries are strictly prohibited to prevent duplicate transmission.
+
+---
+
+### Example API Calls & Expected Responses
+
+#### 1. Create Email Draft (`POST /api/email/draft`)
+```bash
+curl -X POST http://localhost:8000/api/email/draft \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workspace_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "recipients": ["instructor@hcmus.edu.vn"],
+    "subject": "Sprint Review Request",
+    "body": "We have completed Sprint 3 deliverables.",
+    "citations": ["Project_Brief.pdf (Page 2)"]
+  }'
+```
+*Expected JSON Response (HTTP 200):*
+```json
+{
+  "id": "e4b2c1a0-9f3e-4b2c-8d1a-0f3e4b2c8d1a",
+  "workspace_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "recipients": ["instructor@hcmus.edu.vn"],
+  "subject": "Sprint Review Request",
+  "body": "We have completed Sprint 3 deliverables.",
+  "fsm_state": "DRAFT",
+  "sha256_digest": null,
+  "audit_timestamp": "2026-11-11T16:00:00Z",
+  "citations": ["Project_Brief.pdf (Page 2)"]
+}
+```
+
+#### 2. Approve Snapshot & Lock Hash (`POST /api/email/{draft_id}/approve`)
+```bash
+curl -X POST http://localhost:8000/api/email/e4b2c1a0-9f3e-4b2c-8d1a-0f3e4b2c8d1a/approve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "recipients": "instructor@hcmus.edu.vn",
+    "subject": "Sprint Review Request",
+    "body": "We have completed Sprint 3 deliverables.",
+    "user_confirmed": true
+  }'
+```
+*Expected JSON Response (HTTP 200):*
+```json
+{
+  "id": "e4b2c1a0-9f3e-4b2c-8d1a-0f3e4b2c8d1a",
+  "workspace_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "recipients": ["instructor@hcmus.edu.vn"],
+  "subject": "Sprint Review Request",
+  "body": "We have completed Sprint 3 deliverables.",
+  "fsm_state": "APPROVED",
+  "sha256_digest": "a3b89f2d1e4c7b8a5d6e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c",
+  "audit_timestamp": "2026-11-11T16:01:00Z",
+  "citations": ["Project_Brief.pdf (Page 2)"]
+}
+```
+
+#### 3. Send Approved Email (`POST /api/email/{draft_id}/send`)
+```bash
+curl -X POST http://localhost:8000/api/email/e4b2c1a0-9f3e-4b2c-8d1a-0f3e4b2c8d1a/send
+```
+*Expected JSON Response (HTTP 200):*
+```json
+{
+  "status": "SENT",
+  "draft_id": "e4b2c1a0-9f3e-4b2c-8d1a-0f3e4b2c8d1a",
+  "dispatch_mode": "local_mock",
+  "sha256_digest": "a3b89f2d1e4c7b8a5d6e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c",
+  "audit_timestamp": "2026-11-11T16:02:00Z",
+  "message": "Email dispatched successfully (Local Mock Mode) to instructor@hcmus.edu.vn."
+}
+```
+
+#### 4. Query Audit Log (`GET /api/email/audit-log`)
+```bash
+curl -X GET "http://localhost:8000/api/email/audit-log?workspace_id=9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+```
+*Expected JSON Response (HTTP 200, PII-redacted):*
+```json
+[
+  {
+    "id": "e4b2c1a0-9f3e-4b2c-8d1a-0f3e4b2c8d1a",
+    "draft_id": "e4b2c1a0-9f3e-4b2c-8d1a-0f3e4b2c8d1a",
+    "workspace_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+    "fsm_state": "SENT",
+    "state": "SENT",
+    "sha256_digest": "a3b89f2d1e4c7b8a5d6e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c",
+    "audit_timestamp": "2026-11-11T16:02:00Z"
+  }
+]
+```
+
+---
+
+## 🧪 Running the Test Suite Locally
+
+### Single-Command Feature 3 Test Suite
+To run the Feature 3 unit and integration test suite:
+```bash
+python -m unittest tests/test_feature3_email_backend.py
+```
+Or using the Makefile target:
+```bash
+make test
+```
+
+### Full Single-Touch Verification Suite (`verify.py`)
+To run the automated 3-step verification (AST Syntax Check, R2 Stdlib Purity Gate, Pytest Suite):
+```bash
+python verify.py
+```
+
+---
+
 ## 🚀 Quick Start with Docker (Recommended)
 
 You can run the entire WorkspaceAI platform (FastAPI Backend + Streamlit UI + Local Ollama LLM) with a single command without installing Python dependencies locally.
@@ -29,22 +162,6 @@ Once started:
 - 🌐 **Interactive Web UI (Streamlit):** [http://localhost:8501](http://localhost:8501)
 - 📖 **API Docs & Swagger UI (FastAPI):** [http://localhost:8000/docs](http://localhost:8000/docs)
 - 🦙 **Ollama LLM Engine:** [http://localhost:11434](http://localhost:11434)
-
-### 4. Pull Local LLM Model (Optional for Ollama)
-If you wish to run Qwen2.5 locally inside the Ollama container:
-```bash
-# Pull lightweight 1.5B model (recommended for low-RAM / laptops):
-docker compose exec ollama ollama pull qwen2.5:1.5b
-
-# Or pull full 7B model:
-docker compose exec ollama ollama pull qwen2.5:7b
-```
-*(If no model is pulled or Ollama is offline, WorkspaceAI automatically uses its deterministic Smart Offline Synthesizer without failing).*
-
-### 5. Run Verification Test Suite in Docker
-```bash
-docker compose run --rm app test
-```
 
 ---
 
@@ -71,12 +188,7 @@ Choose `LLM_PROVIDER`:
 - `ollama`: Local Qwen2.5 / Llama models via Ollama
 - `gemini`: Cloud Gemini API (requires `GEMINI_API_KEY`)
 
-### 3. Run Automated Tests (13/13 Pass)
-```bash
-pytest -v
-```
-
-### 4. Start Services
+### 3. Start Services
 - **Backend (FastAPI):**
   ```bash
   uvicorn backend.main:app --reload --port 8000
@@ -94,7 +206,7 @@ pytest -v
 |---|---|---|
 | **Feature 1: Evidence-Grounded Q&A** | Ingestion (PDF/TXT/MD), SHA-256 deduplication, Hybrid RRF retrieval (BM25 + Dense), 5-step strict Citation Verifier ($S_{verify} \ge \theta_{match}$), Table-of-Contents penalty | `backend/services/document_service.py`<br>`backend/services/qa_service.py`<br>`backend/algorithms/citation_verifier.py`<br>`backend/repositories/workspace_repository.py` |
 | **Feature 2: Cross-Document Reconciliation** | Pure stdlib reconciliation: Missing Requirements ($O(N)$), Redundant Tasks ($O(M)$), Inconsistent Specs ($O(N \cdot M)$), Task Drift (Jaccard similarity) | `backend/algorithms/reconciliation.py`<br>`backend/services/reconciliation_service.py` |
-| **Feature 3: Context-Aware Email Assistant** | Deterministic Finite State Machine (DRAFT $\to$ PENDING $\to$ APPROVED $\to$ DISPATCHED), SHA-256 draft integrity lock, Gmail SMTP TLS dispatch | `backend/algorithms/email_state_machine.py`<br>`backend/services/email_service.py`<br>`backend/api/email_routes.py` |
+| **Feature 3: Context-Aware Email Assistant** | 100% Pure stdlib Finite State Machine (`DRAFT` $\to$ `APPROVED` $\to$ `SENT`), canonical SHA-256 draft integrity lock, duplicate-send prevention, Gmail SMTP TLS dispatch with NFR-04 unknown delivery protection | `backend/algorithms/email_state_machine.py`<br>`backend/services/email_service.py`<br>`backend/api/email_routes.py` |
 | **Safeguards & Guardrails** | Prompt injection detection ($R_7$), recipient validation, untrusted context framing | `backend/core/guardrails.py`<br>`backend/services/router_service.py` |
 
 For detailed architectural specification, see [`WORKSPACEAI_PROJECT_ARCHITECTURE_AND_STATUS_REPORT.md`](WORKSPACEAI_PROJECT_ARCHITECTURE_AND_STATUS_REPORT.md).

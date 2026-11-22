@@ -3,8 +3,8 @@ import unittest
 from backend.algorithms.citation_verifier import verify_citations
 from backend.algorithms.email_state_machine import (
     SecurityError,
-    approve_and_verify_email_send,
-    prepare_draft_for_approval,
+    approve_snapshot,
+    verify_and_lock_for_send,
 )
 from backend.algorithms.reconciliation import reconcile_requirements_and_tasks
 from backend.core.schemas import (
@@ -95,21 +95,20 @@ class TestWorkspaceAIPipeline(unittest.TestCase):
         self.assertEqual(res.grounding_score, 0.5)
 
     def test_algorithm_3_email_fsm_and_tamper_protection(self):
-        draft = EmailDraftPayload(
-            draft_id="d1",
-            recipient_email="lecturer@hcmus.edu.vn",
+        state, digest = approve_snapshot(
+            recipients="lecturer@hcmus.edu.vn",
             subject="Progress Report",
             body="Grounded summary.",
+            user_confirmed=True,
         )
-        staged = prepare_draft_for_approval(draft)
+        self.assertEqual(state, "APPROVED")
         with self.assertRaises(SecurityError):
-            approve_and_verify_email_send(
-                stored_draft=staged,
-                approved_recipient="attacker@evil.com",
-                approved_subject="Progress Report",
-                approved_body="Grounded summary.",
-                approved_attachments=[],
-                user_confirmed=True,
+            verify_and_lock_for_send(
+                current_state=state,
+                expected_digest=digest,
+                recipients="attacker@evil.com",
+                subject="Progress Report",
+                body="Grounded summary.",
             )
 
     def test_r5_clarification_and_r7_injection_routing(self):
