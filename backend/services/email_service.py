@@ -67,7 +67,7 @@ def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
                         zf.write(full_path, rel_path)
             zip_buffer.seek(0)
             part = MIMEApplication(zip_buffer.read(), Name=f"{dir_name}.zip")
-            part["Content-Disposition"] = f'attachment; filename="{dir_name}.zip"'
+            part.add_header("Content-Disposition", "attachment", filename=f"{dir_name}.zip")
             msg.attach(part)
         else:
             ctype, encoding = mimetypes.guess_type(att_path)
@@ -80,7 +80,7 @@ def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
             part.set_payload(file_content)
             encoders.encode_base64(part)
             filename = os.path.basename(att_path)
-            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            part.add_header("Content-Disposition", "attachment", filename=filename)
             msg.attach(part)
 
 
@@ -121,15 +121,21 @@ def send_real_email_via_smtp(
         _attach_files_to_msg(msg, attachments)
 
     host = settings.smtp_host or "smtp.gmail.com"
-    port = settings.smtp_port or 587
+    port = int(settings.smtp_port or 587)
+    timeout_val = 90
 
-    # Connect to Gmail SMTP server
-    with smtplib.SMTP(host, port, timeout=20) as server:
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(sender, password)
-        server.sendmail(sender, [clean_recipient], msg.as_string())
+    # Connect to Gmail SMTP server (90s timeout to support attachments up to 25MB)
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, timeout=timeout_val) as server:
+            server.login(sender, password)
+            server.sendmail(sender, [clean_recipient], msg.as_string())
+    else:
+        with smtplib.SMTP(host, port, timeout=timeout_val) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(sender, password)
+            server.sendmail(sender, [clean_recipient], msg.as_string())
 
     return {
         "status": "SENT",
@@ -195,7 +201,7 @@ class EmailService:
             self.draft_repo.save(staged)
             return {
                 "route": RouteType.EMAIL_FLOW,
-                "status": staged.state,
+                "status": "PENDING_APPROVAL",
                 "draft": staged,
             }
 
@@ -280,8 +286,11 @@ class EmailService:
             stored.subject = final_subject
         if hasattr(stored, "body"):
             stored.body = final_body
-        if attachments is not None and hasattr(stored, "attachments"):
-            stored.attachments = attachments
+        if attachments is not None:
+            if hasattr(stored, "attachments"):
+                stored.attachments = attachments
+            if hasattr(stored, "attachment_ids"):
+                stored.attachment_ids = attachments
         if hasattr(stored, "fsm_state"):
             stored.fsm_state = EmailFSMState.APPROVED
         if hasattr(stored, "sha256_digest"):
@@ -390,15 +399,21 @@ class EmailService:
 
 
         host = settings.smtp_host or "smtp.gmail.com"
-        port = settings.smtp_port or 587
+        port = int(settings.smtp_port or 587)
+        timeout_val = 90  # Extended 90s timeout to comfortably transfer large attachments
 
         try:
-            with smtplib.SMTP(host, port, timeout=20) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(sender, password)
-                server.sendmail(sender, to_addrs, msg.as_string())
+            if port == 465:
+                with smtplib.SMTP_SSL(host, port, timeout=timeout_val) as server:
+                    server.login(sender, password)
+                    server.sendmail(sender, to_addrs, msg.as_string())
+            else:
+                with smtplib.SMTP(host, port, timeout=timeout_val) as server:
+                    server.ehlo()
+                    server.starttls()
+                    server.ehlo()
+                    server.login(sender, password)
+                    server.sendmail(sender, to_addrs, msg.as_string())
 
             ts_str = self._set_draft_state(stored, EmailFSMState.SENT)
             self.draft_repo.save(stored)
@@ -409,6 +424,9 @@ class EmailService:
                 "dispatch_mode": "gmail_real",
                 "sha256_digest": expected_digest,
                 "audit_timestamp": ts_str,
+                "sender": sender,
+                "recipient": recipients,
+                "attachments": attachments,
                 "message": f"Email sent successfully via Gmail SMTP to {to_addrs}!",
             }
         except smtplib.SMTPAuthenticationError as exc:
@@ -446,6 +464,7 @@ class EmailService:
         recipient_email: str,
         subject: str,
         body: str,
+        attachments: Optional[List[str]] = None,
         user_confirmed: bool = True,
     ) -> Dict[str, Any]:
         """
@@ -457,6 +476,7 @@ class EmailService:
             recipients=recipient_email,
             subject=subject,
             body=body,
+            attachments=attachments,
             user_confirmed=user_confirmed,
         )
         return self.dispatch_email(draft_id=draft_id)
