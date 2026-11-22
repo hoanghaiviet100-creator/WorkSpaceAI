@@ -277,8 +277,8 @@ def prepare_draft_for_approval(draft: Any) -> Any:
         )
     subject = getattr(draft, "subject", None) or (draft.get("subject") if isinstance(draft, dict) else "")
     body = getattr(draft, "body", None) or (draft.get("body") if isinstance(draft, dict) else "")
-    attachments = getattr(draft, "attachment_ids", None) or (
-        draft.get("attachment_ids") if isinstance(draft, dict) else []
+    attachments = getattr(draft, "attachments", None) or getattr(draft, "attachment_ids", None) or (
+        draft.get("attachments") if isinstance(draft, dict) else (draft.get("attachment_ids") if isinstance(draft, dict) else [])
     )
     if attachments is None:
         attachments = []

@@ -180,6 +180,7 @@ class EmailDraftPayload(BaseModel):
     subject: str
     body: str
     attachment_ids: List[str] = Field(default_factory=list)
+    attachments: List[str] = Field(default_factory=list)
     citations: List[str] = Field(default_factory=list)
     state: EmailState = EmailState.PENDING_APPROVAL
     payload_hash: str = ""
