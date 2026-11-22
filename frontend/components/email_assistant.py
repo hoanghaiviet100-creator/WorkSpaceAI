@@ -5,6 +5,7 @@ Column 3 (Tab 3): Human-in-the-Loop Email Assistant with Cryptographic Verificat
 from __future__ import annotations
 
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -23,7 +24,8 @@ from frontend.state import (
     queue_query,
 )
 
-ATTACHMENTS_DIR = Path(".workspace_data/email_attachments")
+# Store email attachments in system temp directory so workspace stays clean
+ATTACHMENTS_DIR = Path(tempfile.gettempdir()) / "workspaceai_email_attachments"
 ATTACHMENTS_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -85,6 +87,14 @@ def send_draft(
     if result.get("status") == "SENT":
         st.session_state["current_draft"] = None
         add_message("assistant", f"Đã gửi email thành công tới {recipient}.")
+        # Clean up temporary attachment files from disk immediately after sending
+        if attachments:
+            for att_path in attachments:
+                try:
+                    if att_path and os.path.exists(att_path):
+                        os.remove(att_path)
+                except Exception:
+                    pass
     else:
         # Keep current_draft so user can retry without re-typing or re-uploading
         add_message("assistant", f"Gửi email tới {recipient} thất bại: {result.get('error', 'Lỗi không xác định')}")

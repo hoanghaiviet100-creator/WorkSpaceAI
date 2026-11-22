@@ -361,6 +361,15 @@ class EmailService:
         if settings.email_dispatch_mode != "gmail_real":
             ts_str = self._set_draft_state(stored, EmailFSMState.SENT)
             self.draft_repo.save(stored)
+
+            # Auto-cleanup temporary attachment files from disk upon successful transmission
+            if attachments:
+                for att_path in attachments:
+                    try:
+                        if att_path and os.path.exists(att_path):
+                            os.remove(att_path)
+                    except Exception:
+                        pass
             return {
                 "status": EmailFSMState.SENT.value,
                 "fsm_state": EmailFSMState.SENT.value,
@@ -417,6 +426,15 @@ class EmailService:
 
             ts_str = self._set_draft_state(stored, EmailFSMState.SENT)
             self.draft_repo.save(stored)
+
+            # Auto-cleanup temporary attachment files from disk upon successful transmission
+            if attachments:
+                for att_path in attachments:
+                    try:
+                        if att_path and os.path.exists(att_path):
+                            os.remove(att_path)
+                    except Exception:
+                        pass
             return {
                 "status": EmailFSMState.SENT.value,
                 "fsm_state": EmailFSMState.SENT.value,
