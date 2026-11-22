@@ -205,3 +205,21 @@ class UserRequest(BaseModel):
 
 class DocumentSelectRequest(BaseModel):
     selected_doc_ids: List[str]
+
+
+class DocumentRenameRequest(BaseModel):
+    name: str
+
+
+class DocumentImportUrlRequest(BaseModel):
+    url: str
+    title: str
+
+
+class ProviderSelectRequest(BaseModel):
+    provider: str
+
+
+class GeminiConfigRequest(BaseModel):
+    api_key: str
+

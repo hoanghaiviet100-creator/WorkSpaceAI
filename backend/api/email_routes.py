@@ -14,7 +14,7 @@ from __future__ import annotations
 import smtplib
 import socket
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from backend.algorithms.email_state_machine import FSMStateError, SecurityError
@@ -178,7 +178,7 @@ def approve_email(
     recipient_email: str,
     subject: str,
     body: str,
-    attachments: Optional[list[str]] = None,
+    attachments: Optional[List[str]] = Query(default=None),
     user_confirmed: bool = True,
 ) -> Dict[str, Any]:
     """

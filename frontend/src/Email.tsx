@@ -288,8 +288,7 @@ export default function Email({
               Attachments <span>{draft.attachmentIds?.length ?? 0}</span>
             </summary>
             <p className="small muted">
-              Select files separately from the documents used as evidence. The
-              current server cannot stage or send attachments yet.
+              Select files to attach and send along with this email.
             </p>
             {sources.map((s) => (
               <label className="schema-check" key={s.id}>
