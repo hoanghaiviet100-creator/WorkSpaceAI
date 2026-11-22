@@ -27,12 +27,6 @@ report/
 reports/
 .workspace_data/
 
-# Local manual test scripts & artifacts
-run_real_email.py
-backend/services/sample_attachment.txt
-backend/services/test_f3_*.py
-backend/services/test_f3_*.sh
-
 # Deployment / Environment variables
 .env
 .env.*.local

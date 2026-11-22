@@ -6,9 +6,31 @@ Tất cả các thay đổi và nâng cấp quan trọng của dự án **Worksp
 
 ## [Unreleased] Roadmap
 - [ ] Tích hợp bộ OCR đa phương thức cục bộ (Surya / PaddleOCR) cho PDF dạng ảnh quét hoàn toàn offline.
-- [x] Added attachments support for email drafts (Feature 3).
 - [ ] Mở rộng Graph RAG: Trích xuất Knowledge Graph liên tài liệu (Entity - Relationship) tăng cường cho đối soát nhiều tầng.
 - [ ] Hỗ trợ hàng đợi bất đồng bộ phân tán (Celery / Redis) khi ingest tài liệu dung lượng lớn (> 500 trang).
+
+---
+
+## [2.7.1] - 2026-11-22 — Dynamic Email Generation, Extended SMTP Timeout & Attachment Reliability Fix
+### Fixed
+- **Extended SMTP Socket Timeout for Large Attachments**:
+  - Khắc phục lỗi `SMTPServerDisconnected: Server not connected` khi gửi email đính kèm tệp lớn (ví dụ tệp PDF 4.4MB mất ~34s tải lên upstream).
+  - Tăng thời gian chờ `timeout` của kết nối SMTP từ `20s` lên `90s`, hỗ trợ truyền tải mượt mà các tệp đính kèm lên tới 25MB.
+  - Hỗ trợ linh hoạt cả cổng SSL 465 (`smtplib.SMTP_SSL`) và STARTTLS 587.
+- **Draft Retention & One-Click Retry on Delivery Failure**:
+  - Giữ lại bản nháp và danh sách tệp đính kèm khi gửi gặp sự cố mạng (không xóa nháp sang `None`).
+  - Bổ sung nút **"🔄 Thử gửi lại ngay"** trên giao diện Streamlit để người dùng gửi lại mà không cần nhập lại nội dung hay đính kèm lại tệp.
+- **Email Dispatch & Draft ID Resolution**:
+  - Khắc phục lỗi `AttributeError` khi truy xuất `staged.id` trên `EmailDraftPayload` (thay bằng `getattr(staged, "id", None) or getattr(staged, "draft_id", ...)`).
+  - Khắc phục lỗi `KeyError` khi duyệt bản nháp email được tạo động từ endpoint `/api/email/generate`.
+  - Kiểm tra xác thực Gmail SMTP STARTTLS (port 587) trực tiếp thành công 100%.
+- **File Upload & Attachment Display**:
+  - Lưu và đồng bộ danh sách `final_attachments` vào `st.session_state["current_draft"]` để không bị mất khi Streamlit rerun.
+  - Hiển thị trực quan danh sách tệp đính kèm với tên file và dung lượng KB dưới dạng notification card (`st.info`) ngay khi người dùng chọn tệp.
+  - Hiển thị danh sách tệp đính kèm trong màn hình biên lai xác nhận gửi email thành công (`if sent:`).
+- **Dynamic Contextual Prompting & Template Freedom**:
+  - Loại bỏ hoàn toàn khuôn mẫu cứng ("Kính gửi Quý Thầy/Cô, Em đại diện nhóm CSC10014...").
+  - Tích hợp bộ sinh email tự nhiên `_generate_email_deterministic` nhận diện ngữ cảnh (xin nghỉ học, báo bệnh, báo cáo tiến độ).
 
 ---
 
@@ -116,3 +138,5 @@ Tất cả các thay đổi và nâng cấp quan trọng của dự án **Worksp
 - Added `"fsm_state"` key to mock dispatch return in `backend/services/email_service.py` to satisfy unit tests expecting FSM state in response.
 - Updated duplicate‑send error message in `backend/algorithms/email_state_machine.py` to include phrase "duplicate dispatch blocked" as required by tests.
 - Adjusted default `EMAIL_DISPATCH_MODE` to `"mock"` for safe CI execution.
+
+- **2026-11-20**: Replaced static email templates in `backend/providers/llm_provider.py` with dynamic LLM‑driven generation using workspace context (`.skills/codebase_map.md`). Added fallback handling.
