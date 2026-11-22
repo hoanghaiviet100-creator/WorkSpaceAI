@@ -181,17 +181,29 @@ class EmailService:
                 extracted = re.findall(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}", user_req.query)
                 recipient = extracted[0] if extracted else "an.nguyen@hcmus.edu.vn"
 
-            retrieved = self.workspace_repo.search(user_req.query, top_k=2)
+            search_query = user_req.query
+            if len(user_req.query.split()) < 4 and user_req.conversation_history:
+                recent_contents = [
+                    t.get("content", "") for t in reversed(user_req.conversation_history)
+                    if t.get("content") and len(t.get("content", "").split()) >= 3
+                ]
+                if recent_contents:
+                    search_query = f"{user_req.query} {recent_contents[0][:300]}"
+
+            retrieved = self.workspace_repo.search(search_query, top_k=3)
+            if not retrieved and self.workspace_repo.chunks:
+                retrieved = list(self.workspace_repo.chunks.values())[:3]
             found_citations = [f"{c.doc_name} (Page {c.page_number})" for c in retrieved]
 
             gen_subject, gen_body = self.provider.generate_email_draft(
-                query=user_req.query,
+                query=search_query,
                 chunks=retrieved,
                 recipient_email=recipient,
             )
 
+            assigned_draft_id = f"draft_{uuid.uuid4().hex[:8]}"
             draft_payload = EmailDraftPayload(
-                draft_id="draft_001",
+                draft_id=assigned_draft_id,
                 recipient_email=recipient,
                 subject=gen_subject,
                 body=gen_body,

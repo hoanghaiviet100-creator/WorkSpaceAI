@@ -168,7 +168,7 @@ def render_email_review(scope: str) -> None:
                         "subject": data.get("subject", ""),
                         "body": data.get("body", ""),
                         "attachments": [],
-                        "citations": [],
+                        "citations": data.get("citations", []),
                     }
                     st.rerun()
                 except Exception as exc:
@@ -176,23 +176,40 @@ def render_email_review(scope: str) -> None:
         return
 
 
-    draft_id = str(extract_draft_attr(draft, "draft_id", "") or extract_draft_attr(draft, "id", "draft_001"))
+    draft_id = str(extract_draft_attr(draft, "draft_id", "") or extract_draft_attr(draft, "id", ""))
+    if not draft_id or draft_id == "draft_001":
+        draft_id = f"draft_{int(time.time() * 1000)}"
+        if isinstance(draft, dict):
+            draft["draft_id"] = draft_id
+        elif hasattr(draft, "draft_id"):
+            draft.draft_id = draft_id
+
     default_to = extract_draft_attr(
         draft, "recipient_email", st.session_state.get("recipient_email", "")
     )
+    draft_subject = extract_draft_attr(draft, "subject", "")
+    draft_body = extract_draft_attr(draft, "body", "")
     sender = settings.gmail_sender_email or "Gmail (chế độ mô phỏng an toàn)"
     st.caption(f"Người gửi: {sender}")
 
     k = f"{scope}_{draft_id}"
-    recipient = st.text_input("Người nhận", value=default_to, key=f"{k}_to")
-    subject = st.text_input(
-        "Tiêu đề", value=extract_draft_attr(draft, "subject", ""), key=f"{k}_subject"
-    )
+    k_to = f"{k}_to"
+    k_subject = f"{k}_subject"
+    k_body = f"{k}_body"
+
+    last_rendered_id = st.session_state.get(f"{scope}_rendered_draft_id")
+    if last_rendered_id != draft_id:
+        st.session_state[f"{scope}_rendered_draft_id"] = draft_id
+        st.session_state[k_to] = default_to
+        st.session_state[k_subject] = draft_subject
+        st.session_state[k_body] = draft_body
+
+    recipient = st.text_input("Người nhận", key=k_to)
+    subject = st.text_input("Tiêu đề", key=k_subject)
     body = st.text_area(
         "Nội dung",
-        value=extract_draft_attr(draft, "body", ""),
         height=220,
-        key=f"{k}_body",
+        key=k_body,
     )
 
     # Attachments handling

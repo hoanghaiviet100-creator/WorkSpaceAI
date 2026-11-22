@@ -592,19 +592,24 @@ class LLMProvider:
             """Parse SUBJECT:/BODY: format from LLM output. Reject static templates."""
             if not text:
                 return None
+            cleaned = text.replace("**SUBJECT:**", "SUBJECT:").replace("**BODY:**", "BODY:")
+            cleaned = cleaned.replace("**Tiêu đề:**", "SUBJECT:").replace("**Nội dung:**", "BODY:")
+            cleaned = re.sub(r"(?i)^(?:tiêu đề|chủ đề):\s*", "SUBJECT: ", cleaned, flags=re.MULTILINE)
+            cleaned = re.sub(r"(?i)^(?:nội dung|nội dung email):\s*", "BODY:\n", cleaned, flags=re.MULTILINE)
+
             # Try SUBJECT:/BODY: format (from build_email_prompt)
-            if "SUBJECT:" in text and "BODY:" in text:
-                parts = text.split("BODY:", 1)
-                subj = parts[0].replace("SUBJECT:", "").strip()
+            if "SUBJECT:" in cleaned and "BODY:" in cleaned:
+                parts = cleaned.split("BODY:", 1)
+                subj = parts[0].replace("SUBJECT:", "").strip().strip("*").strip("#").strip()
                 body = parts[1].strip()
                 if subj and body and not _is_static_template(body):
                     return subj, body
             # Try Subject:/Body: format (alternative LLM output)
-            if "Subject:" in text and "Body:" in text:
-                subj_match = re.search(r"Subject:\s*(.*)", text, re.IGNORECASE)
-                body_match = re.search(r"Body:\s*([\s\S]*)", text, re.IGNORECASE)
+            if re.search(r"Subject:", cleaned, re.IGNORECASE) and re.search(r"Body:", cleaned, re.IGNORECASE):
+                subj_match = re.search(r"Subject:\s*(.*)", cleaned, re.IGNORECASE)
+                body_match = re.search(r"Body:\s*([\s\S]*)", cleaned, re.IGNORECASE)
                 if subj_match and body_match:
-                    subj = subj_match.group(1).strip()
+                    subj = subj_match.group(1).strip().strip("*").strip("#").strip()
                     body = body_match.group(1).strip()
                     if subj and body and not _is_static_template(body):
                         return subj, body

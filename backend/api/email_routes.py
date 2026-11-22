@@ -39,14 +39,23 @@ def generate_email_endpoint(prompt: Optional[str] = None, req: Optional[Generate
         from backend.providers.llm_provider import llm_provider
         from backend.algorithms.email_state_machine import prepare_draft_for_approval
         from backend.core.schemas import EmailDraftPayload
-        subject, body = llm_provider.generate_email_draft(effective_prompt, [])
+        from backend.repositories.workspace_repository import workspace_repository
+
+        # Nạp các đoạn trích liên quan từ tài liệu đang có trong workspace
+        chunks = workspace_repository.search(effective_prompt, top_k=3)
+        if not chunks and workspace_repository.chunks:
+            chunks = list(workspace_repository.chunks.values())[:3]
+
+        citations = [f"{c.doc_name} (Trang {c.page_number})" for c in chunks] if chunks else []
+        subject, body = llm_provider.generate_email_draft(effective_prompt, chunks)
         # Create a real draft record so approve+send flow works
+        assigned_id = f"draft_{uuid.uuid4().hex[:8]}"
         draft_payload = EmailDraftPayload(
-            draft_id="draft_001",
+            draft_id=assigned_id,
             recipient_email="",
             subject=subject,
             body=body,
-            citations=[],
+            citations=citations,
         )
         staged = prepare_draft_for_approval(draft_payload)
         email_service.draft_repo.save(staged)
@@ -55,6 +64,7 @@ def generate_email_endpoint(prompt: Optional[str] = None, req: Optional[Generate
             "subject": subject,
             "body": body,
             "draft_id": assigned_id,
+            "citations": citations,
         }
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
