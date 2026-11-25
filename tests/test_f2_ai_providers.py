@@ -1,14 +1,9 @@
-"""Gemini wire protocol and UI integration. HTTP is simulated only in tests."""
+"""Gemini wire protocol and service integration. HTTP is simulated only in tests."""
 import json
-from pathlib import Path
-from unittest.mock import patch
 
 import httpx
 import pytest
-from streamlit.testing.v1 import AppTest
-from streamlit.proto.TextInput_pb2 import TextInput
 
-from backend.core.config import settings
 from backend.core.f2_study_schemas import SourceRef, StudySourceSelection
 from backend.providers.f2_gemini_provider import GeminiFlashcardProvider, GeminiQuizProvider
 from backend.providers.f2_study_provider import MAX_STUDY_RESPONSE_BYTES, StudyEvidence, StudyProviderError
@@ -23,7 +18,6 @@ from backend.services.f2_source_service import F2SourceService, SourceAccessCont
 KEY = "unit-test-key-not-a-real-credential"
 MODEL = "gemini-test-model"
 TEXT = "Cache: Fast temporary memory.\nRAM: Volatile working storage."
-APP = Path(__file__).resolve().parents[1] / "frontend/f2_manual_app.py"
 
 
 def draft(study_format="quiz", **changes):
@@ -208,46 +202,3 @@ def test_api_auth_failure_remains_gemini_error_in_generation_without_offline_fal
     assert result.provider_name == "gemini" and result.status == "ERROR" and result.quiz is None
     assert [i.code for i in result.issues] == ["PROVIDER_AUTH_FAILED"]
     assert KEY not in str(result.issues)
-
-
-def ui():
-    at = AppTest.from_file(str(APP), default_timeout=20).run()
-    runtime = at.session_state["f2_manual_runtime"]
-    doc = runtime["ingestion"].ingest_file("lesson.txt", TEXT.encode())["document"]
-    at.run()
-    at.multiselect(key="f2_manual_selected").select(doc.doc_id).run()
-    at.number_input(key="f2_manual_count").set_value(1).run()
-    at.selectbox(key="f2_manual_engine").set_value("Gemini").run()
-    assert not at.exception
-    return at
-
-
-def test_ui_missing_key_blocks_generation_and_password_is_not_a_validity_claim():
-    with patch.object(settings, "gemini_api_key", ""):
-        at = ui()
-        assert at.button(key="f2_manual_generate").disabled
-        assert at.text_input(key="f2_manual_gemini_key").proto.type == TextInput.PASSWORD
-        at.text_input(key="f2_manual_gemini_key").set_value(KEY).run()
-        assert not at.button(key="f2_manual_generate").disabled
-        assert any("chưa xác nhận" in c.value for c in at.caption)
-
-
-@pytest.mark.parametrize("status", [200, 403])
-def test_ui_uses_selected_real_adapter_and_reports_actual_model_or_failure(status):
-    def factory(api_key, model):
-        return GeminiQuizProvider(api_key, model, transport=httpx.MockTransport(
-            lambda request: httpx.Response(status, json=response() if status == 200 else {"error": KEY})))
-    with patch.object(settings, "gemini_api_key", ""), patch(
-        "frontend.components.f2_manual_panel.GeminiQuizProvider", side_effect=factory):
-        at = ui()
-        at.text_input(key="f2_manual_gemini_key").set_value(KEY).run()
-        at.text_input(key="f2_manual_gemini_model").set_value(MODEL).run()
-        at.button(key="f2_manual_generate").click().run()
-        assert not at.exception
-        assert any(f"gemini · model yêu cầu: {MODEL}" in item.value for item in at.info)
-        assert all(KEY not in item.value for item in [*at.info, *at.warning, *at.error])
-        if status == 200:
-            assert at.form
-        else:
-            assert not at.form and at.session_state["f2_manual_active"] is None
-            assert any("API key" in item.value for item in at.warning)

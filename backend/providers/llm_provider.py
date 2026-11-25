@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+import time
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
@@ -64,16 +66,51 @@ class LLMProvider:
     Supports 100% local Ollama (qwen2.5:7b), Gemini API, or deterministic Mock mode.
     """
 
-    def is_ollama_online(self) -> bool:
-        """Fast health check to verify if local Ollama daemon is reachable."""
+    def __init__(self) -> None:
+        self._tags_lock = threading.Lock()
+        self._tags_cache: Optional[Tuple[float, str, bool, List[str]]] = None
+
+    def invalidate_ollama_cache(self) -> None:
+        """Clears cached Ollama /api/tags availability and model list."""
+        with self._tags_lock:
+            self._tags_cache = None
+
+    def _fetch_ollama_tags(self, force_refresh: bool = False) -> Tuple[bool, List[str]]:
+        """Fetches and caches Ollama /api/tags status and model names within TTL."""
+        base_url = settings.ollama_base_url.rstrip("/")
+        ttl = max(0.0, float(settings.ollama_tags_cache_ttl))
+        now = time.monotonic()
+
+        if not force_refresh and ttl > 0:
+            with self._tags_lock:
+                if self._tags_cache is not None:
+                    cached_at, cached_url, cached_online, cached_names = self._tags_cache
+                    if cached_url == base_url and (now - cached_at) < ttl:
+                        return cached_online, list(cached_names)
+
+        online = False
+        names: List[str] = []
         try:
             resp = httpx.get(
-                f"{settings.ollama_base_url}/api/tags",
+                f"{base_url}/api/tags",
                 timeout=httpx.Timeout(1.0, connect=0.5),
             )
-            return resp.status_code == 200
+            if resp.status_code == 200:
+                tags = resp.json().get("models", [])
+                names = [m.get("name", "") for m in tags if m.get("name")]
+                online = True
         except Exception:
-            return False
+            online = False
+            names = []
+
+        with self._tags_lock:
+            self._tags_cache = (time.monotonic(), base_url, online, list(names))
+        return online, names
+
+    def is_ollama_online(self) -> bool:
+        """Fast cached health check to verify if local Ollama daemon is reachable."""
+        online, _ = self._fetch_ollama_tags()
+        return online
 
     def is_gemini_configured(self) -> bool:
         """Checks if a valid Google Gemini API key is configured."""
@@ -125,41 +162,33 @@ class LLMProvider:
         return None
 
     def get_effective_ollama_model(self) -> str:
-        """Resolves the best available local Ollama model if configured one is missing."""
-        try:
-            resp = httpx.get(
-                f"{settings.ollama_base_url}/api/tags",
-                timeout=httpx.Timeout(1.0, connect=0.5),
-            )
-            if resp.status_code == 200:
-                tags = resp.json().get("models", [])
-                names = [m.get("name", "") for m in tags]
-                # 1. Exact match
-                if settings.ollama_model in names:
-                    return settings.ollama_model
-                # 2. Check any local qwen2.5 variant (e.g. qwen2.5:3b, qwen2.5:7b, qwen2.5:14b)
-                for n in names:
-                    if "qwen2.5" in n.lower():
-                        return n
-                # 3. Fallback to any qwen model
-                for n in names:
-                    if "qwen" in n.lower():
-                        return n
-                if names:
-                    return names[0]
-        except Exception:
-            pass
+        """Resolves the best available local Ollama model using cached /api/tags."""
+        online, names = self._fetch_ollama_tags()
+        if online and names:
+            # 1. Exact match
+            if settings.ollama_model in names:
+                return settings.ollama_model
+            # 2. Check any local qwen2.5 variant (e.g. qwen2.5:3b, qwen2.5:7b, qwen2.5:14b)
+            for n in names:
+                if "qwen2.5" in n.lower():
+                    return n
+            # 3. Fallback to any qwen model
+            for n in names:
+                if "qwen" in n.lower():
+                    return n
+            return names[0]
         return settings.ollama_model
 
     def call_ollama(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
         """
         Calls local Ollama instance with qwen2.5 optimization options:
-        - num_ctx: 8192 (prevents context truncation)
+        - keep_alive: 30m (keeps model hot in RAM/VRAM)
+        - num_ctx: 3072 (balanced context window without excessive KV-cache)
+        - num_predict: 900 (caps runaway generation)
         - temperature: 0.1 (strict factual grounding)
         - top_p: 0.85
         - repeat_penalty: 1.1
         - format: json (when requested)
-        - timeout: 60.0s
         """
         if not self.is_ollama_online():
             return None
@@ -168,8 +197,10 @@ class LLMProvider:
             "model": active_model,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": settings.ollama_keep_alive,
             "options": {
-                "num_ctx": 4096,
+                "num_ctx": settings.ollama_num_ctx,
+                "num_predict": settings.ollama_num_predict,
                 "temperature": 0.1,
                 "top_p": 0.85,
                 "repeat_penalty": 1.1,
@@ -180,14 +211,15 @@ class LLMProvider:
 
         try:
             resp = httpx.post(
-                f"{settings.ollama_base_url}/api/generate",
+                f"{settings.ollama_base_url.rstrip('/')}/api/generate",
                 json=payload,
                 timeout=httpx.Timeout(150.0, connect=3.0),
             )
             if resp.status_code == 200:
                 return resp.json().get("response", "").strip()
+            self.invalidate_ollama_cache()
         except Exception:
-            pass
+            self.invalidate_ollama_cache()
         return None
 
     def synthesize_smart_answer(self, query: str, chunks: List[DocumentChunk]) -> str:

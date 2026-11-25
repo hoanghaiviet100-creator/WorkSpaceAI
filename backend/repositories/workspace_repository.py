@@ -491,7 +491,8 @@ class WorkspaceRepository:
                 if query in self._query_embeddings:
                     q_vec = self._query_embeddings[query]
                 else:
-                    q_vec = self._embed_fn([query])
+                    query_embed_fn = getattr(self._embed_fn, "embed_queries", None)
+                    q_vec = query_embed_fn([query]) if callable(query_embed_fn) else self._embed_fn([query])
                     if q_vec is not None and len(q_vec) > 0:
                         self._query_embeddings[query] = q_vec
 
@@ -500,7 +501,13 @@ class WorkspaceRepository:
                         self._chunk_embeddings = {}
                     uncached = [c for c in eligible if c.chunk_id not in self._chunk_embeddings]
                     if uncached:
-                        new_vecs = self._embed_fn([c.text for c in uncached])
+                        passage_embed_fn = getattr(self._embed_fn, "embed_passages", None)
+                        passage_texts = [c.text for c in uncached]
+                        new_vecs = (
+                            passage_embed_fn(passage_texts)
+                            if callable(passage_embed_fn)
+                            else self._embed_fn(passage_texts)
+                        )
                         if new_vecs is not None and len(new_vecs) == len(uncached):
                             for c, v in zip(uncached, new_vecs):
                                 self._chunk_embeddings[c.chunk_id] = v
@@ -536,7 +543,12 @@ class WorkspaceRepository:
 
             if cid in rank_dense:
                 r_d = rank_dense[cid]
-                d_sim = dense_scores_map[cid]
+                raw_sim = dense_scores_map[cid]
+                score_floor = float(getattr(self._embed_fn, "score_floor", 0.0) or 0.0)
+                if 0.0 < score_floor < 1.0:
+                    d_sim = max(0.0, (raw_sim - score_floor) / (1.0 - score_floor))
+                else:
+                    d_sim = raw_sim
                 c_copy.dense_score = round(d_sim, 4)
                 # Standard RRF formula
                 rrf = 1.0 / (60.0 + r_bm25) + 1.0 / (60.0 + r_d)
@@ -728,9 +740,9 @@ def create_ollama_embed_fn() -> Optional[Callable[[List[str]], Optional[List[Lis
     return None
 
 
-# Backward compatibility aliases
+# Backward compatibility aliases (embed_fn is injected by QAService so CPU FastEmbed takes priority)
 HybridWorkspaceIndex = WorkspaceRepository
-workspace_repository = WorkspaceRepository(embed_fn=create_ollama_embed_fn())
+workspace_repository = WorkspaceRepository()
 
 __all__ = [
     "HybridWorkspaceIndex",
