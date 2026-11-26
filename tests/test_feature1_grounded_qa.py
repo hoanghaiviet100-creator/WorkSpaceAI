@@ -306,28 +306,6 @@ class TestFeature1GroundedQA(unittest.TestCase):
         self.assertGreater(len(results_date), 0)
         self.assertGreater(results_date[0].pinpoint_score, 0.0)
 
-    def test_10_multiline_evidence_highlighting(self):
-        """Verifies multi-line evidence highlight renders valid marks across line boundaries."""
-        from frontend.state import highlight_evidence_in_page
-
-        page_text = (
-            "Line 1: Submission Package\n"
-            "Line 2: 01 Engineering Report (12-18 pages recommended)\n"
-            "Line 3: 02 Source Repository and Demo\n"
-            "Line 4: End of package"
-        )
-        quote = (
-            "01 Engineering Report (12-18 pages recommended)\n"
-            "Line 3: 02 Source Repository and Demo"
-        )
-        html = highlight_evidence_in_page(page_text, quote)
-        self.assertIn('<mark class="cite-mark">', html)
-        self.assertIn("</mark>", html)
-        # Ensure marks appear on both Line 2 and Line 3
-        self.assertIn("Line 2:", html)
-        self.assertIn("Line 3:", html)
-        self.assertEqual(html.count('<mark class="cite-mark">'), html.count("</mark>"))
-
     def test_11_notebooklm_comprehensive_document_summary(self):
         """Verifies NotebookLM-level comprehensive briefing with multi-page citations."""
         res = qa_service.summarize_document("Project_Brief.pdf")
@@ -411,20 +389,6 @@ class TestFeature1GroundedQA(unittest.TestCase):
             selected_doc_ids=["Team_8_Proposal.pdf"],
         )
         self.assertEqual(target_selected, "Team_8_Proposal.pdf")
-
-    def test_14_frontend_state_initialization(self):
-        """Verifies frontend state initialization does not fail with NameError or import errors."""
-        import streamlit as st
-        import frontend.state as f_state
-
-        st.session_state = {}
-        f_state.init_state()
-        self.assertIn("active_ai_mode", st.session_state)
-        self.assertIn(st.session_state["active_ai_mode"], ["offline", "ollama", "gemini"])
-        self.assertIn("chat_messages", st.session_state)
-        self.assertGreater(len(st.session_state["chat_messages"]), 0)
-
-
 
 
 if __name__ == "__main__":

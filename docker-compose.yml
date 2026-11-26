@@ -1,6 +1,6 @@
 services:
   # ============================================================================
-  # WorkspaceAI Application Service (FastAPI Backend + Streamlit Frontend)
+  # WorkspaceAI Backend Service (FastAPI)
   # ============================================================================
   app:
     build:
@@ -8,7 +8,6 @@ services:
       dockerfile: Dockerfile
     container_name: workspaceai-app
     ports:
-      - "8501:8501"   # Streamlit Interactive Web UI (http://localhost:8501)
       - "8000:8000"   # FastAPI REST API & Swagger UI (http://localhost:8000/docs)
     env_file:
       - path: .env
@@ -21,6 +20,14 @@ services:
       # set OLLAMA_DOCKER_URL=http://host.docker.internal:11434 in .env.
       - OLLAMA_BASE_URL=${OLLAMA_DOCKER_URL:-http://ollama:11434}
       - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - OLLAMA_TAGS_CACHE_TTL=${OLLAMA_TAGS_CACHE_TTL:-60}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_NUM_CTX=${OLLAMA_NUM_CTX:-3072}
+      - OLLAMA_NUM_PREDICT=${OLLAMA_NUM_PREDICT:-900}
+      - OLLAMA_INCLUDE_THINKING=${OLLAMA_INCLUDE_THINKING:-true}
+      - EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-auto}
+      - FASTEMBED_MODEL=${FASTEMBED_MODEL:-intfloat/multilingual-e5-small}
+      - FASTEMBED_CACHE_PATH=/var/cache/fastembed
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GEMINI_MODEL=${GEMINI_MODEL:-gemini-2.5-flash}
       - RETRIEVAL_MIN_SCORE=${RETRIEVAL_MIN_SCORE:-0.35}
@@ -30,10 +37,28 @@ services:
       - GMAIL_APP_PASSWORD=${GMAIL_APP_PASSWORD:-}
       - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
       - SMTP_PORT=${SMTP_PORT:-587}
+    volumes:
+      - fastembed_cache:/var/cache/fastembed
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - ollama
+    restart: unless-stopped
+    networks:
+      - workspaceai-net
+
+  # ============================================================================
+  # WorkspaceAI Frontend Service (React + Vite built & served by Nginx)
+  # ============================================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: workspaceai-frontend
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      - app
     restart: unless-stopped
     networks:
       - workspaceai-net
@@ -46,6 +71,11 @@ services:
     container_name: workspaceai-ollama
     ports:
       - "11434:11434" # Ollama API endpoint (http://localhost:11434)
+    environment:
+      - OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION:-1}
+      - OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE:-q8_0}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:-30m}
+      - OLLAMA_MAX_LOADED_MODELS=${OLLAMA_MAX_LOADED_MODELS:-1}
     volumes:
       - ollama_models:/root/.ollama
     restart: unless-stopped
@@ -55,6 +85,8 @@ services:
 volumes:
   ollama_models:
     name: workspaceai_ollama_models
+  fastembed_cache:
+    name: workspaceai_fastembed_cache
 
 networks:
   workspaceai-net:

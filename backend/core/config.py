@@ -13,6 +13,13 @@ class Settings:
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
     ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    ollama_tags_cache_ttl: float = float(os.getenv("OLLAMA_TAGS_CACHE_TTL", "60.0"))
+    ollama_keep_alive: str = os.getenv("OLLAMA_KEEP_ALIVE", "30m")
+    ollama_num_ctx: int = int(os.getenv("OLLAMA_NUM_CTX", "3072"))
+    ollama_num_predict: int = int(os.getenv("OLLAMA_NUM_PREDICT", "900"))
+    ollama_include_thinking: bool = os.getenv("OLLAMA_INCLUDE_THINKING", "true").lower() == "true"
+    fastembed_model: str = os.getenv("FASTEMBED_MODEL", "intfloat/multilingual-e5-small")
+    embedding_backend: str = os.getenv("EMBEDDING_BACKEND", "auto")
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
     

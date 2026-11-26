@@ -21,20 +21,18 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 # Copy application source code and configurations (excluding test files for production security)
 COPY backend /app/backend
-COPY frontend /app/frontend
-COPY .streamlit /app/.streamlit
 COPY .env.example /app/
 COPY entrypoint.sh /app/entrypoint.sh
 
 # Ensure entrypoint script has Unix line endings and execute permissions
 RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
-# Expose Streamlit (8501) and FastAPI (8000)
-EXPOSE 8501 8000
+# Expose FastAPI (8000)
+EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health && curl -f http://localhost:8000/docs || exit 1
+    CMD curl -f http://localhost:8000/api/runtime || exit 1
 
 # Run entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]

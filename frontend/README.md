@@ -256,10 +256,8 @@ Set-Location H:\WorkSpaceAI\WorkSpaceAI
 | `src/AppTools.tsx` | Mục Display và giao diện sáng/tối; bố cục tự thích ứng kích thước thiết bị |
 | `src/data.ts`, `src/styles.css` | Kiểu dữ liệu giao diện, dữ liệu mẫu và phong cách dùng chung |
 
-Các file Python `app.py`, `state.py`, `styles.py` và `components/` trong cùng thư mục thuộc giao diện Streamlit trước đây. Các bước trong README này khởi động giao diện React tại cổng 5174.
-
 ## Docker (React + backend + Ollama)
-From the project root run `docker compose up --build -d` and open http://localhost:8501. See the root README for model download and data persistence. Browser storage from port 5174 is a separate origin and is not migrated automatically.
+From the project root run `docker compose up --build -d` and open http://localhost:5173 (or the port configured via `FRONTEND_PORT`). See the root README for model download and data persistence. Browser storage from port 5174 is a separate origin and is not migrated automatically.
 
 ## Chọn Ollama / Gemini (cấu hình bởi dev)
 

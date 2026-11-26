@@ -142,7 +142,7 @@ python verify.py
 
 ## 🚀 Quick Start with Docker (Recommended)
 
-You can run the entire WorkspaceAI platform (FastAPI Backend + Streamlit UI + Local Ollama LLM) with a single command without installing Python dependencies locally.
+You can run the entire WorkspaceAI platform (FastAPI Backend + React/Vite UI + Local Ollama LLM) with a single command without installing dependencies locally.
 
 ### 1. Prerequisites
 - [Docker](https://docs.docker.com/get-docker/) & [Docker Compose](https://docs.docker.com/compose/) installed and running.
@@ -159,7 +159,7 @@ docker compose up --build
 ```
 
 Once started:
-- 🌐 **Interactive Web UI (Streamlit):** [http://localhost:8501](http://localhost:8501)
+- 🌐 **Interactive Web UI (React + Vite):** [http://localhost:5173](http://localhost:5173)
 - 📖 **API Docs & Swagger UI (FastAPI):** [http://localhost:8000/docs](http://localhost:8000/docs)
 - 🦙 **Ollama LLM Engine:** [http://localhost:11434](http://localhost:11434)
 
@@ -193,9 +193,11 @@ Choose `LLM_PROVIDER`:
   ```bash
   uvicorn backend.main:app --reload --port 8000
   ```
-- **Frontend (Streamlit):**
+- **Frontend (React + Vite):**
   ```bash
-  streamlit run frontend/app.py
+  cd frontend
+  pnpm install
+  pnpm dev
   ```
 
 ---

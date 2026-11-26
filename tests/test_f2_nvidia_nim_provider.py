@@ -1,15 +1,9 @@
-"""NVIDIA NIM HTTP contract and real F2/UI integration; no live key/model."""
+"""NVIDIA NIM HTTP contract and real F2 integration; no live key/model."""
 import json
-import os
-from pathlib import Path
-from unittest.mock import patch
 
 import httpx
 import pytest
-from streamlit.proto.TextInput_pb2 import TextInput
-from streamlit.testing.v1 import AppTest
 
-from backend.core.config import settings
 from backend.core.f2_study_schemas import SourceRef, StudySourceSelection
 from backend.providers.f2_nvidia_nim_provider import NvidiaNimFlashcardProvider, NvidiaNimQuizProvider
 from backend.providers.f2_study_provider import MAX_STUDY_RESPONSE_BYTES, StudyEvidence, StudyProviderError
@@ -24,7 +18,6 @@ from backend.services.f2_source_service import F2SourceService, SourceAccessCont
 KEY = "nvapi-unit-test-not-a-real-credential"
 MODEL = "vendor/test-model"
 TEXT = "Cache: Fast temporary memory.\nRAM: Volatile working storage."
-APP = Path(__file__).resolve().parents[1] / "frontend/f2_manual_app.py"
 
 
 def inner(kind="quiz", **changes):
@@ -202,54 +195,3 @@ def test_fenced_json_is_not_repaired_and_auth_failure_is_not_offline_success():
         assert result.status == "ERROR" and result.quiz is None and result.provider_name == "nvidia_nim"
         assert code in [issue.code for issue in result.issues]
         assert KEY not in str(result.issues)
-
-
-def ui():
-    at = AppTest.from_file(str(APP), default_timeout=20).run()
-    runtime = at.session_state["f2_manual_runtime"]
-    doc = runtime["ingestion"].ingest_file("lesson.txt", TEXT.encode())["document"]
-    at.run()
-    at.multiselect(key="f2_manual_selected").select(doc.doc_id).run()
-    at.number_input(key="f2_manual_count").set_value(1).run()
-    return at
-
-
-def test_ui_nim_key_is_masked_and_never_inherited_from_gemini_field():
-    with patch.dict(os.environ, {"NVIDIA_API_KEY": ""}), patch.object(settings, "gemini_api_key", ""):
-        at = ui()
-        at.selectbox(key="f2_manual_engine").set_value("Gemini").run()
-        at.text_input(key="f2_manual_gemini_key").set_value("google-only-test-key").run()
-        at.selectbox(key="f2_manual_engine").set_value("NVIDIA NIM").run()
-        assert not at.exception
-        assert at.text_input(key="f2_manual_nim_key").value == ""
-        assert at.text_input(key="f2_manual_nim_key").proto.type == TextInput.PASSWORD
-        assert at.button(key="f2_manual_generate").disabled
-        at.text_input(key="f2_manual_nim_key").set_value(KEY).run()
-        assert not at.button(key="f2_manual_generate").disabled
-        assert any("chưa xác nhận" in item.value for item in at.caption)
-
-
-@pytest.mark.parametrize("kind,status", [("quiz", 200), ("flashcards", 200), ("quiz", 403)])
-def test_ui_nim_factory_model_provider_errors_and_no_hidden_fallback(kind, status):
-    real_type = NvidiaNimQuizProvider if kind == "quiz" else NvidiaNimFlashcardProvider
-    def factory(api_key, model):
-        assert api_key == KEY
-        return real_type(api_key, model, transport=httpx.MockTransport(
-            lambda request: httpx.Response(status, json=reply(inner(kind)) if status == 200 else {"error": KEY})))
-    target = "NvidiaNimQuizProvider" if kind == "quiz" else "NvidiaNimFlashcardProvider"
-    with patch.dict(os.environ, {"NVIDIA_API_KEY": ""}), patch(
-        "frontend.components.f2_manual_panel." + target, side_effect=factory):
-        at = ui()
-        at.selectbox(key="f2_manual_engine").set_value("NVIDIA NIM").run()
-        at.radio(key="f2_manual_format").set_value("Quiz" if kind == "quiz" else "Flashcards").run()
-        at.text_input(key="f2_manual_nim_key").set_value(KEY).run()
-        at.text_input(key="f2_manual_nim_model").set_value(MODEL).run()
-        at.button(key="f2_manual_generate").click().run()
-        assert not at.exception
-        assert any(f"nvidia_nim · model yêu cầu: {MODEL}" in item.value for item in at.info)
-        assert all(KEY not in item.value for item in [*at.info, *at.warning, *at.error])
-        if status == 200:
-            assert at.session_state["f2_manual_active"]["format"] == kind
-        else:
-            assert at.session_state["f2_manual_active"] is None
-            assert any("NVIDIA NIM" in item.value for item in at.warning)
