@@ -285,7 +285,11 @@ export function approveAndSend(draft: Draft, workspaceId?: string) {
   if (
     !validRecipient(draft.to) ||
     draft.cc.trim() ||
-    draftPayload({ ...draft, ...draft.serverSnapshot }) !== draftPayload(draft)
+    draftPayload({
+      ...draft,
+      ...draft.serverSnapshot,
+      attachmentIds: draft.attachmentIds,
+    }) !== draftPayload(draft)
   )
     throw new ApiError(
       "This version cannot be submitted. Review the draft snapshot before sending.",
