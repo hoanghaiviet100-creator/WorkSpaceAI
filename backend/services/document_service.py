@@ -1,12 +1,17 @@
 from datetime import datetime
 import hashlib
 import io
+import os
+from pathlib import Path
 import re
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple
 import pypdf
 
 from backend.core.schemas import DocumentChunk, DocumentMetadata
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
+
+UPLOAD_CACHE_DIR = Path(tempfile.gettempdir()) / "workspaceai_uploads"
 
 
 def format_chunk_with_lines(chunk: DocumentChunk) -> str:
@@ -273,6 +278,13 @@ class DocumentService:
             metadata = self.repository.documents[doc_id]
             metadata.version_id = version_id
             metadata.file_hash = file_hash
+            try:
+                UPLOAD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                safe_name = os.path.basename(doc_id)
+                if safe_name:
+                    (UPLOAD_CACHE_DIR / safe_name).write_bytes(content_bytes)
+            except Exception:
+                pass
             return {
                 "status": "INGESTED",
                 "message": f"Đã nạp thành công '{clean_name}' (phiên bản {version_id}, {added_count} dòng công việc).",
@@ -314,6 +326,14 @@ class DocumentService:
         )
 
         self.repository.add_document(metadata, all_chunks)
+
+        try:
+            UPLOAD_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            safe_name = os.path.basename(doc_id)
+            if safe_name:
+                (UPLOAD_CACHE_DIR / safe_name).write_bytes(content_bytes)
+        except Exception:
+            pass
 
         return {
             "status": "INGESTED",
