@@ -52,9 +52,46 @@ from backend.repositories.workspace_repository import WorkspaceRepository, works
 
 
 def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
-    """Helper to attach local files, images, or compress directories into a MIMEMultipart message."""
+    """Helper to attach local files, directories, or workspace documents (by doc_id) into a MIMEMultipart message."""
+    import tempfile
+    from pathlib import Path
+
+    upload_cache_dir = Path(tempfile.gettempdir()) / "workspaceai_uploads"
+
     for att_path in attachments:
-        if not att_path or not os.path.exists(att_path):
+        if not att_path:
+            continue
+        if not os.path.exists(att_path):
+            # Resolve workspace document by doc_id when selected from UI
+            safe_name = os.path.basename(att_path)
+            cached_file = upload_cache_dir / safe_name if safe_name else None
+            doc_meta = workspace_repository.documents.get(att_path)
+            if cached_file and cached_file.exists():
+                ctype, encoding = mimetypes.guess_type(str(cached_file))
+                if ctype is None or encoding is not None:
+                    ctype = "application/octet-stream"
+                maintype, subtype = ctype.split("/", 1)
+                part = MIMEBase(maintype, subtype)
+                part.set_payload(cached_file.read_bytes())
+                encoders.encode_base64(part)
+                filename = doc_meta.doc_name if doc_meta else safe_name
+                part.add_header("Content-Disposition", "attachment", filename=filename)
+                msg.attach(part)
+            elif doc_meta is not None:
+                doc_chunks = [c for c in workspace_repository.chunks if c.doc_id == att_path]
+                text_body = "\n\n".join(c.text for c in doc_chunks if c.text)
+                if not text_body and doc_meta.file_type == "csv":
+                    task_lines = [
+                        f"{t.task_id}: {t.title} ({t.assignee}, {t.status}, {t.deadline})"
+                        for t in workspace_repository.tasks
+                    ]
+                    text_body = "\n".join(task_lines)
+                if text_body:
+                    part = MIMEText(text_body, "plain", "utf-8")
+                    base_name = doc_meta.doc_name or safe_name
+                    attach_name = base_name if base_name.lower().endswith((".txt", ".md", ".csv")) else f"{base_name}.txt"
+                    part.add_header("Content-Disposition", "attachment", filename=attach_name)
+                    msg.attach(part)
             continue
         if os.path.isdir(att_path):
             zip_buffer = io.BytesIO()
