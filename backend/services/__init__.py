@@ -1,4 +1,9 @@
-from backend.services.document_service import DocumentService, document_service
+try:
+    from backend.services.document_service import DocumentService, document_service
+except Exception:
+    # DocumentService optional; missing dependencies like pypdf are acceptable for email-only operations.
+    DocumentService = None
+    document_service = None
 from backend.services.email_service import (
     EmailService,
     email_service,

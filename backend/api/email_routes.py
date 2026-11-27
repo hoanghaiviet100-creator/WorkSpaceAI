@@ -14,14 +14,50 @@ from __future__ import annotations
 import smtplib
 import socket
 from typing import Any, Dict, List, Optional, Union
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 
 from backend.algorithms.email_state_machine import FSMStateError, SecurityError
 from backend.core.config import settings
 from backend.core.schemas import ApproveDraftRequest, CreateDraftRequest, EmailDraftRecord, EmailFSMState
 from backend.services.email_service import email_service
 
+class GenerateEmailRequest(BaseModel):
+    prompt: str
+
 router = APIRouter(prefix="/api/email", tags=["Email Reporting & FSM Send Gate"])
+
+@router.post("/generate")
+def generate_email_endpoint(prompt: Optional[str] = None, req: Optional[GenerateEmailRequest] = None):
+    """Generate an email subject and body from a free-form user prompt.
+    Creates a real draft record in the FSM repo so it can be approved and sent.
+    Accepts prompt via query param or JSON body {prompt: ...}."""
+    effective_prompt = (req.prompt if req else None) or prompt or ""
+    if not effective_prompt.strip():
+        raise HTTPException(status_code=400, detail="prompt is required")
+    try:
+        from backend.providers.llm_provider import llm_provider
+        from backend.algorithms.email_state_machine import prepare_draft_for_approval
+        from backend.core.schemas import EmailDraftPayload
+        subject, body = llm_provider.generate_email_draft(effective_prompt, [])
+        # Create a real draft record so approve+send flow works
+        draft_payload = EmailDraftPayload(
+            draft_id="draft_001",
+            recipient_email="",
+            subject=subject,
+            body=body,
+            citations=[],
+        )
+        staged = prepare_draft_for_approval(draft_payload)
+        email_service.draft_repo.save(staged)
+        assigned_id = str(getattr(staged, "id", None) or getattr(staged, "draft_id", "draft_001"))
+        return {
+            "subject": subject,
+            "body": body,
+            "draft_id": assigned_id,
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/connection")
@@ -142,6 +178,7 @@ def approve_email(
     recipient_email: str,
     subject: str,
     body: str,
+    attachments: Optional[List[str]] = Query(default=None),
     user_confirmed: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -154,6 +191,7 @@ def approve_email(
             recipient_email=recipient_email,
             subject=subject,
             body=body,
+            attachments=attachments,
             user_confirmed=user_confirmed,
         )
     except KeyError as exc:

@@ -290,21 +290,27 @@ def build_email_prompt(
     chunks: List[DocumentChunk],
     recipient_email: Optional[str] = None,
 ) -> str:
-    """Builds email drafting prompt with explicit reasoning step."""
-    context_str = "\n".join(f"- [{c.doc_name} p.{c.page_number}]: {c.text}" for c in chunks)
+    """Builds dynamic email drafting prompt – fully AI-generated, NO static template."""
+    context_str = "\n".join(f"- [{c.doc_name} p.{c.page_number}]: {c.text}" for c in chunks) if chunks else ""
+    context_block = f"\nThông tin workspace liên quan:\n{context_str}\n" if context_str else ""
     prompt = (
-        "Bạn là trợ lý ảo hỗ trợ soạn thảo email học thuật cho đồ án môn học CSC10014 (WorkspaceAI).\n"
-        f"Yêu cầu của người dùng: \"{query}\"\n"
-        f"Người nhận dự kiến: {recipient_email or 'Giảng viên'}\n"
-        f"Dữ liệu liên quan từ workspace:\n{context_str}\n\n"
-        "QUY TRÌNH SUY LUẬN (REASONING PROCESS):\n"
-        "Trước khi tạo Tiêu đề và Nội dung, bạn PHẢI tư duy logic: phân tích vai trò người nhận, bối cảnh yêu cầu, mục tiêu email và chọn lọc thông tin từ workspace.\n\n"
-        "Hãy tạo 1 Tiêu đề (Subject) và Nội dung email (Body) bằng tiếng Việt thật trang trọng, lịch sự và rõ ràng.\n"
-        "Định dạng kết quả trả về CHÍNH XÁC theo cấu trúc sau:\n"
-        "THINKING:\n"
-        "<Suy luận logic: Phân tích đối tượng người nhận, bối cảnh yêu cầu, mục tiêu email và chọn lọc thông tin từ tài liệu đính kèm>\n"
-        "SUBJECT: <tiêu đề bắt đầu bằng [CSC10014]>\n"
+        "Bạn là trợ lý soạn email thông minh cho sinh viên.\n\n"
+        f"Yêu cầu: \"{query}\"\n"
+        f"Người nhận: {recipient_email or 'thầy/cô'}\n"
+        f"{context_block}\n"
+        "Hãy VIẾT email hoàn chỉnh phù hợp với yêu cầu trên theo phong cách tự nhiên của người gửi.\n"
+        "QUAN TRỌNG:\n"
+        "- Nếu là xin nghỉ học / báo bệnh / việc cá nhân → viết giọng sinh viên nhắn thầy cô, thân thiện, ngắn gọn (VD: 'Dạ thầy/cô ơi, hôm nay em...')\n"
+        "- Nếu là báo cáo / đề xuất chính thức → viết trang trọng hơn\n"
+        "- KHÔNG dùng khuôn mẫu cứng 'Kính gửi Quý Thầy/Cô, Em đại diện nhóm thực hiện đồ án CSC10014...'\n"
+        "- Tiêu đề phải ngắn gọn, phản ánh đúng nội dung\n\n"
+        "Ví dụ cho email xin nghỉ học:\n"
+        "SUBJECT: Xin nghỉ học môn Giải Tích hôm nay\n"
         "BODY:\n"
-        "<nội dung email có lời chào, nội dung chi tiết, lời cảm ơn và chữ ký Nhóm sinh viên CSC10014>"
+        "Dạ thầy ơi, hôm nay em bị sốt nên không thể đến lớp được ạ. Em xin phép được nghỉ buổi học Giải Tích hôm nay. Em sẽ bù bài đầy đủ ạ, em cảm ơn thầy!\n\n"
+        "Giờ hãy viết email theo yêu cầu trên (KHÔNG copy y chang ví dụ, tự sinh nội dung phù hợp):\n"
+        "SUBJECT: <tiêu đề ngắn gọn>\n"
+        "BODY:\n"
+        "<nội dung email tự nhiên theo ngữ cảnh, bao gồm lời chào phù hợp và chữ ký>"
     )
     return prompt

@@ -87,7 +87,11 @@ export default function Email({
   const connected = apiFor(workspaceId);
   const sameAsServer =
     draft.serverSnapshot &&
-    draftPayload({ ...draft, ...draft.serverSnapshot }) === draftPayload(draft);
+    draftPayload({
+      ...draft,
+      ...draft.serverSnapshot,
+      attachmentIds: draft.attachmentIds,
+    }) === draftPayload(draft);
   const canSend =
     connected &&
     draft.origin === "server" &&
@@ -95,7 +99,6 @@ export default function Email({
     !!draft.payloadHash &&
     sameAsServer &&
     !draft.cc.trim() &&
-    !(draft.attachmentIds ?? []).length &&
     ["PENDING_APPROVAL", "FAILED_RETRYABLE", "APPROVED"].includes(state);
   const change = (field: keyof Draft, value: string | string[]) => {
     onChange({ ...draft, [field]: value, updatedAt: new Date().toISOString() });
@@ -288,8 +291,7 @@ export default function Email({
               Attachments <span>{draft.attachmentIds?.length ?? 0}</span>
             </summary>
             <p className="small muted">
-              Select files separately from the documents used as evidence. The
-              current server cannot stage or send attachments yet.
+              Select files to attach and send along with this email.
             </p>
             {sources.map((s) => (
               <label className="schema-check" key={s.id}>
@@ -443,8 +445,7 @@ export default function Email({
               busy ||
               !validRecipient(draft.to) ||
               !draft.body.trim() ||
-              !!draft.cc.trim() ||
-              !!draft.attachmentIds?.length
+              !!draft.cc.trim()
             }
             onClick={async () => {
               setBusy(true);
@@ -464,11 +465,14 @@ export default function Email({
                   throw new Error(
                     result.message || "The server did not create a draft.",
                   );
-                const next = draftFromServer(
-                  result.draft,
-                  draft.sessionId ?? "",
-                  { name: draft.context ?? "Email" },
-                );
+                const next = {
+                  ...draftFromServer(
+                    result.draft,
+                    draft.sessionId ?? "",
+                    { name: draft.context ?? "Email" },
+                  ),
+                  attachmentIds: draft.attachmentIds ?? [],
+                };
                 if (mounted.current) {
                   onChange(next);
                   setSnapshot(null);

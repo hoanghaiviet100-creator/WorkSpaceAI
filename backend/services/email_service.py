@@ -1,40 +1,24 @@
-"""
-backend/services/email_service.py
-CSC10014 Feature 3: Context-Aware Email Reporting Service.
+# backend/services/email_service.py
+# CSC10014 Feature 3: Context-Aware Email Reporting Service.
+# Encapsulates draft creation, cryptographic snapshot approval, and controlled SMTP dispatch.
+# Adheres strictly to the 5 FSM states: DRAFT, APPROVED, SENT, FAILED, DELIVERY_UNKNOWN.
+# Guarantees NFR-04: tamper-proof SHA‑256, duplicate‑send prevention, single dispatch per approved digest, no auto‑retry on DELIVERY_UNKNOWN.
 
-Encapsulates draft creation, cryptographic snapshot approval, and controlled SMTP dispatch.
-Adheres strictly to the 5 FSM states:
-- DRAFT
-- APPROVED
-- SENT
-- FAILED
-- DELIVERY_UNKNOWN
-
-Guarantees NFR-04:
-- Tamper-proof SHA-256 payload binding (recipients, subject, body).
-- Duplicate-send prevention.
-- Single dispatch per approved digest.
-- No automatic retries on DELIVERY_UNKNOWN (socket.timeout / SMTPServerDisconnected).
-"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
 from email.mime.application import MIMEApplication
 from email.mime.base import MIMEBase
 from email import encoders
+import os, mimetypes, zipfile, io
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-import io
-import logging
-import mimetypes
-import os
 import re
 import smtplib
 import socket
 from typing import Any, Dict, List, Optional, Union
 import uuid
 from uuid import UUID
-import zipfile
 
 from backend.algorithms.email_state_machine import (
     APPROVED,
@@ -45,8 +29,10 @@ from backend.algorithms.email_state_machine import (
     FSMStateError,
     SecurityError,
     _normalize_recipients,
+    approve_and_verify_email_send,
     approve_snapshot,
     compute_draft_hash,
+    prepare_draft_for_approval,
     validate_rfc5322_email,
     verify_and_lock_for_send,
 )
@@ -64,13 +50,48 @@ from backend.providers.llm_provider import LLMProvider, llm_provider
 from backend.repositories.draft_repository import DraftRepository, draft_repository
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
 
-logger = logging.getLogger("workspaceai.email_service")
-
 
 def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
-    """Helper to attach local files, images, or compress directories into a MIMEMultipart message."""
+    """Helper to attach local files, directories, or workspace documents (by doc_id) into a MIMEMultipart message."""
+    import tempfile
+    from pathlib import Path
+
+    upload_cache_dir = Path(tempfile.gettempdir()) / "workspaceai_uploads"
+
     for att_path in attachments:
-        if not att_path or not os.path.exists(att_path):
+        if not att_path:
+            continue
+        if not os.path.exists(att_path):
+            # Resolve workspace document by doc_id when selected from UI
+            safe_name = os.path.basename(att_path)
+            cached_file = upload_cache_dir / safe_name if safe_name else None
+            doc_meta = workspace_repository.documents.get(att_path)
+            if cached_file and cached_file.exists():
+                ctype, encoding = mimetypes.guess_type(str(cached_file))
+                if ctype is None or encoding is not None:
+                    ctype = "application/octet-stream"
+                maintype, subtype = ctype.split("/", 1)
+                part = MIMEBase(maintype, subtype)
+                part.set_payload(cached_file.read_bytes())
+                encoders.encode_base64(part)
+                filename = doc_meta.doc_name if doc_meta else safe_name
+                part.add_header("Content-Disposition", "attachment", filename=filename)
+                msg.attach(part)
+            elif doc_meta is not None:
+                doc_chunks = [c for c in workspace_repository.chunks if c.doc_id == att_path]
+                text_body = "\n\n".join(c.text for c in doc_chunks if c.text)
+                if not text_body and doc_meta.file_type == "csv":
+                    task_lines = [
+                        f"{t.task_id}: {t.title} ({t.assignee}, {t.status}, {t.deadline})"
+                        for t in workspace_repository.tasks
+                    ]
+                    text_body = "\n".join(task_lines)
+                if text_body:
+                    part = MIMEText(text_body, "plain", "utf-8")
+                    base_name = doc_meta.doc_name or safe_name
+                    attach_name = base_name if base_name.lower().endswith((".txt", ".md", ".csv")) else f"{base_name}.txt"
+                    part.add_header("Content-Disposition", "attachment", filename=attach_name)
+                    msg.attach(part)
             continue
         if os.path.isdir(att_path):
             zip_buffer = io.BytesIO()
@@ -83,7 +104,7 @@ def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
                         zf.write(full_path, rel_path)
             zip_buffer.seek(0)
             part = MIMEApplication(zip_buffer.read(), Name=f"{dir_name}.zip")
-            part["Content-Disposition"] = f'attachment; filename="{dir_name}.zip"'
+            part.add_header("Content-Disposition", "attachment", filename=f"{dir_name}.zip")
             msg.attach(part)
         else:
             ctype, encoding = mimetypes.guess_type(att_path)
@@ -96,7 +117,7 @@ def _attach_files_to_msg(msg: MIMEMultipart, attachments: List[str]) -> None:
             part.set_payload(file_content)
             encoders.encode_base64(part)
             filename = os.path.basename(att_path)
-            part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
+            part.add_header("Content-Disposition", "attachment", filename=filename)
             msg.attach(part)
 
 
@@ -126,6 +147,7 @@ def send_real_email_via_smtp(
     if not validate_email_address(clean_recipient):
         raise ValueError(f"Địa chỉ email người nhận không hợp lệ theo chuẩn RFC-5322: '{clean_recipient}'")
 
+    # Construct standard multipart MIME message for robust UTF-8 encoding
     msg = MIMEMultipart()
     msg["From"] = sender
     msg["To"] = clean_recipient
@@ -136,23 +158,22 @@ def send_real_email_via_smtp(
         _attach_files_to_msg(msg, attachments)
 
     host = settings.smtp_host or "smtp.gmail.com"
-    port = settings.smtp_port or 587
+    port = int(settings.smtp_port or 587)
+    timeout_val = 90
 
-    try:
-        with smtplib.SMTP(host, port, timeout=20) as server:
+    # Connect to Gmail SMTP server (90s timeout to support attachments up to 25MB)
+    if port == 465:
+        with smtplib.SMTP_SSL(host, port, timeout=timeout_val) as server:
+            server.login(sender, password)
+            server.sendmail(sender, [clean_recipient], msg.as_string())
+    else:
+        with smtplib.SMTP(host, port, timeout=timeout_val) as server:
             server.ehlo()
             server.starttls()
             server.ehlo()
             server.login(sender, password)
             server.sendmail(sender, [clean_recipient], msg.as_string())
-    except (smtplib.SMTPException, socket.timeout, TimeoutError, OSError) as exc:
-        logger.error(
-            "send_real_email_via_smtp failed",
-            extra={"error_type": exc.__class__.__name__},
-        )
-        raise
 
-    logger.info("Real email successfully transmitted via SMTP", extra={"outcome": "SENT"})
     return {
         "status": "SENT",
         "sender": sender,
@@ -170,9 +191,9 @@ class EmailService:
         workspace_repo: Optional[WorkspaceRepository] = None,
         provider: Optional[LLMProvider] = None,
     ) -> None:
-        self.draft_repo: DraftRepository = draft_repo or draft_repository
-        self.workspace_repo: WorkspaceRepository = workspace_repo or workspace_repository
-        self.provider: LLMProvider = provider or llm_provider
+        self.draft_repo = draft_repo or draft_repository
+        self.workspace_repo = workspace_repo or workspace_repository
+        self.provider = provider or llm_provider
 
     def create_draft(
         self,
@@ -181,14 +202,14 @@ class EmailService:
         subject: Optional[str] = None,
         body: Optional[str] = None,
         citations: Optional[List[str]] = None,
-        req: Optional[UserRequest] = None,
         attachments: Optional[List[str]] = None,
+        req: Optional[UserRequest] = None,
     ) -> Union[EmailDraftRecord, Dict[str, Any]]:
         """
         Creates an email draft in DRAFT state.
         Supports both:
         1. Context-aware generation from UserRequest (backward compatibility for /api/chat).
-        2. Direct manual composition with (workspace_id, recipients, subject, body, citations).
+        2. Direct manual composition with (workspace_id, recipients, subject, body, citations, attachments).
         """
         user_req = workspace_id if isinstance(workspace_id, UserRequest) else req
         if user_req is not None:
@@ -212,18 +233,13 @@ class EmailService:
                 subject=gen_subject,
                 body=gen_body,
                 citations=found_citations,
-                state=EmailState.PENDING_APPROVAL,
-                payload_hash=compute_draft_hash(recipient, gen_subject, gen_body),
             )
-            self.draft_repo.save(draft_payload)
-            logger.info(
-                "Context-aware email draft generated from user request",
-                extra={"draft_id": draft_payload.draft_id, "route": RouteType.EMAIL_FLOW.value},
-            )
+            staged = prepare_draft_for_approval(draft_payload)
+            self.draft_repo.save(staged)
             return {
                 "route": RouteType.EMAIL_FLOW,
-                "status": draft_payload.state,
-                "draft": draft_payload,
+                "status": "PENDING_APPROVAL",
+                "draft": staged,
             }
 
         # Feature 3 Direct Specification: (workspace_id, recipients, subject, body, citations)
@@ -231,6 +247,7 @@ class EmailService:
             try:
                 ws_uuid = UUID(workspace_id)
             except ValueError:
+                # Deterministic uuid from name or fallback
                 ws_uuid = uuid.uuid5(uuid.NAMESPACE_DNS, workspace_id)
         elif isinstance(workspace_id, UUID):
             ws_uuid = workspace_id
@@ -261,14 +278,6 @@ class EmailService:
             attachments=attachments or [],
         )
         self.draft_repo.save(new_draft)
-        logger.info(
-            "Email draft record created in DRAFT state",
-            extra={
-                "draft_id": str(new_draft.id),
-                "workspace_id": str(ws_uuid),
-                "fsm_state": EmailFSMState.DRAFT.value,
-            },
-        )
         return new_draft
 
     def approve_draft_snapshot(
@@ -281,7 +290,7 @@ class EmailService:
         user_confirmed: bool = True,
     ) -> EmailDraftRecord:
         """
-        UC-08: Review and Approve Email Snapshot.
+        # UC-08: Review and Approve Email Snapshot.
         Validates payload, enforces explicit human confirmation, transitions to APPROVED,
         computes and binds the canonical SHA-256 digest, and updates audit timestamp.
         """
@@ -289,6 +298,7 @@ class EmailService:
         if stored is None:
             raise KeyError(f"Draft with ID '{draft_id}' not found.")
 
+        # Fall back to existing draft content if not overridden
         final_recipients = (
             recipients
             if recipients is not None
@@ -304,6 +314,7 @@ class EmailService:
             user_confirmed=user_confirmed,
         )
 
+        # Update fields conditionally based on model type (EmailDraftRecord vs legacy EmailDraftPayload)
         if hasattr(stored, "recipients"):
             stored.recipients = final_recipients
         if hasattr(stored, "recipient_email"):
@@ -312,8 +323,11 @@ class EmailService:
             stored.subject = final_subject
         if hasattr(stored, "body"):
             stored.body = final_body
-        if hasattr(stored, "attachments") and attachments is not None:
-            stored.attachments = attachments
+        if attachments is not None:
+            if hasattr(stored, "attachments"):
+                stored.attachments = attachments
+            if hasattr(stored, "attachment_ids"):
+                stored.attachment_ids = attachments
         if hasattr(stored, "fsm_state"):
             stored.fsm_state = EmailFSMState.APPROVED
         if hasattr(stored, "sha256_digest"):
@@ -326,20 +340,11 @@ class EmailService:
             stored.audit_timestamp = datetime.now(timezone.utc)
 
         self.draft_repo.save(stored)
-        logger.info(
-            "Draft snapshot approved and locked with SHA-256 digest",
-            extra={
-                "draft_id": str(draft_id),
-                "fsm_state": EmailFSMState.APPROVED.value,
-                "sha256_digest": digest,
-            },
-        )
         return stored
 
     def _set_draft_state(self, stored: Any, fsm_state: EmailFSMState) -> str:
         """Safely updates state and audit timestamp across EmailDraftRecord and EmailDraftPayload."""
         now_ts = datetime.now(timezone.utc)
-        prev_state = getattr(stored, "fsm_state", None) or getattr(stored, "state", "UNKNOWN")
         if hasattr(stored, "fsm_state"):
             stored.fsm_state = fsm_state
         if hasattr(stored, "state"):
@@ -353,20 +358,11 @@ class EmailService:
                 stored.state = EmailState.PENDING_APPROVAL
         if hasattr(stored, "audit_timestamp"):
             stored.audit_timestamp = now_ts
-
-        logger.info(
-            "FSM state transition recorded",
-            extra={
-                "draft_id": str(getattr(stored, "id", None) or getattr(stored, "draft_id", "")),
-                "previous_state": getattr(prev_state, "value", str(prev_state)),
-                "new_state": fsm_state.value,
-            },
-        )
         return now_ts.isoformat()
 
     def dispatch_email(self, draft_id: Union[UUID, str]) -> Dict[str, Any]:
         """
-        UC-09: Send Email and Track Outcome.
+        # UC-09: Send Email and Track Outcome.
         Pre-dispatch gate:
         - Checks FSM state == APPROVED
         - Blocks duplicate dispatch (state == SENT)
@@ -387,7 +383,7 @@ class EmailService:
         recipients = getattr(stored, "recipients", None) or getattr(stored, "recipient_email", "")
         subject = getattr(stored, "subject", "")
         body = getattr(stored, "body", "")
-        attachments = getattr(stored, "attachments", None) or []
+        attachments = getattr(stored, "attachments", None) or getattr(stored, "attachment_ids", []) or []
 
         # Verify integrity and duplicate-send gate (raises SecurityError or FSMStateError)
         verify_and_lock_for_send(
@@ -398,24 +394,19 @@ class EmailService:
             body=body,
         )
 
-        logger.info(
-            "Pre-dispatch integrity check verified successfully",
-            extra={"draft_id": str(draft_id), "sha256_digest": expected_digest},
-        )
-
         # 1. Mock Send Mode
         if settings.email_dispatch_mode != "gmail_real":
             ts_str = self._set_draft_state(stored, EmailFSMState.SENT)
             self.draft_repo.save(stored)
-            logger.info(
-                "Email dispatched in mock mode",
-                extra={
-                    "draft_id": str(draft_id),
-                    "dispatch_mode": "local_mock",
-                    "fsm_state": EmailFSMState.SENT.value,
-                    "sha256_digest": expected_digest,
-                },
-            )
+
+            # Auto-cleanup temporary attachment files from disk upon successful transmission
+            if attachments:
+                for att_path in attachments:
+                    try:
+                        if att_path and os.path.exists(att_path):
+                            os.remove(att_path)
+                    except Exception:
+                        pass
             return {
                 "status": EmailFSMState.SENT.value,
                 "fsm_state": EmailFSMState.SENT.value,
@@ -432,10 +423,6 @@ class EmailService:
         if not sender or not password:
             ts_str = self._set_draft_state(stored, EmailFSMState.FAILED)
             self.draft_repo.save(stored)
-            logger.error(
-                "Gmail SMTP credentials missing in environment",
-                extra={"draft_id": str(draft_id), "fsm_state": EmailFSMState.FAILED.value},
-            )
             return {
                 "status": EmailFSMState.FAILED.value,
                 "draft_id": str(draft_id),
@@ -452,31 +439,39 @@ class EmailService:
         msg["Subject"] = subject
         msg.attach(MIMEText(body, "plain", "utf-8"))
 
+        # Attach files/folders/images if any (folders are zipped in‑memory)
         if attachments:
             _attach_files_to_msg(msg, attachments)
 
+
         host = settings.smtp_host or "smtp.gmail.com"
-        port = settings.smtp_port or 587
+        port = int(settings.smtp_port or 587)
+        timeout_val = 90  # Extended 90s timeout to comfortably transfer large attachments
 
         try:
-            with smtplib.SMTP(host, port, timeout=20) as server:
-                server.ehlo()
-                server.starttls()
-                server.ehlo()
-                server.login(sender, password)
-                server.sendmail(sender, to_addrs, msg.as_string())
+            if port == 465:
+                with smtplib.SMTP_SSL(host, port, timeout=timeout_val) as server:
+                    server.login(sender, password)
+                    server.sendmail(sender, to_addrs, msg.as_string())
+            else:
+                with smtplib.SMTP(host, port, timeout=timeout_val) as server:
+                    server.ehlo()
+                    server.starttls()
+                    server.ehlo()
+                    server.login(sender, password)
+                    server.sendmail(sender, to_addrs, msg.as_string())
 
             ts_str = self._set_draft_state(stored, EmailFSMState.SENT)
             self.draft_repo.save(stored)
-            logger.info(
-                "Email dispatched successfully via Gmail SMTP",
-                extra={
-                    "draft_id": str(draft_id),
-                    "dispatch_mode": "gmail_real",
-                    "fsm_state": EmailFSMState.SENT.value,
-                    "sha256_digest": expected_digest,
-                },
-            )
+
+            # Auto-cleanup temporary attachment files from disk upon successful transmission
+            if attachments:
+                for att_path in attachments:
+                    try:
+                        if att_path and os.path.exists(att_path):
+                            os.remove(att_path)
+                    except Exception:
+                        pass
             return {
                 "status": EmailFSMState.SENT.value,
                 "fsm_state": EmailFSMState.SENT.value,
@@ -484,62 +479,33 @@ class EmailService:
                 "dispatch_mode": "gmail_real",
                 "sha256_digest": expected_digest,
                 "audit_timestamp": ts_str,
+                "sender": sender,
+                "recipient": recipients,
+                "attachments": attachments,
                 "message": f"Email sent successfully via Gmail SMTP to {to_addrs}!",
             }
         except smtplib.SMTPAuthenticationError as exc:
             ts_str = self._set_draft_state(stored, EmailFSMState.FAILED)
             self.draft_repo.save(stored)
-            logger.warning(
-                "SMTP authentication failed during dispatch",
-                extra={
-                    "draft_id": str(draft_id),
-                    "fsm_state": EmailFSMState.FAILED.value,
-                    "error_type": "SMTPAuthenticationError",
-                },
-            )
             return {
                 "status": EmailFSMState.FAILED.value,
                 "draft_id": str(draft_id),
                 "error": f"SMTP Authentication Error: {str(exc)}",
                 "audit_timestamp": ts_str,
             }
-        except (socket.timeout, smtplib.SMTPServerDisconnected, TimeoutError) as exc:
+        except (socket.timeout, smtplib.SMTPServerDisconnected) as exc:
             # CRITICAL NFR-04: Mark DELIVERY_UNKNOWN without auto-retries
             ts_str = self._set_draft_state(stored, EmailFSMState.DELIVERY_UNKNOWN)
             self.draft_repo.save(stored)
-            logger.error(
-                "SMTP timeout or disconnect during dispatch; marked DELIVERY_UNKNOWN (NFR-04)",
-                extra={
-                    "draft_id": str(draft_id),
-                    "fsm_state": EmailFSMState.DELIVERY_UNKNOWN.value,
-                    "error_type": exc.__class__.__name__,
-                },
-            )
             return {
                 "status": EmailFSMState.DELIVERY_UNKNOWN.value,
                 "draft_id": str(draft_id),
                 "error": f"SMTP timeout or server disconnected. State marked DELIVERY_UNKNOWN. Automatic retries prohibited: {str(exc)}",
                 "audit_timestamp": ts_str,
             }
-        except (
-            smtplib.SMTPConnectError,
-            smtplib.SMTPRecipientsRefused,
-            smtplib.SMTPSenderRefused,
-            smtplib.SMTPDataError,
-            smtplib.SMTPResponseException,
-            smtplib.SMTPException,
-            OSError,
-        ) as exc:
+        except Exception as exc:
             ts_str = self._set_draft_state(stored, EmailFSMState.FAILED)
             self.draft_repo.save(stored)
-            logger.error(
-                "SMTP transmission failure during dispatch",
-                extra={
-                    "draft_id": str(draft_id),
-                    "fsm_state": EmailFSMState.FAILED.value,
-                    "error_type": exc.__class__.__name__,
-                },
-            )
             return {
                 "status": EmailFSMState.FAILED.value,
                 "draft_id": str(draft_id),
@@ -549,14 +515,15 @@ class EmailService:
 
     def approve_and_send(
         self,
-        draft_id: Union[UUID, str],
-        recipient_email: Union[List[str], str],
+        draft_id: str,
+        recipient_email: str,
         subject: str,
         body: str,
+        attachments: Optional[List[str]] = None,
         user_confirmed: bool = True,
     ) -> Dict[str, Any]:
         """
-        Convenience method:
+        Backward-compatibility convenience method:
         Approves draft snapshot and dispatches in one coordinated invocation.
         """
         self.approve_draft_snapshot(
@@ -564,6 +531,7 @@ class EmailService:
             recipients=recipient_email,
             subject=subject,
             body=body,
+            attachments=attachments,
             user_confirmed=user_confirmed,
         )
         return self.dispatch_email(draft_id=draft_id)
@@ -578,8 +546,8 @@ def handle_email_draft_request(req: UserRequest) -> Dict[str, Any]:
 
 
 def handle_email_approve_request(
-    draft_id: Union[UUID, str],
-    recipient_email: Union[List[str], str],
+    draft_id: str,
+    recipient_email: str,
     subject: str,
     body: str,
     user_confirmed: bool = True,

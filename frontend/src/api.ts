@@ -285,11 +285,14 @@ export function approveAndSend(draft: Draft, workspaceId?: string) {
   if (
     !validRecipient(draft.to) ||
     draft.cc.trim() ||
-    draft.attachmentIds?.length ||
-    draftPayload({ ...draft, ...draft.serverSnapshot }) !== draftPayload(draft)
+    draftPayload({
+      ...draft,
+      ...draft.serverSnapshot,
+      attachmentIds: draft.attachmentIds,
+    }) !== draftPayload(draft)
   )
     throw new ApiError(
-      "This version cannot be submitted. The current server accepts its staged single-recipient draft without attachments.",
+      "This version cannot be submitted. Review the draft snapshot before sending.",
     );
   if (
     !["PENDING_APPROVAL", "APPROVED", "FAILED_RETRYABLE"].includes(
@@ -303,6 +306,11 @@ export function approveAndSend(draft: Draft, workspaceId?: string) {
     body: draft.body,
     user_confirmed: "true",
   });
+  if (draft.attachmentIds?.length) {
+    for (const a of draft.attachmentIds) {
+      params.append("attachments", a);
+    }
+  }
   // This route approves AND sends. The button must explicitly describe both actions.
   return request<{
     status: EmailState;

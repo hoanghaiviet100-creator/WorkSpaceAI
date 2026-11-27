@@ -140,9 +140,9 @@
 - `ReconciliationSummary`: `coverage_ratio: float, overdue_count: int, conflict_count: int, item_reports: List[ReconciledItemReport]`
 - `GeneratedClaim`: `claim_text: str, cited_doc_id: str, cited_page: int, evidence_quote: str, verification_status: str, cited_start_line: Optional[int], cited_end_line: Optional[int], doc_version: Optional[str], doc_hash: Optional[str], match_score: float, matched_span: Optional[str], evidence_span: Optional[Dict[str, Any]]`
 - `CitationVerificationResult`: `validated_claims: List[GeneratedClaim], hallucination_flags: List[GeneratedClaim], grounding_score: float`
-- `EmailDraftRecord`: `id: UUID, workspace_id: UUID, recipients: Union[List[str], str], subject: str, body: str, fsm_state: EmailFSMState, sha256_digest: Optional[str], audit_timestamp: datetime, citations: List[str]`
-- `CreateDraftRequest`: `workspace_id: UUID, recipients: Union[List[str], str], subject: str, body: str, citations: Optional[List[str]]`
-- `ApproveDraftRequest`: `recipients: Optional[Union[List[str], str]], subject: Optional[str], body: Optional[str], user_confirmed: bool`
+- `EmailDraftRecord`: `id: UUID, workspace_id: UUID, recipients: Union[List[str], str], subject: str, body: str, fsm_state: EmailFSMState, sha256_digest: Optional[str], audit_timestamp: datetime, citations: List[str], attachments: List[str]`
+- `CreateDraftRequest`: `workspace_id: UUID, recipients: Union[List[str], str], subject: str, body: str, citations: Optional[List[str]], attachments: Optional[List[str]]`
+- `ApproveDraftRequest`: `recipients: Optional[Union[List[str], str]], subject: Optional[str], body: Optional[str], attachments: Optional[List[str]], user_confirmed: bool`
 - `EmailDraftPayload`: `draft_id: str, recipient_email: str, subject: str, body: str, attachment_ids: List[str], citations: List[str], state: EmailState, payload_hash: str, fsm_state: Optional[EmailFSMState], audit_timestamp: Optional[datetime]`
 - `EmailApproveRequest`: `recipient_email: str, subject: str, body: str, user_confirmed: bool`
 - `UserRequest`: `query: str, selected_doc_ids: Optional[List[str]], recipient_email: Optional[str], reference_date: date, conversation_history: List[Dict[str, str]]`
@@ -223,8 +223,8 @@
   - `extract_requirements_from_workspace(doc_ids: Optional[List[str]] = None) -> List[RequirementItem]`
   - `reconcile(reference_date: date, requirements: Optional[List[RequirementItem]] = None, tasks: Optional[List[TaskRecord]] = None) -> Dict[str, Any]`
 - `email_service.EmailService`:
-  - `create_draft(workspace_id=..., recipients=..., subject=..., body=..., citations=...) -> EmailDraftRecord`
-  - `approve_draft_snapshot(draft_id, recipients=..., subject=..., body=..., user_confirmed=True) -> EmailDraftRecord`
+  - `create_draft(workspace_id=..., recipients=..., subject=..., body=..., citations=..., attachments=...) -> EmailDraftRecord`
+  - `approve_draft_snapshot(draft_id, recipients=..., subject=..., body=..., attachments=..., user_confirmed=True) -> EmailDraftRecord`
   - `dispatch_email(draft_id) -> Dict[str, Any]`
   - `approve_and_send(draft_id, recipient_email, subject, body, user_confirmed=True) -> Dict[str, Any]`
 - `router_service`:

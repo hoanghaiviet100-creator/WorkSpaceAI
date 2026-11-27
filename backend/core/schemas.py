@@ -100,7 +100,6 @@ class GeneratedClaim(BaseModel):
     cited_doc_id: str
     cited_page: int
     evidence_quote: str
-    section: Optional[str] = None
     verification_status: str = "UNVERIFIED"
     cited_start_line: Optional[int] = None
     cited_end_line: Optional[int] = None
@@ -109,7 +108,6 @@ class GeneratedClaim(BaseModel):
     match_score: float = 0.0
     matched_span: Optional[str] = None
     evidence_span: Optional[Dict[str, Any]] = None
-    thinking: Optional[str] = None
 
 
 class CitationVerificationResult(BaseModel):
@@ -135,10 +133,8 @@ class EmailFSMState(str, Enum):
 
 
 class EmailDraftRecord(BaseModel):
-    """
-    Feature 3: Table EmailDraft in WorkspaceAI Database Schema.
-    Stores email draft with SHA-256 integrity hash, FSM state, and audit timestamp.
-    """
+    """Feature 3: Table EmailDraft in WorkspaceAI Database Schema.
+    Stores email draft with SHA-256 integrity hash, FSM state, and audit timestamp."""
     id: UUID = Field(default_factory=uuid.uuid4)
     workspace_id: UUID
     recipients: Union[List[str], str]
@@ -149,6 +145,7 @@ class EmailDraftRecord(BaseModel):
     audit_timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     citations: List[str] = Field(default_factory=list)
     attachments: List[str] = Field(default_factory=list)
+
 
 
 class CreateDraftRequest(BaseModel):
@@ -183,6 +180,7 @@ class EmailDraftPayload(BaseModel):
     subject: str
     body: str
     attachment_ids: List[str] = Field(default_factory=list)
+    attachments: List[str] = Field(default_factory=list)
     citations: List[str] = Field(default_factory=list)
     state: EmailState = EmailState.PENDING_APPROVAL
     payload_hash: str = ""
@@ -203,8 +201,6 @@ class UserRequest(BaseModel):
     recipient_email: Optional[str] = None
     reference_date: date = Field(default_factory=lambda: date(2026, 10, 26))
     conversation_history: List[Dict[str, str]] = Field(default_factory=list)
-    allow_reconciliation: bool = True
-    studio_tool: Optional[str] = None
 
 
 class DocumentSelectRequest(BaseModel):
@@ -226,3 +222,4 @@ class ProviderSelectRequest(BaseModel):
 
 class GeminiConfigRequest(BaseModel):
     api_key: str
+

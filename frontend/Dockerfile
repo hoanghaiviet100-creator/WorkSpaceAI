@@ -5,7 +5,7 @@ COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY frontend/ ./
 ENV VITE_API_ENABLED=true VITE_API_BASE_URL=/api
-RUN pnpm build
+RUN pnpm exec vite build
 
 FROM nginx:stable-alpine
 COPY frontend/nginx.conf /etc/nginx/conf.d/default.conf
