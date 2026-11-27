@@ -19,6 +19,7 @@ WorkspaceAI_Report_LaTeX_Package.zip
 .env
 *.env
 *.env.*
+!.env.example
 tests/
 report/
 reports/
