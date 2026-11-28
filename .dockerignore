@@ -23,3 +23,12 @@ tests/
 report/
 reports/
 .workspace_data/
+
+# F1 runtime: keep model/cache/history outside the build context.
+.venv-msys/
+.f1_latency/
+docs/f1_gpu/evidence/
+*.safetensors
+*.gguf
+# Dockerfile explicitly copies this public template.
+!.env.example

@@ -41,7 +41,7 @@ import { sha256, syncWorkspaceLibrary } from "./workflow-model";
 import DocumentInspector from "./DocumentInspector";
 import ActionMenu from "./ActionMenu";
 
-const ACCEPT = ".pdf,.docx,.pptx,.txt,.md,.csv";
+const ACCEPT = ".pdf,.txt,.md,.csv";
 const TYPES = ["PDF", "DOCX", "PPTX", "TXT", "MD", "CSV"];
 function FileIcon({ source }: { source: Source }) {
   const kind = source.kind.toLowerCase();
@@ -331,9 +331,9 @@ export default function Sources({
   };
   const ingest = async (file: File, replacement?: Source) => {
     const extension = file.name.split(".").pop()?.toLowerCase() || "";
-    if (!TYPES.includes(extension.toUpperCase()))
+    if (!["PDF", "TXT", "MD", "CSV"].includes(extension.toUpperCase()))
       throw new Error(
-        "Choose a PDF, Word (.docx), PowerPoint (.pptx), TXT, MD, or CSV file.",
+        "Choose a text-based PDF, TXT, MD, or CSV file.",
       );
     if (!file.size || file.size > 25 * 1024 * 1024)
       throw new Error(
@@ -794,7 +794,7 @@ export default function Sources({
               <Check size={13} />
               Answers use selected sources only
             </span>
-            <span>PDF · Word · PowerPoint · up to 25 MB per file</span>
+            <span>Text-based PDF · TXT · MD · CSV · up to 25 MB per file</span>
           </div>
           {dragging && (
             <div className="nb-drop-overlay">
@@ -849,7 +849,7 @@ export default function Sources({
               <Upload size={32} />
               <h3>Upload documents</h3>
               <p>
-                Text-based PDF, Word (.docx), PowerPoint (.pptx), TXT, MD, and
+                Text-based PDF, TXT, MD, and
                 CSV. Up to 25 MB per file.
               </p>
               {target.current && (

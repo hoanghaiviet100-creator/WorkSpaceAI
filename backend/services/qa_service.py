@@ -4,12 +4,54 @@ from backend.algorithms.citation_verifier import (
     CitationClaim,
     CitationVerificationResult as AlgoVerificationResult,
     verify_citations,
+    build_f1_citation_lookup,
 )
+from backend.algorithms.f1_claim_support import parse_bound_proposition, source_assertions
+from backend.services.f1_claim_support_service import F1SupportGate
 from backend.core.config import settings
 from backend.core.schemas import CitationVerificationResult, DocumentChunk, GeneratedClaim, RouteType
 from backend.providers.embedding_provider import embedding_provider
 from backend.providers.llm_provider import LLMProvider, llm_provider
 from backend.repositories.workspace_repository import WorkspaceRepository, workspace_repository
+
+
+def _covers_compound_request(query, claims):
+    """Reject incomplete output for structurally declared bounded compounds.
+
+    This only rejects incomplete output; it never grants citation or support.
+    The existing closed grammar handles identity, polarity, values and units.
+    """
+    quoted = list(re.finditer(r'["“]([^"”]+)["”]', query, re.DOTALL))
+    spans = [match.group(1) for match in quoted]
+    spans.append(query.strip().rstrip("?.!"))
+    required = []
+    for left, right in zip(quoted, quoted[1:]):
+        if re.fullmatch(r"\s+(?:and|và)\s+", query[left.end():right.start()], re.IGNORECASE):
+            atoms = [parse_bound_proposition(match.group(1)) for match in (left, right)]
+            if any(atom is not None for atom in atoms):
+                if any(atom is None for atom in atoms):
+                    return False
+                required.extend(atoms)
+    for span in spans:
+        parts = re.split(r"\s+(?:and|và)\s+", span, flags=re.IGNORECASE)
+        if len(parts) < 2:
+            continue
+        atoms = [parse_bound_proposition(part) for part in parts]
+        # Titles and phrases without a recognized proposition do not create
+        # an assertion. A partially recognized compound cannot grant coverage.
+        if not any(atom is not None for atom in atoms):
+            continue
+        if any(atom is None for atom in atoms):
+            return False
+        required.extend(atoms)
+    if not required:
+        return True
+    covered = set()
+    for claim in claims:
+        for part in re.split(r"\s+(?:and|và)\s+", claim.claim_text, flags=re.IGNORECASE):
+            covered.update(p for text in source_assertions(part)
+                           if (p := parse_bound_proposition(text)) is not None)
+    return all(part in covered for part in required)
 
 
 def claim_schema_to_algorithm(claim: GeneratedClaim) -> CitationClaim:
@@ -118,122 +160,12 @@ def expand_contextual_query(query: str, history: Optional[List[Dict[str, str]]])
 
 
 def align_claim_to_chunks(claim: GeneratedClaim, chunks: List[DocumentChunk]) -> GeneratedClaim:
+    """Preserve original evidence; strict verification owns same-document locator correction.
+
+    Keep this observable pipeline stage without substituting source text for a
+    rejected quote or changing identity based on retrieval order.
     """
-    Step 2.5: Normalizes and aligns citation coordinates.
-    Finds exact or high-token-overlap matches in retrieved candidate chunks,
-    snapping the line numbers, doc_id, doc_version, and doc_hash to the exact physical coordinates.
-    """
-    if not chunks:
-        return claim
-
-    quote_clean = claim.evidence_quote.strip().lower()
-    if not quote_clean:
-        return claim
-
-    # 1. Exact substring match in retrieved candidate chunks
-    for chunk in chunks:
-        chunk_text_lower = chunk.text.lower()
-        if quote_clean in chunk_text_lower:
-            preceding_text = chunk_text_lower.split(quote_clean, 1)[0]
-            start_offset = preceding_text.count("\n")
-            quote_lines = quote_clean.count("\n")
-
-            base_line = chunk.start_line if chunk.start_line is not None else 1
-            actual_start_line = base_line + start_offset
-            actual_end_line = actual_start_line + quote_lines
-
-            return GeneratedClaim(
-                claim_text=claim.claim_text,
-                cited_doc_id=chunk.doc_id,
-                cited_page=chunk.page_number,
-                cited_start_line=actual_start_line,
-                cited_end_line=actual_end_line,
-                doc_version=chunk.doc_version,
-                doc_hash=chunk.doc_hash,
-                evidence_quote=claim.evidence_quote,
-                verification_status=claim.verification_status,
-                match_score=1.0,
-                matched_span=claim.evidence_quote,
-            )
-
-    # 2. Punctuation-stripped substring match
-    q_norm = re.sub(r"[^\w\s]", "", quote_clean).strip()
-    if len(q_norm) >= 10:
-        for chunk in chunks:
-            c_norm = re.sub(r"[^\w\s]", "", chunk.text.lower())
-            if q_norm in c_norm:
-                lines = chunk.text.splitlines()
-                best_l = 0
-                max_w = 0
-                q_words = set(q_norm.split())
-                for l_idx, l in enumerate(lines):
-                    common_w = len(q_words.intersection(set(re.sub(r"[^\w\s]", "", l.lower()).split())))
-                    if common_w > max_w:
-                        max_w = common_w
-                        best_l = l_idx
-
-                base_line = chunk.start_line if chunk.start_line is not None else 1
-                matched_line = lines[best_l].strip() if best_l < len(lines) else chunk.text[:120]
-                return GeneratedClaim(
-                    claim_text=claim.claim_text,
-                    cited_doc_id=chunk.doc_id,
-                    cited_page=chunk.page_number,
-                    cited_start_line=base_line + best_l,
-                    cited_end_line=base_line + best_l,
-                    doc_version=chunk.doc_version,
-                    doc_hash=chunk.doc_hash,
-                    evidence_quote=matched_line,
-                    verification_status="VERIFIED_EXACT",
-                    match_score=1.0,
-                    matched_span=matched_line,
-                )
-
-    # 3. Token Jaccard overlap match (fuzzy alignment for paraphrased quotes)
-    q_words = set(re.findall(r"\w+", quote_clean))
-    if len(q_words) >= 3:
-        best_chunk = None
-        best_overlap = 0.0
-        for chunk in chunks:
-            c_words = set(re.findall(r"\w+", chunk.text.lower()))
-            if not c_words:
-                continue
-            common = q_words.intersection(c_words)
-            overlap = len(common) / len(q_words)
-            if overlap > best_overlap:
-                best_overlap = overlap
-                best_chunk = chunk
-
-        if best_chunk and best_overlap >= 0.55:
-            lines = best_chunk.text.splitlines()
-            best_l_idx = 0
-            best_l_overlap = 0
-            for l_idx, l in enumerate(lines):
-                l_words = set(re.findall(r"\w+", l.lower()))
-                common_l = len(q_words.intersection(l_words))
-                if common_l > best_l_overlap:
-                    best_l_overlap = common_l
-                    best_l_idx = l_idx
-
-            base_line = best_chunk.start_line if best_chunk.start_line is not None else 1
-            start_l = base_line + best_l_idx
-            matched_line = lines[best_l_idx].strip() if best_l_idx < len(lines) else best_chunk.text[:120]
-            evidence = matched_line if len(matched_line) >= 15 else best_chunk.text[:120]
-
-            return GeneratedClaim(
-                claim_text=claim.claim_text,
-                cited_doc_id=best_chunk.doc_id,
-                cited_page=best_chunk.page_number,
-                cited_start_line=start_l,
-                cited_end_line=start_l + max(1, quote_clean.count("\n")),
-                doc_version=best_chunk.doc_version,
-                doc_hash=best_chunk.doc_hash,
-                evidence_quote=evidence,
-                verification_status="VERIFIED_FUZZY",
-                match_score=round(best_overlap, 4),
-                matched_span=evidence,
-            )
-
-    return claim
+    return claim.model_copy(deep=True)
 
 
 def resolve_summary_target(
@@ -305,153 +237,45 @@ def resolve_summary_target(
 def parse_summary_into_section_claims(
     summary_text: str, chunks: List[DocumentChunk]
 ) -> List[GeneratedClaim]:
+    """Conservative extractive fallback: whole chunks preserve qualifications.
+
+    Generated prose is never treated as correctness evidence. This helper emits
+    unverified candidates; the shared citation/support gate owns every verdict.
     """
-    Parses a comprehensive Markdown summary into distinct, high-level section claims.
-    Prevents duplicating the full text across all pages and formats clean cards for the UI.
-    """
-    claims: List[GeneratedClaim] = []
+    return [GeneratedClaim(claim_text=c.text, cited_doc_id=c.doc_id,
+        cited_page=c.page_number, cited_start_line=c.start_line, cited_end_line=c.end_line,
+        doc_version=c.doc_version, doc_hash=c.doc_hash, evidence_quote=c.text)
+        for c in chunks[:4] if c.text.strip()]
 
-    # Normalize text in case LLM outputs headers without newlines (e.g. "...text. #### 3. ...")
-    norm_summary = re.sub(r"\s*(#{2,4}\s+)", r"\n\n\1", summary_text.strip())
 
-    page_to_chunk: Dict[int, DocumentChunk] = {}
-    for c in chunks:
-        if c.page_number not in page_to_chunk:
-            page_to_chunk[c.page_number] = c
-    sorted_pages = sorted(page_to_chunk.keys()) if page_to_chunk else [1]
+def generate_suggested_prompts(doc_name, claims=None, query=None):
+    # Questions add no source-specific factual assertions.
+    return ["Tài liệu nêu những yêu cầu nào?", "Những điều kiện nào cần lưu ý?",
+            "Có thể trích dẫn nội dung liên quan không?"]
 
-    # Split cleanly by section headings (### or ####)
-    raw_sections = re.split(r"\n(?=#{2,4}\s+)", norm_summary.strip())
-    parsed_sections: List[Tuple[str, str]] = []
-    for s in raw_sections:
-        lines = s.strip().split("\n", 1)
-        header = re.sub(r"^#{2,4}\s+", "", lines[0]).strip()
-        body = lines[1].strip() if len(lines) > 1 else ""
-        if not body or any(header.startswith(p) for p in ["📄", "📚", "📊", "Tóm tắt", "Cẩm nang"]):
-            continue
-        parsed_sections.append((header, body))
 
-    if parsed_sections and len(parsed_sections) >= 2:
-        for idx, (clean_header, clean_body) in enumerate(parsed_sections):
-            target_page = sorted_pages[min(idx, len(sorted_pages) - 1)]
-            chunk = page_to_chunk.get(target_page, chunks[0])
-
-            claims.append(
-                GeneratedClaim(
-                    section=clean_header,
-                    claim_text=clean_body,
-                    cited_doc_id=chunk.doc_id,
-                    cited_page=chunk.page_number,
-                    cited_start_line=chunk.start_line,
-                    cited_end_line=chunk.end_line,
-                    doc_version=chunk.doc_version,
-                    doc_hash=chunk.doc_hash,
-                    evidence_quote=chunk.text[:120],
-                    verification_status="VERIFIED_EXACT",
-                )
-            )
-            
-    if not claims:
-        # Fallback: break into paragraphs
-        paragraphs = [p.strip() for p in summary_text.split("\n\n") if len(p.strip()) > 30 and not p.strip().startswith("###")]
-        if not paragraphs:
-            paragraphs = [summary_text.strip()]
-            
-        for idx, p in enumerate(paragraphs[:4]):
-            target_page = sorted_pages[min(idx, len(sorted_pages) - 1)]
-            chunk = page_to_chunk.get(target_page, chunks[0])
-            is_academic = any(w in summary_text.lower() for w in ["chuyên đề", "viét", "vi-ét", "toán", "công thức", "định lý", "học tập", "cẩm nang", "phương trình"])
-            if is_academic:
-                titles = ["Tổng quan Mục tiêu", "Khung Lý thuyết & Công thức", "Phân loại Dạng bài", "Bẫy Sai lầm & Gợi ý"]
+def _authorized_chunks(chunks, retrieved, selected):
+    if selected is None:
+        ids = {c.doc_id for c in retrieved}
+    else:
+        ids = set()
+        canonical = {c.doc_id.casefold(): c.doc_id for c in chunks}
+        for name in selected:
+            if name.casefold() in canonical:
+                ids.add(canonical[name.casefold()])
             else:
-                titles = ["Tổng quan", "Yêu cầu kỹ thuật", "Hạn chót & Định lượng", "Khuyến nghị"]
-            section_title = titles[idx] if idx < len(titles) else f"Phần {idx + 1}"
-            claims.append(
-                GeneratedClaim(
-                    section=section_title,
-                    claim_text=p,
-                    cited_doc_id=chunk.doc_id,
-                    cited_page=chunk.page_number,
-                    cited_start_line=chunk.start_line,
-                    cited_end_line=chunk.end_line,
-                    doc_version=chunk.doc_version,
-                    doc_hash=chunk.doc_hash,
-                    evidence_quote=chunk.text[:120],
-                    verification_status="VERIFIED_EXACT",
-                )
-            )
-            
-    return claims
+                aliases = {c.doc_id for c in chunks if c.doc_name.casefold() == name.casefold()}
+                if len(aliases) == 1:
+                    ids.update(aliases)
+    return [c for c in chunks if c.doc_id in ids]
 
 
-def generate_suggested_prompts(
-    doc_name: str,
-    claims: Optional[List[GeneratedClaim]] = None,
-    query: Optional[str] = None,
-) -> List[str]:
-    """
-    Generates 3 contextual, high-value suggested follow-up prompts for the user.
-    """
-    full_text = " ".join([c.claim_text for c in (claims or [])]).lower()
-    doc_lower = doc_name.lower()
-    q_lower = (query or "").lower()
-
-    # Case 0: Academic Study / Math / Science / Exam Prep
-    if any(w in full_text or w in doc_lower for w in ["viét", "vi-ét", "viet", "phương trình", "bậc hai", "hệ thức", "nghiệm", "định lý", "tam thức", "công thức", "toán", "đại số", "chuyên đề"]):
-        if any(w in q_lower for w in ["dấu", "dương", "âm", "trái dấu"]):
-            return [
-                "Điều kiện để phương trình có 2 nghiệm phân biệt cùng dương là gì?",
-                "Khi nào phương trình bậc hai có 2 nghiệm trái dấu?",
-                "Cách áp dụng dấu của nghiệm vào bài toán tìm tham số m?",
-            ]
-        if any(w in q_lower for w in ["dạng", "bài tập", "phương pháp", "giải"]):
-            return [
-                "Phương pháp biến đổi biểu thức đối xứng x1^2 + x2^2 về S và P?",
-                "Các bước giải bài toán tìm hai số khi biết tổng và tích?",
-                "Những bẫy sai lầm kinh điển cần tránh khi áp dụng hệ thức Vi-ét?",
-            ]
-        return [
-            "Hệ thức Vi-ét và điều kiện bắt buộc trước khi áp dụng là gì?",
-            "Phương pháp tính giá trị biểu thức đối xứng mà không cần giải phương trình?",
-            "Điều kiện để phương trình có 2 nghiệm cùng mang dấu dương?",
-        ]
-
-    # Case 1: Sorting algorithms project
-    if any(w in full_text or w in doc_lower for w in ["thuật toán", "sắp xếp", "sorting", "sort", "quicksort", "mergesort", "radix"]):
-        if any(w in q_lower for w in ["bao nhiêu", "danh sách", "gồm những"]):
-            return [
-                "Lệnh biên dịch và chạy 12 thuật toán là gì?",
-                "Quy định về định dạng file input.txt và output.txt?",
-                "4 kiểu dữ liệu kiểm thử (ngẫu nhiên, có thứ tự, ngược, gần như) là gì?",
-            ]
-        return [
-            "Danh sách 12 thuật toán sắp xếp cần cài đặt?",
-            "Lệnh biên dịch mã nguồn C/C++ là gì?",
-            "Quy định về thời gian chạy và số phép so sánh?",
-        ]
-
-    # Case 2: Lab 06 AI / RAG / Assistant project
-    if any(w in full_text or w in doc_lower for w in ["lab06", "lab 06", "rag", "retrieval", "llm", "csc10014", "grounding"]):
-        return [
-            "Kiến trúc 3 luồng xử lý (The Three Paths) gồm những luồng nào?",
-            "Cơ chế Grounding check và kiểm tra trích dẫn hoạt động ra sao?",
-            "Quy định dạy AI biết từ chối trả lời (Abstain) khi thiếu dữ liệu?",
-        ]
-
-    # Case 3: Project Brief / Academic Deliverables
-    if any(w in full_text or w in doc_lower for w in ["project_brief", "submission", "deadline", "báo cáo", "hạn chót", "nộp bài"]):
-        return [
-            "Gói nộp bài (Submission Package) gồm những thành phần nào?",
-            "5 tiêu chuẩn kỹ thuật cốt lõi R1 đến R5 là gì?",
-            "Chính sách trừ điểm khi nộp muộn không báo trước?",
-        ]
-
-    # Case 4: Default smart overview prompts
-    return [
-        "Các yêu cầu kỹ thuật và tiêu chuẩn cốt lõi là gì?",
-        "Hạn chót và các con số định lượng quan trọng trong file?",
-        "Những lưu ý và khuyến nghị thực thi quan trọng nhất?",
-    ]
+def _redacted_flags(claims):
+    # Rejected factual text/explanations must not reappear in the API response.
+    return [c.model_copy(update=dict(claim_text="", evidence_quote="", thinking=None,
+        section=None, matched_span=None, evidence_span=None, cited_doc_id="", cited_page=0,
+        cited_start_line=None, cited_end_line=None, doc_version=None, doc_hash=None,
+        match_score=0.0)) for c in claims]
 
 
 class QAService:
@@ -462,7 +286,9 @@ class QAService:
         repository: Optional[WorkspaceRepository] = None,
         provider: Optional[LLMProvider] = None,
         embed_provider: Optional[Any] = None,
+        support_gate: Optional[F1SupportGate] = None,
     ) -> None:
+        self.support_gate = support_gate or F1SupportGate()
         self.repository = repository or workspace_repository
         self.provider = provider or llm_provider
         self.embed_provider = embed_provider or embedding_provider
@@ -472,65 +298,86 @@ class QAService:
             if embed_fn is not None:
                 self.repository.set_embed_fn(embed_fn)
 
-    def summarize_document(self, doc_id: str) -> Dict[str, Any]:
-        """Summarizes a specific document in the workspace using the active LLM or deterministic engine."""
-        chunks = self.repository.get_document_chunks(doc_id)
-        if not chunks:
-            # If not found by exact id, try matching substring or stem without extension
-            clean_id = doc_id.lower().replace(".pdf", "").replace(".txt", "").replace(".csv", "").strip()
-            matching = [
-                c for c in self.repository.chunks
-                if doc_id.lower() in c.doc_id.lower()
-                or doc_id.lower() in c.doc_name.lower()
-                or clean_id in c.doc_id.lower()
-                or clean_id in c.doc_name.lower()
-            ]
-            chunks = matching
-            if not chunks:
-                return {
-                    "route": RouteType.QA_FLOW,
-                    "status": "DOCUMENT_NOT_FOUND",
-                    "message": f"Không tìm thấy tài liệu `{doc_id}` trong Workspace để tóm tắt.",
-                    "summary": "",
-                    "grounding_score": 0.0,
-                    "validated_claims": [],
-                    "hallucination_flags": [],
-                }
+    def _verify_output(self, candidates, source_chunks, match_threshold=None):
+        citation_result = verify_citations([claim_schema_to_algorithm(c) for c in candidates],
+            build_f1_citation_lookup(source_chunks), strict=True, allow_locator_correction=False,
+            theta_match=match_threshold if match_threshold is not None else settings.theta_match)
+        verified = verification_result_to_schema(citation_result)
+        gate = getattr(self, 'support_gate', None) or F1SupportGate()
+        supported, rejected, decisions = gate.verify_claims(verified.validated_claims, source_chunks)
+        flags = _redacted_flags(verified.hallucination_flags + rejected)
+        score = round(len(supported) / max(1, len(candidates)), 4)
+        return supported, flags, score
 
+    def summarize_document(self, doc_id: str, selected_doc_ids=None) -> Dict[str, Any]:
+        # Resolve only exact authorized identities/names; no substring rescue.
+        all_chunks = self.repository.chunks
+        request_chunks = _authorized_chunks(all_chunks, [], selected_doc_ids if selected_doc_ids is not None else [doc_id])
+        chunks = [c for c in request_chunks if doc_id.casefold() in (c.doc_id.casefold(), c.doc_name.casefold())]
+        if not chunks or len({c.doc_id for c in chunks}) != 1:
+            return dict(route=RouteType.QA_FLOW, status="ABSTAINED_INSUFFICIENT_EVIDENCE",
+                summary="", grounding_score=0.0, validated_claims=[], hallucination_flags=[],
+                citations=[], thinking=None)
         doc_name = chunks[0].doc_name
-        summary_text = self.provider.generate_summary(doc_name, chunks)
-        section_claims = parse_summary_into_section_claims(summary_text, chunks)
-        suggested = generate_suggested_prompts(doc_name, section_claims)
+        # Keep the existing generation failure contract. Its output is only a
+        # proposal; the served summary uses the bounded extractive fallback.
+        proposal = self.provider.generate_summary(doc_name, chunks)
+        candidates = parse_summary_into_section_claims(proposal, chunks)
+        supported, flags, score = self._verify_output(candidates, request_chunks)
+        if not supported:
+            return dict(route=RouteType.QA_FLOW, status="ABSTAINED_INSUFFICIENT_EVIDENCE",
+                doc_name=doc_name, summary="", grounding_score=0.0, validated_claims=[],
+                hallucination_flags=flags, citations=[], thinking=None)
+        return dict(route=RouteType.QA_FLOW, status="SUMMARY_GENERATED", doc_name=doc_name,
+            summary="\n\n".join(c.claim_text for c in supported), grounding_score=score,
+            validated_claims=supported, hallucination_flags=flags, thinking=None,
+            citations=[f"{c.cited_doc_id} (Trang {c.cited_page}, Dòng {c.cited_start_line}-{c.cited_end_line})" for c in supported],
+            suggested_questions=generate_suggested_prompts(doc_name, supported))
 
-        thinking_text = None
-        if "> 💭" in summary_text:
-            thinking_lines = []
-            for line in summary_text.splitlines():
-                if line.startswith(">"):
-                    clean_l = (
-                        line.lstrip("> ")
-                        .replace("**Tư duy Sư phạm & Phân tích Cấu trúc (Reasoning Process)**:", "")
-                        .replace("**Phân tích Kiến trúc & Chuỗi Suy luận (Reasoning Process)**:", "")
-                        .strip()
-                    )
-                    if clean_l and not clean_l.startswith("["):
-                        thinking_lines.append(clean_l)
-                elif thinking_lines:
-                    break
-            if thinking_lines:
-                thinking_text = "\n".join(thinking_lines)
-
-        return {
-            "route": RouteType.QA_FLOW,
-            "status": "SUMMARY_GENERATED",
-            "doc_name": doc_name,
-            "summary": summary_text,
-            "grounding_score": 1.0,
-            "validated_claims": section_claims,
-            "hallucination_flags": [],
-            "suggested_questions": suggested,
-            "thinking": thinking_text,
-        }
+    def _answer_evidence_question(self, query, top_k, selected_doc_ids, conversation_history, tau_rel):
+        from backend.services.f1_evidence_profile_service import F1EvidenceProfileService,generate_evidence_claims
+        from backend.core.schemas import EvidenceProfileVerification
+        gate=F1EvidenceProfileService(self.repository)
+        chunks,identities=gate._scope(selected_doc_ids)
+        if not chunks:
+            return dict(route=RouteType.QA_FLOW,status='ABSTAINED_NO_SOURCE_SELECTED',
+                message='Chưa chọn tài liệu nguồn nào.',citations=[],validated_claims=[],hallucination_flags=[])
+        dense=bool(self.repository.dense_available)
+        retrieval_query=expand_contextual_query(query,conversation_history)
+        weighted=f'{query} {query} {query} {retrieval_query}' if retrieval_query!=query else query
+        found=self.repository.search(weighted,top_k=top_k,selected_doc_ids=[d[0] for d in identities])
+        minimum=tau_rel if tau_rel is not None else min(settings.dense_tau_rel if dense else settings.bm25_tau_rel,
+                                                       .20 if dense else .25)
+        if not found or found[0].score<minimum:
+            return dict(route=RouteType.QA_FLOW,status='ABSTAINED_INSUFFICIENT_EVIDENCE',
+                message='Không tìm thấy đủ bằng chứng trong các tài liệu đã chọn.',
+                citations=[],validated_claims=[],hallucination_flags=[],dense_available=dense)
+        # Existing request nonce map and exact excerpt binding stay authoritative.
+        raw=generate_evidence_claims(self.provider,query,found,conversation_history)
+        result=gate.verify_claims(raw,[d[0] for d in identities])
+        if result['status']=='SOURCE_SUPPORTED' and not _covers_compound_request(query,raw):
+            result.update(status='ABSTAINED_INSUFFICIENT_EVIDENCE',answer=None,citations=[])
+            for claim in result['verification']['claims']:
+                claim.update(disposition='INSUFFICIENT_EVIDENCE',reason='INCOMPLETE_COMPOUND_ANSWER')
+        if any(c['disposition']=='CONFIRMED_CONFLICT' for c in result['verification']['claims']):
+            result['status']='SOURCE_CONFLICT'
+        for claim in result['verification']['claims']:
+            for competing in claim['competing_evidence']:
+                if competing['relation']=='AMBIGUOUS':competing['relation']='UNRESOLVED'
+        result['verification']=EvidenceProfileVerification(**result['verification']).model_dump()
+        result.pop('retrieval_log',None)  # Detailed search audit belongs in instrumentation.
+        result.update(route=RouteType.QA_FLOW,dense_available=dense,hallucination_flags=[])
+        if result['status']=='SOURCE_SUPPORTED':
+            result['message']=result['verification']['limitations'][0]
+            result['citations']=[f"{c['doc_id']} (Trang {c['page']}, Dòng {c['line_start']}-{c['line_end']})"
+                for claim in result['verification']['claims'] for c in claim['citations']]
+        elif result['status']=='SOURCE_CONFLICT':
+            result['message']='Nguồn có thông tin mâu thuẫn về nhận định này.'
+        elif any(c['disposition']=='INSUFFICIENT_CONFLICT_COVERAGE' for c in result['verification']['claims']):
+            result['message']='Chưa đủ độ bao phủ để kết luận; có bằng chứng cần đối chiếu.'
+        else:
+            result['message']='Không đủ bằng chứng hỗ trợ toàn bộ câu trả lời.'
+        return result
 
     def answer_question(
         self,
@@ -540,7 +387,12 @@ class QAService:
         conversation_history: Optional[List[Dict[str, str]]] = None,
         tau_rel: Optional[float] = None,
         theta_match: Optional[float] = None,
+        verification_profile: str = "strict",
     ) -> Dict[str, Any]:
+        if verification_profile == "evidence_centric_v0":
+            return self._answer_evidence_question(query,top_k,selected_doc_ids,conversation_history,tau_rel)
+        if verification_profile != "strict":
+            raise ValueError("UNKNOWN_VERIFICATION_PROFILE")
         # 1. Rule: Explicit empty document selection must abstain immediately
         if selected_doc_ids is not None and len(selected_doc_ids) == 0:
             return {
@@ -567,7 +419,7 @@ class QAService:
         if any(w in q_lower for w in summary_keywords):
             target_doc = resolve_summary_target(query, self.repository, selected_doc_ids)
             if target_doc:
-                return self.summarize_document(target_doc)
+                return self.summarize_document(target_doc, selected_doc_ids)
 
         dense_active = getattr(self.repository, "dense_available", False)
         default_min_score = settings.dense_tau_rel if dense_active else settings.bm25_tau_rel
@@ -587,6 +439,9 @@ class QAService:
 
         # 4. Hybrid RRF Retrieval
         retrieved = self.repository.search(weighted_query, top_k=effective_top_k, selected_doc_ids=selected_doc_ids)
+        source_chunks = _authorized_chunks(self.repository.chunks, retrieved, selected_doc_ids)
+        authorized_ids = {c.doc_id for c in source_chunks}
+        retrieved = [c for c in retrieved if c.doc_id in authorized_ids]
         # Adaptive threshold: allow top-ranked chunks with score >= 0.20 when dense active, unless caller explicitly enforces tau_rel
         if tau_rel is not None:
             effective_min_score = tau_rel
@@ -612,63 +467,33 @@ class QAService:
             conversation_history=conversation_history,
         )
 
-        # 5. Snap claims to exact chunk coordinates (Step 2.5) while preserving hallucination detection
+        # 5. Preserve submitted claims/evidence through the observable alignment stage.
         aligned_claims = [align_claim_to_chunks(c, retrieved) for c in raw_claims]
 
-        # 6. Deterministic Citation Verification (pure Python stdlib)
-        algo_claims = [claim_schema_to_algorithm(c) for c in aligned_claims]
-        algo_verification = verify_citations(
-            algo_claims,
-            self.repository.build_page_lookup(),
-            theta_match=match_threshold,
-        )
-        verification = verification_result_to_schema(algo_verification)
+        # Citation integrity -> deterministic/NLI support -> conflict -> output validation.
+        supported, flags, score = self._verify_output(aligned_claims, source_chunks, match_threshold)
+        verification = CitationVerificationResult(validated_claims=supported,
+            hallucination_flags=flags, grounding_score=score)
 
-        # 7. Rule: If every claim fails citation verification -> check for soft recovery before abstaining
-        if not verification.validated_claims:
-            if retrieved and raw_claims and raw_claims[0].claim_text.strip():
-                top_chunk = retrieved[0]
-                lines = [l.strip() for l in top_chunk.text.splitlines() if len(l.strip()) >= 15]
-                lead_quote = lines[0] if lines else top_chunk.text[:120]
-                recovered_claim = GeneratedClaim(
-                    claim_text=raw_claims[0].claim_text,
-                    cited_doc_id=top_chunk.doc_id,
-                    cited_page=top_chunk.page_number,
-                    cited_start_line=top_chunk.start_line,
-                    cited_end_line=top_chunk.end_line,
-                    doc_version=top_chunk.doc_version,
-                    doc_hash=top_chunk.doc_hash,
-                    evidence_quote=lead_quote,
-                    verification_status="VERIFIED_FUZZY",
-                    match_score=0.75,
-                )
-                verification.validated_claims = [recovered_claim]
-                verification.grounding_score = 0.75
-            else:
-                return {
-                    "route": RouteType.QA_FLOW,
-                    "status": "ABSTAINED_INSUFFICIENT_EVIDENCE",
-                    "message": "Không tìm thấy đủ bằng chứng đã được kiểm chứng trích lục trong các tài liệu để trả lời câu hỏi này.",
-                    "citations": [],
-                    "dense_available": dense_active,
-                    "validated_claims": [],
-                    "hallucination_flags": verification.hallucination_flags,
-                    "grounding_score": 0.0,
-                }
+        # R2 rejection is authoritative: no quote substitution or synthetic acceptance.
+        coverage_ok = _covers_compound_request(query, verification.validated_claims)
+        if not verification.validated_claims or not coverage_ok:
+            return {
+                "route": RouteType.QA_FLOW,
+                "status": "ABSTAINED_INSUFFICIENT_EVIDENCE",
+                "message": "Không tìm thấy đủ bằng chứng đã được kiểm chứng trích lục trong các tài liệu để trả lời câu hỏi này.",
+                "citations": [],
+                "dense_available": dense_active,
+                "validated_claims": [],
+                "hallucination_flags": verification.hallucination_flags,
+                "grounding_score": verification.grounding_score if coverage_ok else 0.0,
+            }
 
         citations = []
-        # Preserve reasoning/thinking from raw claims
-        thinking_text = None
-        for rc in raw_claims:
-            if getattr(rc, "thinking", None):
-                thinking_text = rc.thinking
-                break
-
+        thinking_text = None  # P1: no factual explanation inherits a claim verdict.
         for c in verification.validated_claims:
-            line_str = f", Dòng {c.cited_start_line}-{c.cited_end_line}" if c.cited_start_line and c.cited_end_line else ""
+            line_str = f", Dòng {c.cited_start_line}-{c.cited_end_line}"
             citations.append(f"{c.cited_doc_id} (Trang {c.cited_page}{line_str})")
-            if not getattr(c, "thinking", None) and thinking_text:
-                c.thinking = thinking_text
 
         primary_doc = verification.validated_claims[0].cited_doc_id if verification.validated_claims else "Tài liệu"
         suggested = generate_suggested_prompts(primary_doc, verification.validated_claims, query)

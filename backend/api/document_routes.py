@@ -1,6 +1,9 @@
+import os
 from typing import Any, Dict, List
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from pypdf.errors import PdfReadError
 from backend.core.schemas import DocumentImportUrlRequest, DocumentRenameRequest, DocumentSelectRequest
+from backend.providers.embedding_provider import EmbeddingError
 from backend.services.document_service import document_service
 
 router = APIRouter(prefix="/api/documents", tags=["Document Library"])
@@ -27,20 +30,32 @@ async def upload_document(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="Tên tệp không hợp lệ.")
 
     try:
-        content_bytes = await file.read()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Không thể đọc tệp tải lên: {str(e)}")
+        content_bytes = await file.read(25 * 1024 * 1024 + 1)
+        if len(content_bytes) > 25 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="Document is larger than the 25 MiB upload limit.")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="Không thể đọc tệp tải lên.") from None
 
     if not content_bytes:
         raise HTTPException(status_code=400, detail="Tệp tải lên rỗng.")
 
     try:
-        result = document_service.ingest_file(file.filename, content_bytes)
+        if os.getenv('F1_EMBEDDING_BACKEND') == 'fastembed_cpu':
+            from backend.services.f1_session_store import retain_original
+            retain_original(content_bytes)
+        import asyncio
+        result = await asyncio.to_thread(document_service.ingest_file, file.filename, content_bytes)
         return result
+    except EmbeddingError:
+        raise
+    except PdfReadError:
+        raise HTTPException(status_code=400, detail="The PDF is invalid or unreadable. Upload a valid text-based PDF.") from None
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý tài liệu: {str(e)}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="Lỗi khi xử lý tài liệu.") from None
 
 
 @router.delete("/{doc_id}")
@@ -92,6 +107,8 @@ def import_document_url(req: DocumentImportUrlRequest) -> Dict[str, Any]:
     POST /api/documents/import-url
     Imports web reference link as a document in the library.
     """
+    if os.getenv("F1_SESSION_B", "false").lower() == "true":
+        raise HTTPException(status_code=400, detail="Use uploaded documents. URL import is disabled.")
     return document_service.import_url(req.url, req.title)
 
 

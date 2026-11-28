@@ -3122,3 +3122,5 @@ mark {
   font-size: 12px;
 }@media(max-width:640px){.file-chip button{min-width:19px;min-height:19px}.theme-control button{min-width:29px;min-height:31px}.history-row .row-menu .icon-button{min-height:40px}.workspace-heading-top>div{min-width:0}}
 @media(max-width:640px){.history-row .history-time{font-size:11px}}
+
+.generation-preparation { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:90; max-width:min(620px,90vw); padding:12px 18px; border:1px solid #d8e5e3; border-radius:12px; background:#f5fbf9; color:#16443c; box-shadow:0 4px 20px #153d3214; font-size:14px; }

@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "provider": "fastembed",
+  "model": "Qwen/Qwen3-Embedding-0.6B-Q",
+  "repo": "Qdrant/Qwen3-Embedding-0.6B-onnx",
+  "revision": "af95f2c416ffe9379369ad64f9113e865db6112c",
+  "files": {
+    "config.json": "da2b52e46d1469b9f6ff3a45e2bec36b2bb667de5ea9dd5a076e8bfe3b30cc05",
+    "special_tokens_map.json": "76862e765266b85aa9459767e33cbaf13970f327a0e88d1c65846c2ddd3a1ecd",
+    "tokenizer.json": "def76fb086971c7867b829c23a26261e38d9d74e02139253b38aeb9df8b4b50a",
+    "tokenizer_config.json": "1c45aaa97b2bec1d2e1ab0df53e1b2ed2f9568b871b25ca56095c0b83a5d4e93",
+    "onnx/model_quantized.onnx": "b39d0623bfc7d2dfc2dcc0d32152c5c5b8d61e9e74679e8222dcce5cf32486b9"
+  },
+  "dimension": 1024,
+  "pooling": "last",
+  "normalization": "l2-float32-v1",
+  "query_prefix": "Instruct: Given a search query, retrieve relevant passages that answer the query\nQuery:",
+  "document_prefix": "",
+  "max_tokens": 2048,
+  "batch": 1,
+  "threads": 2,
+  "versions": {
+    "fastembed": "0.9.1",
+    "onnxruntime": "1.32.0",
+    "tokenizers": "0.23.3",
+    "numpy": "2.5.5"
+  }
+}

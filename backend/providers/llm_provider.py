@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
+import secrets
 from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
@@ -56,6 +58,75 @@ def _safe_parse_json(text: str) -> Optional[dict]:
             pass
 
     return None
+
+
+_NATIVE_THINKING_TAG = re.compile(r"<\s*/?\s*think(?:ing)?\b", re.IGNORECASE)
+
+
+def _has_inline_native_thinking(value: Any) -> bool:
+    """Validate final text/decoded JSON without stripping or reconstructing it."""
+    if isinstance(value, str):
+        return bool(_NATIVE_THINKING_TAG.search(value))
+    if isinstance(value, dict):
+        return any(_has_inline_native_thinking(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_inline_native_thinking(item) for item in value)
+    return False
+
+
+class GenerationError(RuntimeError):
+    """F1 generation failed; never turn this failure into grounded claims."""
+
+
+def _invalid_f1_response(reason: str) -> GenerationError:
+    """Fixed categorical diagnostics; never log proposals or source context."""
+    error = GenerationError("GENERATION_INVALID_RESPONSE")
+    error.diagnostic_reason = reason
+    logging.getLogger(__name__).warning("F1 evidence validation: %s", reason,
+        extra={"event": "f1_evidence_validation", "reason": reason})
+    return error
+
+
+def _bind_f1_citation(citation: Any, evidence: Dict[str, DocumentChunk], thinking: Optional[str]) -> GeneratedClaim:
+    """Bind a unique exact excerpt within one request-authorized source only.
+
+    Binding establishes provenance/coordinates, never factual support. The
+    unchanged downstream verifier and support/coverage gates remain mandatory.
+    """
+    if not isinstance(citation, dict) or set(citation) != {"evidence_id", "claim", "excerpt"}:
+        raise _invalid_f1_response("MALFORMED_RESPONSE")
+    if any(not isinstance(citation[k], str) for k in citation):
+        raise _invalid_f1_response("MALFORMED_RESPONSE")
+    if not citation["excerpt"].strip():
+        raise _invalid_f1_response("EMPTY_EXCERPT")
+    if not citation["claim"].strip() or not citation["evidence_id"].strip():
+        raise _invalid_f1_response("MALFORMED_RESPONSE")
+    source = evidence.get(citation["evidence_id"])
+    if source is None:
+        raise _invalid_f1_response("UNKNOWN_EVIDENCE_ID")
+    lines = source.text.splitlines(keepends=True)
+    if (any(type(n) is not int or n < 1 for n in (source.page_number, source.start_line, source.end_line))
+            or source.end_line - source.start_line + 1 != len(lines)
+            or not all(isinstance(v, str) and v.strip() for v in (source.doc_id, source.doc_version, source.doc_hash))):
+        raise _invalid_f1_response("INVALID_SOURCE_METADATA")
+    quote = citation["excerpt"]
+    offset = source.text.find(quote)
+    if offset < 0:
+        raise _invalid_f1_response("NON_EXACT_EXCERPT")
+    if source.text.find(quote, offset + 1) >= 0:
+        raise _invalid_f1_response("AMBIGUOUS_OCCURRENCE")
+    # Offsets are local to the chunk; line numbers are absolute within its page.
+    starts = []
+    cursor = 0
+    for line in lines:
+        starts.append(cursor)
+        cursor += len(line)
+    first = max(i for i, start in enumerate(starts) if start <= offset)
+    last = max(i for i, start in enumerate(starts) if start <= offset + len(quote) - 1)
+    return GeneratedClaim(claim_text=citation["claim"], cited_doc_id=source.doc_id,
+        cited_page=source.page_number, cited_start_line=source.start_line + first,
+        cited_end_line=source.start_line + last, doc_version=source.doc_version,
+        doc_hash=source.doc_hash, evidence_quote=quote, thinking=thinking)
 
 
 class LLMProvider:
@@ -151,19 +222,60 @@ class LLMProvider:
             pass
         return settings.ollama_model
 
-    def call_ollama(self, prompt: str, enforce_json: bool = False) -> Optional[str]:
+    def _require_ollama_generation_model(self) -> str:
+        """Verify F1's exact configured tag without selecting an alternative."""
+        model = settings.f1_generation_model
+        if not isinstance(model, str) or not model.strip():
+            raise GenerationError("GENERATION_INVALID_CONFIG")
+        try:
+            resp = httpx.get(
+                f"{settings.ollama_base_url}/api/tags",
+                timeout=httpx.Timeout(1.0, connect=0.5),
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        except httpx.TimeoutException as exc:
+            raise GenerationError("GENERATION_TIMEOUT") from exc
+        except httpx.RequestError as exc:
+            raise GenerationError("GENERATION_UNAVAILABLE") from exc
+        except httpx.HTTPStatusError as exc:
+            raise GenerationError("GENERATION_PROVIDER_FAILURE") from exc
+        except ValueError as exc:
+            raise GenerationError("GENERATION_INVALID_RESPONSE") from exc
+        models = data.get("models") if isinstance(data, dict) else None
+        if not isinstance(models, list) or any(
+            not isinstance(item, dict) or not isinstance(item.get("name"), str) for item in models
+        ) or "error" in data:
+            raise GenerationError("GENERATION_INVALID_RESPONSE")
+        if not any(item["name"] == model for item in models):
+            raise GenerationError("GENERATION_MODEL_MISSING")
+        return model
+
+    def call_ollama(self, prompt: str, enforce_json: bool = False, *, strict: bool = False) -> Optional[str]:
         """
-        Calls local Ollama instance with qwen2.5 optimization options:
-        - num_ctx: 8192 (prevents context truncation)
+        Calls local Ollama; strict F1 uses its own exact model and native Thinking.
+        - num_ctx: F1-specific 8192 (legacy/F3 remains 4096)
+        - num_predict: F1-specific 4096 total Thinking + final tokens
         - temperature: 0.1 (strict factual grounding)
         - top_p: 0.85
         - repeat_penalty: 1.1
         - format: json (when requested)
-        - timeout: 60.0s
+        - timeout: 150.0s (connect: 3.0s)
         """
-        if not self.is_ollama_online():
-            return None
-        active_model = self.get_effective_ollama_model()
+        # F1 opts into exact identity/fail-closed errors. Preserve legacy F3 calls.
+        if strict:
+            if type(settings.f1_generation_think) is not bool:
+                raise GenerationError("GENERATION_INVALID_CONFIG")
+            if (type(settings.f1_generation_num_ctx) is not int
+                    or type(settings.f1_generation_num_predict) is not int
+                    or settings.f1_generation_num_predict <= 0
+                    or settings.f1_generation_num_ctx <= settings.f1_generation_num_predict):
+                raise GenerationError("GENERATION_INVALID_CONFIG")
+            active_model = self._require_ollama_generation_model()
+        else:
+            if not self.is_ollama_online():
+                return None
+            active_model = self.get_effective_ollama_model()
         payload: Dict[str, Any] = {
             "model": active_model,
             "prompt": prompt,
@@ -175,6 +287,10 @@ class LLMProvider:
                 "repeat_penalty": 1.1,
             },
         }
+        if strict:
+            payload["think"] = settings.f1_generation_think
+            payload["options"]["num_ctx"] = settings.f1_generation_num_ctx
+            payload["options"]["num_predict"] = settings.f1_generation_num_predict
         if enforce_json:
             payload["format"] = "json"
 
@@ -184,11 +300,58 @@ class LLMProvider:
                 json=payload,
                 timeout=httpx.Timeout(150.0, connect=3.0),
             )
+            if strict:
+                if resp.status_code == 404:
+                    raise GenerationError("GENERATION_MODEL_MISSING")
+                resp.raise_for_status()
+                data = resp.json()
+                if not isinstance(data, dict) or "error" in data or data.get("model") != active_model or data.get("done") is not True:
+                    raise GenerationError("GENERATION_INVALID_RESPONSE")
+                if settings.f1_generation_think is False and data.get("thinking") not in (None, ""):
+                    raise GenerationError("GENERATION_INVALID_RESPONSE")
+                # Explicit truncation/abnormal completion must fail even with valid JSON.
+                if data.get("done_reason") not in (None, "stop"):
+                    raise GenerationError("GENERATION_INVALID_RESPONSE")
+                # Native thinking is internal: return only the final response.
+                # Never retain the envelope or reasoning on this shared provider.
+                text = data.get("response")
+                if not isinstance(text, str) or not text.strip() or _has_inline_native_thinking(text):
+                    raise GenerationError("GENERATION_INVALID_RESPONSE")
+                return text.strip()
             if resp.status_code == 200:
                 return resp.json().get("response", "").strip()
+        except GenerationError:
+            raise
+        except httpx.TimeoutException as exc:
+            if strict:
+                raise GenerationError("GENERATION_TIMEOUT") from exc
+        except httpx.RequestError as exc:
+            if strict:
+                raise GenerationError("GENERATION_UNAVAILABLE") from exc
+        except httpx.HTTPStatusError as exc:
+            if strict:
+                raise GenerationError("GENERATION_PROVIDER_FAILURE") from exc
+        except (ValueError, TypeError, AttributeError) as exc:
+            if strict:
+                raise GenerationError("GENERATION_INVALID_RESPONSE") from exc
         except Exception:
-            pass
+            if strict:
+                raise
         return None
+
+    def _call_f1_generation(self, prompt: str, enforce_json: bool = False) -> str:
+        """Use only the selected F1 provider; deterministic synthesis is mock-only."""
+        if settings.llm_provider == "ollama":
+            text = self.call_ollama(prompt, enforce_json=enforce_json, strict=True)
+        elif settings.llm_provider == "gemini":
+            text = self.call_gemini(prompt, enforce_json=enforce_json)
+            if not text:
+                raise GenerationError("GENERATION_PROVIDER_FAILURE")
+        else:
+            raise GenerationError("GENERATION_INVALID_CONFIG")
+        if not isinstance(text, str) or not text.strip():
+            raise GenerationError("GENERATION_INVALID_RESPONSE")
+        return text.strip()
 
     def synthesize_smart_answer(self, query: str, chunks: List[DocumentChunk]) -> str:
         """
@@ -280,8 +443,8 @@ class LLMProvider:
     ) -> List[GeneratedClaim]:
         """
         Generates grounded claims with exact citations and line locators.
-        Uses structured JSON prompting for Ollama qwen2.5:7b / Gemini.
-        Falls back cleanly to deterministic synthesis in offline or mock mode.
+        Uses structured JSON prompting for the configured F1 model / Gemini.
+        Configured providers fail closed; deterministic synthesis is mock-only.
         """
         if not chunks:
             return []
@@ -310,145 +473,44 @@ class LLMProvider:
                 )
             ]
 
-        prompt = build_qa_prompt(query, chunks, conversation_history)
-        raw_response: Optional[str] = None
-
-        # 2. Try Local Ollama if configured
-        if settings.llm_provider == "ollama" and self.is_ollama_online():
-            raw_response = self.call_ollama(prompt, enforce_json=True)
-
-        # 3. Try Gemini API if configured
-        if not raw_response and (settings.llm_provider == "gemini" or self.is_gemini_configured()):
-            raw_response = self.call_gemini(prompt, enforce_json=True)
-
-        # 4. Parse Structured JSON response if available
-        if raw_response:
-            parsed = _safe_parse_json(raw_response)
-            if parsed and isinstance(parsed, dict) and "answer" in parsed:
-                thinking_text = str(parsed.get("thinking") or parsed.get("reasoning") or "").strip()
-                answer_text = str(parsed.get("answer", "")).strip()
-                raw_cits = parsed.get("citations", [])
-
-                claims: List[GeneratedClaim] = []
-                if isinstance(raw_cits, list) and raw_cits:
-                    valid_doc_ids = {c.doc_id for c in chunks}
-                    valid_doc_names = {c.doc_name for c in chunks}
-                    valid_pages = {c.page_number for c in chunks}
-
-                    for cit in raw_cits:
-                        if isinstance(cit, dict):
-                            raw_doc = str(cit.get("doc_id", top.doc_id)).strip()
-                            # Resolve doc_id against candidate chunks
-                            if raw_doc in valid_doc_ids or raw_doc in valid_doc_names:
-                                resolved_doc = raw_doc
-                            else:
-                                matched_c = next(
-                                    (c for c in chunks if raw_doc.lower() in c.doc_id.lower() or raw_doc.lower() in c.doc_name.lower()),
-                                    None
-                                )
-                                resolved_doc = matched_c.doc_id if matched_c else top.doc_id
-
-                            try:
-                                page = int(cit.get("page", top.page_number))
-                            except (ValueError, TypeError):
-                                page = top.page_number
-                            if page not in valid_pages:
-                                page = top.page_number
-
-                            try:
-                                start_l = int(cit.get("line_start", top.start_line or 1))
-                            except (ValueError, TypeError):
-                                start_l = top.start_line or 1
-
-                            try:
-                                end_l = int(cit.get("line_end", top.end_line or start_l))
-                            except (ValueError, TypeError):
-                                end_l = top.end_line or start_l
-
-                            excerpt = str(cit.get("excerpt", "")).strip()
-
-                            claim_stmt = str(cit.get("claim") or cit.get("statement") or answer_text).strip()
-                            claims.append(
-                                GeneratedClaim(
-                                    claim_text=claim_stmt,
-                                    cited_doc_id=resolved_doc,
-                                    cited_page=page,
-                                    cited_start_line=start_l,
-                                    cited_end_line=end_l,
-                                    doc_version=top.doc_version,
-                                    doc_hash=top.doc_hash,
-                                    evidence_quote=excerpt or top.text[:120],
-                                    thinking=thinking_text or None,
-                                )
-                            )
-
-                if claims:
-                    return claims
-
-                # If no citations in list, create claim from answer and top chunk
-                return [
-                    GeneratedClaim(
-                        claim_text=answer_text,
-                        cited_doc_id=top.doc_id,
-                        cited_page=top.page_number,
-                        cited_start_line=top.start_line,
-                        cited_end_line=top.end_line,
-                        doc_version=top.doc_version,
-                        doc_hash=top.doc_hash,
-                        evidence_quote=top.text[:120],
-                        thinking=thinking_text or None,
-                    )
-                ]
-
-            # If raw response wasn't JSON, use raw text directly
-            if raw_response.strip():
-                return [
-                    GeneratedClaim(
-                        claim_text=raw_response.strip(),
-                        cited_doc_id=top.doc_id,
-                        cited_page=top.page_number,
-                        cited_start_line=top.start_line,
-                        cited_end_line=top.end_line,
-                        doc_version=top.doc_version,
-                        doc_hash=top.doc_hash,
-                        evidence_quote=top.text[:120],
-                    )
-                ]
-
-        # 5. Smart Offline Synthesis Fallback
-        smart_text = self.synthesize_smart_answer(query, chunks)
-        return [
-            GeneratedClaim(
-                claim_text=smart_text,
-                cited_doc_id=top.doc_id,
-                cited_page=top.page_number,
-                cited_start_line=top.start_line,
-                cited_end_line=top.end_line,
-                doc_version=top.doc_version,
-                doc_hash=top.doc_hash,
-                evidence_quote=top.text[:120],
-            )
-        ]
+        # A deep snapshot and nonce map belong to this call, never the singleton.
+        snapshot = tuple(c.model_copy(deep=True) for c in chunks)
+        nonce = secrets.token_hex(8)
+        evidence = {f"ev_{nonce}_{i}": c for i, c in enumerate(snapshot, 1)}
+        prompt = build_qa_prompt(query, list(snapshot), conversation_history, evidence_ids=list(evidence))
+        raw_response = self._call_f1_generation(prompt, enforce_json=True)
+        try:
+            parsed = json.loads(raw_response)
+        except ValueError as exc:
+            raise _invalid_f1_response("MALFORMED_RESPONSE") from exc
+        if _has_inline_native_thinking(parsed):
+            raise _invalid_f1_response("MALFORMED_RESPONSE")
+        if not isinstance(parsed, dict) or not isinstance(parsed.get("answer"), str) or not parsed["answer"].strip():
+            raise _invalid_f1_response("MALFORMED_RESPONSE")
+        abstain = parsed.get("abstain", False)
+        citations = parsed.get("citations")
+        if type(abstain) is not bool or not isinstance(citations, list):
+            raise _invalid_f1_response("MALFORMED_RESPONSE")
+        if abstain:
+            if citations:
+                raise _invalid_f1_response("MALFORMED_RESPONSE")
+            # No factual output is accepted. Existing service emits HTTP200 abstention.
+            return []
+        if not citations:
+            raise _invalid_f1_response("MALFORMED_RESPONSE")
+        thinking = str(parsed.get("thinking") or parsed.get("reasoning") or "").strip() or None
+        return [_bind_f1_citation(citation, evidence, thinking) for citation in citations]
 
     def generate_summary(self, doc_name: str, chunks: List[DocumentChunk]) -> str:
         """
-        Generates a comprehensive executive summary using active LLM or deterministic fallback.
+        Generate through the selected provider; deterministic summaries are mock-only.
         """
         if not chunks:
             return f"Tài liệu `{doc_name}` hiện chưa có nội dung văn bản nào để tóm tắt."
 
         if settings.llm_provider != "mock":
             prompt = build_summary_prompt(doc_name, chunks)
-
-            if settings.llm_provider == "gemini" or (settings.llm_provider != "ollama" and self.is_gemini_configured()):
-                ans = self.call_gemini(prompt)
-                if ans:
-                    return ans
-
-            if settings.llm_provider == "ollama" and self.is_ollama_online():
-                ans = self.call_ollama(prompt)
-                if ans:
-                    return ans
+            return self._call_f1_generation(prompt)
 
         # Domain-aware fallback offline summary generator
         domain = detect_document_domain(chunks, doc_name)

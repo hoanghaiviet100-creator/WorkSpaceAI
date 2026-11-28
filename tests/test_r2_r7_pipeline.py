@@ -1,5 +1,6 @@
 from datetime import date
 import unittest
+from unittest.mock import patch
 from backend.algorithms.citation_verifier import verify_citations
 from backend.algorithms.email_state_machine import (
     SecurityError,
@@ -19,6 +20,14 @@ from backend.services.router_service import route_user_request
 
 
 class TestWorkspaceAIPipeline(unittest.TestCase):
+    def setUp(self):
+        # Pipeline unit tests use an explicit lexical index, independent of live Ollama.
+        from backend.repositories.workspace_repository import workspace_repository
+        for name, value in (("_embed_fn", None), ("dense_available", False)):
+            override = patch.object(workspace_repository, name, value)
+            override.start()
+            self.addCleanup(override.stop)
+
     def test_algorithm_1_cross_document_reconciliation(self):
         reqs = [
             RequirementItem(
@@ -136,7 +145,9 @@ class TestWorkspaceAIPipeline(unittest.TestCase):
         qa_res = client.post("/api/chat", json={"query": "Submission Package"})
         self.assertEqual(qa_res.status_code, 200)
         self.assertEqual(qa_res.json()["route"], "QA_FLOW")
-        self.assertEqual(qa_res.json()["status"], "ANSWER_VERIFIED")
+        # The explicit development mock emits unverified explanatory prose.
+        self.assertEqual(qa_res.json()["status"], "ABSTAINED_INSUFFICIENT_EVIDENCE")
+        self.assertEqual(qa_res.json()["validated_claims"], [])
 
         # 2. Test Reconcile endpoint
         rec_res = client.post("/api/chat", json={"query": "reconcile requirements and tasks"})
@@ -183,8 +194,9 @@ class TestWorkspaceAIPipeline(unittest.TestCase):
         sum_res = client.post("/api/chat", json={"query": "Tóm tắt tài liệu Project_Brief.pdf"})
         self.assertEqual(sum_res.status_code, 200)
         self.assertEqual(sum_res.json()["route"], "QA_FLOW")
-        self.assertEqual(sum_res.json()["status"], "SUMMARY_GENERATED")
-        self.assertTrue(len(sum_res.json()["summary"]) > 50)
+        self.assertEqual(sum_res.json()["status"], "ABSTAINED_INSUFFICIENT_EVIDENCE")
+        self.assertEqual(sum_res.json()["summary"], "")
+        self.assertEqual(sum_res.json()["validated_claims"], [])
 
     def test_dynamic_requirement_extraction_and_reconciliation(self):
         from backend.repositories.workspace_repository import workspace_repository

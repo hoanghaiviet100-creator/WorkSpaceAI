@@ -31,14 +31,9 @@ import emailIcon from "./email-icon.svg";
 import { visibleStudioResults, type StudioResult } from "./notebook-model";
 
 function emailStatus(result: StudioResult) {
-  if (result.status === "generating") return "Drafting…";
-  if (result.delivery === "sending") return "Sending…";
-  if (result.delivery === "sent")
-    return result.dispatchMode === "local_mock" ? "Sent · Simulation" : "Sent";
-  if (result.delivery === "unknown") return "Delivery unconfirmed";
-  if (result.status === "error" || result.delivery === "failed")
-    return "Failed";
-  return "Draft";
+  if (result.status === "generating") return "Drafting";
+  if (result.status === "error") return "Draft generation failed";
+  return "Open email for delivery status";
 }
 
 const tools = {

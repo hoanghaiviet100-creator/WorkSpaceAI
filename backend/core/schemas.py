@@ -1,6 +1,7 @@
+import os
 from datetime import date, datetime, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Literal
 import uuid
 from uuid import UUID
 from pydantic import BaseModel, Field
@@ -198,6 +199,7 @@ class EmailApproveRequest(BaseModel):
 
 
 class UserRequest(BaseModel):
+    verification_profile: Literal["academic_grounded", "strict", "evidence_centric_v0"] = ("academic_grounded" if os.getenv("F1_SESSION_B", "false").lower() == "true" else "strict")
     query: str
     selected_doc_ids: Optional[List[str]] = None
     recipient_email: Optional[str] = None
@@ -226,3 +228,43 @@ class ProviderSelectRequest(BaseModel):
 
 class GeminiConfigRequest(BaseModel):
     api_key: str
+
+
+class EvidenceCitation(BaseModel):
+    doc_id: str
+    doc_version: str
+    source_sha256: str
+    page: int
+    line_start: int
+    line_end: int
+    quote: str
+    quote_sha256: str
+
+
+class CompetingEvidence(BaseModel):
+    evidence_id: str
+    relation: Literal['COMPARABLE', 'DISTINCT', 'UNRESOLVED']
+    verdict: Literal['CONFLICT', 'NO_CONFLICT_ESTABLISHED', 'UNRESOLVED_SIGNAL']
+    citations: List[EvidenceCitation]
+    reason: str
+
+
+class EvidenceProfileClaim(BaseModel):
+    claim_id: str
+    text: str
+    disposition: Literal['FULLY_VERIFIED', 'SOURCE_SUPPORTED', 'CONFIRMED_CONFLICT',
+                         'INSUFFICIENT_CONFLICT_COVERAGE', 'INSUFFICIENT_EVIDENCE', 'ERROR']
+    support: Literal['SUPPORTED_BY_CITED_EVIDENCE', 'NOT_ESTABLISHED']
+    reason: str
+    method: Literal['deterministic_proof', 'deterministic_extraction', 'qualified_local_nli', 'validation']
+    citations: List[EvidenceCitation]
+    competing_evidence: List[CompetingEvidence]
+
+
+class EvidenceProfileVerification(BaseModel):
+    profile: Literal['evidence_centric_v0']
+    contract_version: Literal['ec-v0']
+    scope_manifest_sha256: str
+    coverage: Literal['COMPLETE', 'INCOMPLETE', 'ERROR', 'NOT_ASSESSED']
+    limitations: List[str]
+    claims: List[EvidenceProfileClaim]

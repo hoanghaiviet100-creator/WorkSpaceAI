@@ -1,0 +1,147 @@
+[
+  {
+    "file": "backend/vendor/surfsense/prompt.py",
+    "notice": "# Copyright (c) SurfSense. Licensed under Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/history.py",
+    "notice": "# Copyright (c) SurfSense. Licensed under Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/budget.py",
+    "notice": "# Copyright (c) SurfSense. Licensed under Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/grounded.md",
+    "notice": "<!-- Copyright (c) SurfSense; Apache-2.0. Modified: structured document grounding and atomic citation rules. -->",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/stream.py",
+    "notice": "# Copyright (c) SurfSense. Licensed under Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/prompt_cache.py",
+    "notice": "# Copyright (c) SurfSense; Apache-2.0. Modified: local HardwareBudget adapter.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "frontend/src/surfsense-citation-markdown.ts",
+    "notice": "// Copyright (c) SurfSense; Apache-2.0. Modified: structural local Citation type.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/budget.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/cache_types.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/compute_buffers.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/estimate.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/itemisation.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/kv_cache.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/kv_cells.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/mla_cache.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/offload.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/plan_load.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/precision.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/sliding_window.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/states.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/fit/types.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/hardware/budget.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/hardware/devices.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/hardware/selection.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/hardware/system_memory.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/hardware/unified_pool.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/admission/cost.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/model_shape.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  },
+  {
+    "file": "backend/vendor/surfsense/residency.py",
+    "notice": "# Copyright (c) SurfSense. Apache-2.0.",
+    "reason": "Added by earlier integration, absent from actual upstream file; root copyright and license retained in legal"
+  }
+]

@@ -1,39 +1,18 @@
-# Virtual environment
-.venv/
-venv/
-env/
-
-# Python cache
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-
-# Testing
-.pytest_cache/
-htmlcov/
-.coverage
-
-# IDE / Editor settings
-.vscode/
-.idea/
-
-# Temporary files
-*.log
-*.tmp
-
-# Deployment / Environment variables
-.env
-.env.*.local
-.DS_Store
-
-# Local SQLite databases
-workspace_ai.db
-*.db
-*.sqlite
-*.sqlite3
-
-# Frontend build & dependencies
-frontend/node_modules/
+.runtime*/
+**/node_modules/
 frontend/dist/
-frontend/.env
+**/__pycache__/
+**/.pytest_cache/
+*.db
+*.db-*
+.env
+.env.*
+!frontend/.env.production
+validation/**/pytest-tmp/
+vendor-reference/
+
+.venv-pa2/
+.adaptive-reference/
+validation/**/pytest-final/
+validation/**/pytest-complete/
+validation/**/pytest-release/

@@ -1,0 +1,27 @@
+{
+  "models": {
+    "qwen3.5:9b-q4_K_M": {
+      "name": "qwen3.5:9b-q4_K_M",
+      "digest": "7dd7bb310c1f18ad132c7fd72e73d4f6cff2e916c596a818701d2a1269037c7f",
+      "weights_bytes": 5629109120,
+      "quantization": "Q4_K_M",
+      "source_manifest": "D:\\WorkspaceAI-M4-F1-LAT-01\\m4-v3-20261125\\ollama-state\\models\\manifests\\registry.ollama.ai\\library\\qwen3.5\\9b-q4_K_M"
+    },
+    "qwen3-embedding:0.6b": {
+      "name": "qwen3-embedding:0.6b",
+      "digest": "d84267e5df12e19a8be357ab23b88966d61137226724f399707dee270cebccd3",
+      "weights_bytes": 639150592,
+      "quantization": "Q8_0",
+      "source_manifest": "D:\\WorkspaceAI-M4-F1-LAT-01\\m4-v3-20261125\\ollama-state\\models\\manifests\\registry.ollama.ai\\library\\qwen3-embedding\\0.6b"
+    },
+    "qwen2.5:7b-q4_K_M": {
+      "name": "qwen2.5:7b-q4_K_M",
+      "digest": "156bcbf71df68f7a6581fb4ab306ed921b8114d82b6eaeab5c0442785ea9b4c3",
+      "weights_bytes": 4683073952,
+      "quantization": "Q4_K_M",
+      "source_manifest": "D:\\WorkSpaceAI-Models\\ollama\\models\\manifests\\registry.ollama.ai\\library\\qwen2.5\\7b"
+    }
+  },
+  "weights_reused_read_only": true,
+  "downloaded_models": []
+}

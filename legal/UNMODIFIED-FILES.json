@@ -1,0 +1,11 @@
+[
+  "backend/vendor/surfsense/budget.py",
+  "backend/vendor/surfsense/stream.py",
+  "backend/vendor/surfsense/fit/budget.py",
+  "backend/vendor/surfsense/fit/kv_cells.py",
+  "backend/vendor/surfsense/fit/states.py",
+  "backend/vendor/surfsense/hardware/devices.py",
+  "backend/vendor/surfsense/hardware/system_memory.py",
+  "backend/vendor/surfsense/hardware/unified_pool.py",
+  "backend/vendor/surfsense/embedding_spec.py"
+]

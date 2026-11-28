@@ -1,8 +1,11 @@
 import csv
+from dataclasses import dataclass, replace
 from datetime import datetime
 import hashlib
 import io
 import re
+import os
+from threading import RLock
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from rank_bm25 import BM25Okapi
 from backend.core.schemas import DocumentChunk, DocumentMetadata
@@ -24,6 +27,16 @@ def tokenize_vietnamese_english(text: str) -> List[str]:
     return tokens
 
 
+@dataclass(frozen=True)
+class _EncoderSnapshot:
+    embed_fn: Optional[Callable]
+    query_embed_fn: Optional[Callable]
+    enabled: bool
+    generation: int
+    space: Optional[str]
+    dimension: Optional[int]
+
+
 class WorkspaceRepository:
     """
     R3 Data / Retrieval Capability:
@@ -41,19 +54,88 @@ class WorkspaceRepository:
         self._bm25: Optional[BM25Okapi] = None
         self._embed_fn: Optional[Callable[[List[str]], Any]] = embed_fn
         self.dense_available: bool = embed_fn is not None
-        self._chunk_embeddings: Dict[str, Any] = {}
+        self._chunk_embeddings: Dict[Any, Any] = {}
+        self._query_embeddings: Dict[Any, Any] = {}
+        self._embedding_dimensions: Dict[str, int] = {}
+        self._embed_generation = 0
+        self._embedding_lock = RLock()
 
     def set_embed_fn(self, embed_fn: Optional[Callable[[List[str]], Any]]) -> None:
         """Sets or updates the dense embedding function and updates dense availability status."""
-        self._embed_fn = embed_fn
-        self.dense_available = embed_fn is not None
-        self._chunk_embeddings = {}
+        with self._embedding_lock:
+            self._embed_fn = embed_fn
+            self.dense_available = embed_fn is not None
+            # Keep old namespaces; reject in-flight publications from older generations.
+            self._embed_generation += 1
+
+    def _embedding_space(self) -> str:
+        with self._embedding_lock:
+            provider = getattr(self._embed_fn, "__self__", self._embed_fn)
+            identity = getattr(provider, "index_id", None)
+            return identity or f"injected:{id(self._embed_fn)}:{self._embed_generation}"
+
+    def _embedding_snapshot(self, resolve: bool = True) -> _EncoderSnapshot:
+        """Pin encoder identity/dimension together; batch embedding runs outside the lock."""
+        with self._embedding_lock:
+            embed_fn = self._embed_fn
+            enabled = bool(self.dense_available and callable(embed_fn))
+            space = self._embedding_space() if enabled and resolve else None
+            provider = getattr(embed_fn, "__self__", embed_fn)
+            query_fn = getattr(provider, "embed_queries", embed_fn) if enabled else None
+            dimension = (getattr(provider, "dimension", None) or self._embedding_dimensions.get(space)) if space else None
+            snapshot = _EncoderSnapshot(embed_fn, query_fn, enabled, self._embed_generation, space, dimension)
+        # This check also runs on fully warm caches. Keep network I/O outside the
+        # repository lock; FIX-03 still rejects a replaced encoder at publication.
+        verify_index = getattr(provider, "verify_index", None)
+        if enabled and resolve and callable(verify_index):
+            verify_index(snapshot.space)
+        return snapshot
+
+    def _assert_current_encoder(self, snapshot: _EncoderSnapshot) -> None:
+        """Called under the publication lock. A stale operation publishes nothing."""
+        from backend.providers.embedding_provider import EmbeddingError
+
+        if (snapshot.generation != self._embed_generation or snapshot.embed_fn is not self._embed_fn
+                or snapshot.enabled != bool(self.dense_available and callable(self._embed_fn))):
+            raise EmbeddingError("EMBEDDING_PROVIDER_FAILURE: embedding encoder changed; retry the operation")
+        known_dimension = self._embedding_dimensions.get(snapshot.space)
+        if known_dimension is not None and snapshot.dimension is not None and known_dimension != snapshot.dimension:
+            raise EmbeddingError("EMBEDDING_DIMENSION_MISMATCH: cache namespace dimension changed")
+
+    def _chunk_embedding_key(self, chunk: DocumentChunk, space: str) -> Tuple:
+        text_hash = hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+        return (space, "document", chunk.chunk_id, chunk.doc_version, chunk.doc_hash, text_hash)
+
+    def _validate_embeddings(self, vectors: Any, rows: int, snapshot: _EncoderSnapshot):
+        from backend.providers.embedding_provider import validate_vectors
+
+        return validate_vectors(vectors, rows, snapshot.dimension)
+
+    def _stage_chunk_embeddings(self, chunks: List[DocumentChunk], snapshot: _EncoderSnapshot) -> Dict:
+        """Build a complete batch before publishing any new cache entries."""
+        missing = [c for c in chunks if self._chunk_embedding_key(c, snapshot.space) not in self._chunk_embeddings]
+        if not missing:
+            return {}
+        vectors = self._validate_embeddings(snapshot.embed_fn([c.text for c in missing]), len(missing), snapshot)
+        return {self._chunk_embedding_key(c, snapshot.space): v for c, v in zip(missing, vectors)}
 
     def add_document(self, metadata: DocumentMetadata, chunks: List[DocumentChunk]) -> int:
         """Stores a new document and its chunks in the repository, then rebuilds the index."""
-        self.documents[metadata.doc_id] = metadata
-        self.chunks.extend(chunks)
-        self._rebuild_index()
+        snapshot = self._embedding_snapshot(resolve=bool(chunks))
+        staged = {}
+        if chunks and snapshot.enabled:
+            staged = self._stage_chunk_embeddings(chunks, snapshot)
+            if staged:
+                snapshot = replace(snapshot, dimension=len(next(iter(staged.values()))))
+        # Embedding failure leaves documents, chunks and the active vector cache untouched.
+        with self._embedding_lock:
+            self._assert_current_encoder(snapshot)
+            self.documents[metadata.doc_id] = metadata
+            self.chunks.extend(chunks)
+            self._chunk_embeddings.update(staged)
+            if staged:
+                self._embedding_dimensions[snapshot.space] = snapshot.dimension
+            self._rebuild_index()
         return len(chunks)
 
     def delete_document(self, doc_id: str) -> bool:
@@ -324,10 +406,7 @@ class WorkspaceRepository:
             is_selected=True,
         )
 
-        self.documents[doc_id] = metadata
-        self.chunks.extend(added_chunks)
-        self._rebuild_index()
-        return len(added_chunks)
+        return self.add_document(metadata, added_chunks)
 
     def ingest_csv_tasks(self, doc_id: str, doc_name: str, csv_content: str) -> int:
         """Ingests structured CSV task records with row-level provenance and line locators."""
@@ -364,10 +443,7 @@ class WorkspaceRepository:
             is_selected=True,
         )
 
-        self.documents[doc_id] = metadata
-        self.chunks.extend(added_chunks)
-        self._rebuild_index()
-        return len(added_chunks)
+        return self.add_document(metadata, added_chunks)
 
     def _rebuild_index(self) -> None:
         """Rebuilds the BM25 lexical index over all indexed chunks with Vietnamese-English tokenizer."""
@@ -484,42 +560,36 @@ class WorkspaceRepository:
         dense_scores_map: Dict[str, float] = {}
         rank_dense: Dict[str, int] = {}
 
-        if self.dense_available and callable(self._embed_fn):
-            try:
-                if not hasattr(self, "_query_embeddings"):
-                    self._query_embeddings = {}
-                if query in self._query_embeddings:
-                    q_vec = self._query_embeddings[query]
-                else:
-                    q_vec = self._embed_fn([query])
-                    if q_vec is not None and len(q_vec) > 0:
-                        self._query_embeddings[query] = q_vec
+        snapshot = self._embedding_snapshot()
+        if snapshot.enabled:
+            import numpy as np
 
-                if q_vec is not None and len(q_vec) > 0:
-                    if not hasattr(self, "_chunk_embeddings"):
-                        self._chunk_embeddings = {}
-                    uncached = [c for c in eligible if c.chunk_id not in self._chunk_embeddings]
-                    if uncached:
-                        new_vecs = self._embed_fn([c.text for c in uncached])
-                        if new_vecs is not None and len(new_vecs) == len(uncached):
-                            for c, v in zip(uncached, new_vecs):
-                                self._chunk_embeddings[c.chunk_id] = v
-
-                    c_vecs = [self._chunk_embeddings.get(c.chunk_id) for c in eligible]
-                    if all(v is not None for v in c_vecs):
-                        import numpy as np
-                        q_arr = np.asarray(q_vec[0], dtype=np.float32)
-                        c_arr = np.asarray(c_vecs, dtype=np.float32)
-                        q_norm = np.linalg.norm(q_arr)
-                        c_norms = np.linalg.norm(c_arr, axis=1)
-                        denom = np.maximum(c_norms * q_norm, 1e-9)
-                        sims = np.dot(c_arr, q_arr) / denom
-                        dense_scores_map = {eligible[i].chunk_id: float(sims[i]) for i in range(len(eligible))}
-                        dense_sorted_indices = sorted(range(len(eligible)), key=lambda i: sims[i], reverse=True)
-                        rank_dense = {eligible[idx].chunk_id: r for r, idx in enumerate(dense_sorted_indices, start=1)}
-            except Exception:
-                dense_scores_map = {}
-                rank_dense = {}
+            space = snapshot.space
+            query_key = (space, "query", query)
+            q_vec = self._query_embeddings.get(query_key)
+            if q_vec is None:
+                q_vec = snapshot.query_embed_fn([query])
+            q_vec = self._validate_embeddings(q_vec, 1, snapshot)
+            snapshot = replace(snapshot, dimension=q_vec.shape[1])
+            staged = self._stage_chunk_embeddings(eligible, snapshot)
+            c_vecs = [staged.get(self._chunk_embedding_key(c, space),
+                                 self._chunk_embeddings.get(self._chunk_embedding_key(c, space)))
+                      for c in eligible]
+            c_arr = self._validate_embeddings(c_vecs, len(eligible), snapshot)
+            # Publish only after document/query dimension and vector validation succeed.
+            with self._embedding_lock:
+                self._assert_current_encoder(snapshot)
+                self._chunk_embeddings.update(staged)
+                self._query_embeddings[query_key] = q_vec
+                self._embedding_dimensions[space] = snapshot.dimension
+            q_arr = np.asarray(q_vec[0], dtype=np.float32)
+            q_norm = np.linalg.norm(q_arr)
+            c_norms = np.linalg.norm(c_arr, axis=1)
+            denom = np.maximum(c_norms * q_norm, 1e-9)
+            sims = np.dot(c_arr, q_arr) / denom
+            dense_scores_map = {eligible[i].chunk_id: float(sims[i]) for i in range(len(eligible))}
+            dense_sorted_indices = sorted(range(len(eligible)), key=lambda i: sims[i], reverse=True)
+            rank_dense = {eligible[idx].chunk_id: r for r, idx in enumerate(dense_sorted_indices, start=1)}
 
         # 4. Reciprocal Rank Fusion (RRF) & Absolute Relevance Score Calibration
         scored_chunks: List[DocumentChunk] = []
@@ -539,13 +609,13 @@ class WorkspaceRepository:
                 d_sim = dense_scores_map[cid]
                 c_copy.dense_score = round(d_sim, 4)
                 # Standard RRF formula
-                rrf = 1.0 / (60.0 + r_bm25) + 1.0 / (60.0 + r_d)
+                rrf = 0.5 / (60.0 + r_bm25) + 0.5 / (60.0 + r_d)
                 # Calibrated absolute score in [0.0, 1.0]
                 calibrated_score = max(d_sim, lex_score)
                 c_copy.score = round(min(1.0, max(0.0, calibrated_score)), 4)
             else:
                 c_copy.dense_score = 0.0
-                rrf = 1.0 / (60.0 + r_bm25)
+                rrf = 0.5 / (60.0 + r_bm25)
                 c_copy.score = round(min(1.0, max(0.0, lex_score)), 4)
 
             c_copy.rrf_score = round(rrf, 6)
@@ -591,7 +661,10 @@ class WorkspaceRepository:
 
         # Sort by calibrated score (which cleanly merges RRF lexical/dense relevance and pinpoint boost),
         # using pinpoint_score and rrf_score as deterministic tie-breakers
-        scored_chunks.sort(key=lambda x: (x.score, x.pinpoint_score, x.rrf_score), reverse=True)
+        if os.getenv('F1_SESSION_B','false').lower() == 'true':
+            scored_chunks.sort(key=lambda x: (x.rrf_score,x.score), reverse=True)
+        else:
+            scored_chunks.sort(key=lambda x: (x.score, x.pinpoint_score, x.rrf_score), reverse=True)
         return scored_chunks[:top_k]
 
     def build_page_lookup(self) -> Dict[Tuple[str, int], Dict[str, Any]]:
@@ -694,38 +767,11 @@ class WorkspaceRepository:
         )
 
 
-def create_ollama_embed_fn() -> Optional[Callable[[List[str]], Optional[List[List[float]]]]]:
-    """
-    Creates a fast, batch-capable dense embedding function using local Ollama nomic-embed-text.
-    Gracefully returns None if Ollama or nomic-embed-text is offline.
-    """
-    import urllib.request
-    import json
-    from backend.core.config import settings
+def create_ollama_embed_fn() -> Callable[[List[str]], Any]:
+    """Compatibility factory using the same lazy semantic provider as QAService."""
+    from backend.providers.embedding_provider import embedding_provider
 
-    def embed_texts(texts: List[str]) -> Optional[List[List[float]]]:
-        if not texts:
-            return []
-        try:
-            payload = json.dumps({"model": settings.ollama_embed_model, "input": texts}).encode("utf-8")
-            req = urllib.request.Request(
-                f"{settings.ollama_base_url}/api/embed",
-                data=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=12.0) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return data.get("embeddings", [])
-        except Exception:
-            return None
-
-    try:
-        probe = embed_texts(["workspace ai test probe"])
-        if probe and len(probe) == 1 and len(probe[0]) > 0:
-            return embed_texts
-    except Exception:
-        pass
-    return None
+    return embedding_provider.get_embed_fn()
 
 
 # Backward compatibility aliases

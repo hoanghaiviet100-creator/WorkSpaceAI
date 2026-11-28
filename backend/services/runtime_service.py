@@ -13,7 +13,7 @@ class RuntimeService:
             model = None
         elif provider == "ollama":
             engine_mode = "ollama"
-            model = settings.ollama_model
+            model = settings.f1_generation_model
         elif provider == "gemini":
             engine_mode = "gemini"
             model = settings.gemini_model
@@ -29,11 +29,11 @@ class RuntimeService:
             "saved_locally": True,
             "offline_only": offline_only,
             "gemini_scope": "feature1",
-            "model_options": ["qwen2.5:7b", "gemini-flash-lite-latest"],
+            "model_options": [settings.f1_generation_model, "gemini-flash-lite-latest"],
             "provider_options": [
                 {
                     "id": "ollama",
-                    "model": settings.ollama_model,
+                    "model": settings.f1_generation_model,
                     "configured": llm_provider.is_ollama_online(),
                 },
                 {

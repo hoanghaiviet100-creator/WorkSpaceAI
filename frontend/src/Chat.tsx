@@ -1,3 +1,4 @@
+import { questionVietnamese } from "./api";
 import {
   useEffect,
   useId,
@@ -36,7 +37,9 @@ import { validRecipient, resolveCitedSource } from "./workflow-model";
 import { isRetiredThread, visibleChatMessages } from "./notebook-model";
 import { studySuggestion, type StudyKind } from "./study-model";
 import AISettings from "./AISettings";
-import type { RuntimeStatus } from "./api";
+import { sourceSupportDisclosure, citationIntegrityDisclosure } from "./api";
+import { preprocessCitationMarkdown } from "./surfsense-citation-markdown";
+import type { RuntimeStatus, VerificationProfile, EvidenceVerification } from "./api";
 import { Badge, Citation, Notice } from "./components";
 import {
   detectMode,
@@ -58,6 +61,17 @@ const summarySectionIcons = [
   [/kế hoạch|lộ trình|tiến độ|\broadmap\b|\btimeline\b/i, CalendarDays],
   [/mục tiêu|phạm vi|\bobjectives?\b|\bscope\b/i, Target],
 ] as const;
+
+
+function renderAcademicAnswer(text: string, keys: Record<string,string>, onOpen: (id:string) => void): React.ReactNode {
+  const citations=Object.keys(keys).map((key) => ({source_id:Number(key),chunk_id:Number(key)}));
+  const prepared=preprocessCitationMarkdown(text,citations);
+  return prepared.split(/(<citation data-chunk-id="[0-9]+">[0-9]+<\/citation>)/g).map((part,index) => {
+    const match=part.match(/^<citation data-chunk-id="([0-9]+)">/);
+    if (match && keys[match[1]]) return <Citation key={index} id={keys[match[1]]} number={Number(match[1])} onOpen={onOpen} />;
+    return <span key={index}>{renderFormattedMarkdown(part)}</span>;
+  });
+}
 
 function formatMathSnippet(latex: string): string {
   return latex
@@ -214,13 +228,31 @@ export default function Chat({
     Message,
     "request" | "mode" | "at"
   > | null>(null);
+  const [verificationProfile, setVerificationProfile] = useState<VerificationProfile>("academic_grounded");
+  const [verificationDetails, setVerificationDetails] = useState<Record<string, EvidenceVerification>>({});
+  const sourceSupported = (m: Message) => m.evidenceIds.some((id) => workspace.evidence[id]?.context === sourceSupportDisclosure);
+  const [progressText, setProgressText] = useState("Reading selected sources…");
   const [filesExpanded, setFilesExpanded] = useState(false);
   const [showLatestButton, setShowLatestButton] = useState(false);
   const transcriptId = useId();
   const sourceListId = useId();
   const loading = pending !== null;
-  const live = apiFor(workspace.id);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
+  const live = apiFor(workspace.id);
+  const [generationState,setGenerationState] = useState<{ready:boolean;preparing:boolean;message:string} | null>(null);
+  useEffect(() => {
+    if (!live || !active) return;
+    let disposed=false;
+    const refresh=async () => {
+      try {
+        const language=questionVietnamese(input || pending?.request || messages.at(-1)?.request || '') ? 'vi' : 'en';
+        const response=await fetch(`/api/runtime/generation-ready?language=${language}`);
+        if(response.ok && !disposed) setGenerationState(await response.json());
+      } catch { /* A request displays its own natural-language connection error. */ }
+    };
+    void refresh(); const interval=setInterval(() => void refresh(),1500);
+    return () => {disposed=true;clearInterval(interval);};
+  },[active,live,input,pending?.request,messages.length]);
   const requestLock = useRef(false);
   const submittedIntake = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -318,7 +350,7 @@ export default function Chat({
     field.style.height = `${Math.min(field.scrollHeight, 136)}px`;
   }, [input]);
   const send = async (request = input, forced?: Message["state"]) => {
-    if (!request.trim() || loading || requestLock.current) return;
+    if (!request.trim() || loading || requestLock.current || (live && generationState?.preparing)) return;
     followLatest.current = true;
     const ids = selected.map((s) => s.id);
     const activeMode = live ? "Ask" : detectMode(request);
@@ -332,6 +364,7 @@ export default function Chat({
           item.id === thread.id ? { ...item, composerDraft: undefined } : item,
         ),
       }));
+    setProgressText(questionVietnamese(request) ? "Đang đọc tài liệu đã chọn…" : "Reading selected sources…");
     setPending({ request: request.trim(), mode: activeMode, at });
     if (live) {
       requestLock.current = true;
@@ -360,7 +393,7 @@ export default function Chat({
             "Specify a recipient email address in your request or in the Email editor first.",
           );
         const history = messages
-          .filter((m) => m.origin === "server" && m.state === "answer")
+          .filter((m) => m.origin === "server" && m.state === "answer" && [...m.sourceIds].sort().join("|") === [...ids].sort().join("|"))
           .flatMap((m) => [
             { role: "user", content: m.request },
             {
@@ -379,12 +412,34 @@ export default function Chat({
           recipient,
           undefined,
           workspace.id,
+          undefined,
+          activeMode === "Ask" ? verificationProfile : "strict",
+          setProgressText,
         );
         if (response.route === "RECONCILE_FLOW")
           throw new Error(
             "Update the server to continue asking questions in this note.",
           );
         result.routeType = response.route;
+        result.citationChecked = response.verification_method === "citation_integrity_only";
+        result.citationKeys = {};
+        result.sourceCoverage = response.coverage;
+        result.responseLatencyMs = response.latency_ms;
+        if (response.verification) {
+          setVerificationDetails((current) => ({ ...current, [result.id]: response.verification! }));
+        }
+        if (response.status === "SOURCE_SUPPORTED") {
+          const check = response.verification;
+          if (!check || check.profile !== "evidence_centric_v0" || check.contract_version !== "ec-v0" ||
+              !check.limitations.length || !check.claims.length ||
+              check.claims.some((c) => c.disposition !== "SOURCE_SUPPORTED" ||
+                c.support !== "SUPPORTED_BY_CITED_EVIDENCE" || !c.citations.length ||
+                c.competing_evidence.some((e) => e.verdict !== "NO_CONFLICT_ESTABLISHED"))) {
+            throw new Error("The evidence profile response is incomplete.");
+          }
+          result.state = "answer";
+          result.answerText = undefined;
+        }
         result.groundingScore =
           typeof response.grounding_score === "number" &&
           response.grounding_score >= 0 &&
@@ -409,15 +464,16 @@ export default function Chat({
           }
           const id = c.claim_id || crypto.randomUUID();
           result.evidenceIds.push(id);
+          if (c.citation_index !== undefined) result.citationKeys![String(c.citation_index)] = id;
           claims[id] = {
             id: source.id,
             file: source.name,
-            title: c.section || "Supported finding",
+            title: result.citationChecked ? (questionVietnamese(request) ? "Nguồn trích dẫn" : "Cited source") : c.section || "Supported finding",
             finding: c.claim_text,
             section: c.section || undefined,
             quote: c.evidence_quote,
             locator: `p. ${c.cited_page}${c.cited_start_line ? ` · lines ${c.cited_start_line}–${c.cited_end_line ?? c.cited_start_line}` : ""}`,
-            context: "Server-verified citation",
+            context: result.citationChecked ? (questionVietnamese(request) ? "Mở đoạn trích để đối chiếu với tài liệu gốc." : "Open this passage to compare it with the original document.") : "Server-verified citation",
             claimId: c.claim_id,
             messageId: c.message_id,
             page: c.cited_page,
@@ -431,6 +487,25 @@ export default function Chat({
             verifiedAt: c.verified_at,
             origin: "server",
           };
+        }
+        if (response.status === "SOURCE_SUPPORTED" && response.verification) {
+          for (const claim of response.verification.claims) {
+            const c = claim.citations[0];
+            const source = resolveCitedSource(c.doc_id, workspace.sources);
+            if (!source || !ids.includes(source.id) || !/^[a-f0-9]{64}$/.test(c.source_sha256) ||
+                (source.fileHash && source.fileHash !== c.source_sha256) ||
+                (source.versionId && source.versionId !== c.doc_version)) {
+              throw new Error("The source-supported citation does not match the selected library.");
+            }
+            const id = crypto.randomUUID();
+            result.evidenceIds.push(id);
+            claims[id] = { id: source.id, file: source.name, title: "Được nguồn hỗ trợ",
+              finding: claim.text, quote: c.quote,
+              locator: `p. ${c.page} · lines ${c.line_start}–${c.line_end}`,
+              context: sourceSupportDisclosure, page: c.page, startLine: c.line_start, endLine: c.line_end,
+              docVersion: c.doc_version, docHash: c.source_sha256,
+              verificationStatus: "VERIFIED_EXACT", origin: "server" };
+          }
         }
         result.rejectedClaims = rejected;
         result.suggestedQuestions = response.suggested_questions;
@@ -449,7 +524,9 @@ export default function Chat({
             result.evidenceIds.length || response.status === "CONVERSATION"
               ? "answer"
               : "abstention";
-          result.answerText = result.evidenceIds.length
+          result.answerText = result.citationChecked && result.evidenceIds.length
+            ? response.answer
+            : result.evidenceIds.length
             ? response.status === "SUMMARY_GENERATED"
               ? response.message
               : undefined
@@ -679,7 +756,7 @@ export default function Chat({
                       <span className="small muted">
                         {m.state === "answer"
                           ? m.origin === "server"
-                            ? "Server response"
+                            ? "Document answer"
                             : "Sample conversation"
                           : m.state === "abstention"
                             ? "Evidence check"
@@ -715,6 +792,9 @@ export default function Chat({
                   </div>
                   {m.state === "answer" ? (
                     <>
+                      {sourceSupported(m) && (
+                        <Notice tone="neutral"><strong>Được nguồn hỗ trợ — chưa kiểm chứng toàn cục</strong><p>{sourceSupportDisclosure}</p></Notice>
+                      )}
                       {m.thinking && (
                         <details
                           className="reasoning-box"
@@ -759,8 +839,9 @@ export default function Chat({
                         </details>
                       )}
                       {m.answerText && (
-                        <p className="server-answer-text">{renderFormattedMarkdown(m.answerText)}</p>
+                        <div className="server-answer-text">{m.citationChecked ? renderAcademicAnswer(m.answerText, m.citationKeys ?? {}, onEvidence) : renderFormattedMarkdown(m.answerText)}</div>
                       )}
+                      {m.citationChecked && <Notice tone="neutral">{questionVietnamese(m.request) ? "Bạn có thể mở trích dẫn để đối chiếu câu trả lời với tài liệu gốc." : "Open a citation to compare the answer with the original document."}</Notice>}
                       {m.groundingScore !== undefined && !notebook && (
                         <p className="small muted">
                           Grounding score · {Math.round(m.groundingScore * 100)}
@@ -794,16 +875,16 @@ export default function Chat({
                               {SectionIcon && <SectionIcon size={15} aria-hidden="true" />}
                               <h3>{e.title}</h3>
                             </div>
-                            <p>{renderFormattedMarkdown(e.finding)}</p>
+                            {!m.citationChecked && <p>{renderFormattedMarkdown(e.finding)}</p>}
                             <Badge
                               tone={
-                                e.origin === "server" &&
+                                e.context !== sourceSupportDisclosure && e.origin === "server" &&
                                 isVerified(e.verificationStatus)
                                   ? "document"
                                   : "neutral"
                               }
                             >
-                              {e.verificationStatus?.replaceAll("_", " ") ??
+                              {m.citationChecked ? (questionVietnamese(m.request) ? "Nguồn trích dẫn" : "Source citation") : e.context === sourceSupportDisclosure ? "SOURCE SUPPORTED" : e.verificationStatus?.replaceAll("_", " ") ??
                                 "Unverified sample"}
                             </Badge>
                             <Citation
@@ -846,8 +927,8 @@ export default function Chat({
                           </button>
                         </div>
                         <p className="provenance-note">
-                          <Check size={13} />
-                          {m.origin === "server"
+                          {sourceSupported(m) ? <AlertTriangle size={13} /> : <Check size={13} />}
+                          {sourceSupported(m) ? "SOURCE_SUPPORTED · giới hạn kiểm chứng đã công bố" : m.origin === "server"
                             ? `${m.sourceIds.length} documents selected for this request.`
                             : "Sample evidence · original documents not verified."}
                         </p>
@@ -877,7 +958,7 @@ export default function Chat({
                   ) : m.state === "abstention" ? (
                     <div className="abstention">
                       <AlertTriangle size={21} />
-                      <h3>There isn’t enough evidence to answer this.</h3>
+                      <h3>{questionVietnamese(m.request) ? "Tài liệu chưa có đủ thông tin để trả lời." : "There isn’t enough evidence to answer this."}</h3>
                       <p>
                         {m.answerText ||
                           "The ticked files don’t establish this information. Missing details stay unspecified."}
@@ -904,9 +985,9 @@ export default function Chat({
                     </div>
                   ) : m.state === "error" ? (
                     <Notice tone="danger">
-                      <strong>The answer couldn’t be generated.</strong>
+                      <strong>{questionVietnamese(m.request) ? "Mình chưa thể hoàn thành câu trả lời." : "The answer couldn’t be generated."}</strong>
                       <p>
-                        {m.errorText ||
+                        {(m.errorText ? (/[A-Z]+_[A-Z_]+/.test(m.errorText) ? "The request could not be completed. Please check the local service and try again." : m.errorText) : undefined) ||
                           "Your question is preserved. Try again when you’re ready."}
                       </p>
                       <button
@@ -914,7 +995,7 @@ export default function Chat({
                         onClick={() => send(m.request)}
                       >
                         <RotateCcw size={14} />
-                        Retry
+                        {questionVietnamese(m.request) ? "Thử lại" : "Retry"}
                       </button>
                     </Notice>
                   ) : (
@@ -1022,6 +1103,15 @@ export default function Chat({
                       ))}
                     </div>
                   )}
+                  {verificationDetails[m.id] && m.state === "abstention" && (
+                    <details><summary>Bằng chứng cần đối chiếu</summary>
+                      {verificationDetails[m.id].claims.flatMap((c) => c.competing_evidence).filter((e) => e.verdict !== "NO_CONFLICT_ESTABLISHED").map((e) => (
+                        <div key={e.evidence_id}><strong>{e.verdict === "CONFLICT" ? "Mâu thuẫn được xác nhận" : "Tín hiệu chưa giải quyết"}</strong>
+                          {e.citations.map((c, i) => <blockquote key={i}>{c.quote}<p>{c.doc_id} · trang {c.page} · dòng {c.line_start}–{c.line_end} · {c.doc_version}</p></blockquote>)}
+                        </div>
+                      ))}
+                    </details>
+                  )}
                   {m === latestMessage && suggestion && (
                     <button
                       className="button study-chat-suggestion"
@@ -1049,13 +1139,15 @@ export default function Chat({
                   <span />
                   <span />
                 </span>
-                <span>Thinking…</span>
+                <span>{progressText}</span>
               </div>
             </article>
           )}
         </div>
       </div>
       <div className="composer-area">
+        {live && generationState && !generationState.ready && <Notice tone="neutral"><span role="status">{generationState.message}</span></Notice>}
+        
         {notebook && active && !welcome && showLatestButton && (
           <button
             type="button"
@@ -1113,7 +1205,7 @@ export default function Chat({
               className="send-button"
               type="submit"
               aria-label="Send message"
-              disabled={!input.trim() || loading}
+              disabled={!input.trim() || loading || (live && generationState?.preparing)}
             >
               <ArrowUp size={19} aria-hidden="true" />
             </button>

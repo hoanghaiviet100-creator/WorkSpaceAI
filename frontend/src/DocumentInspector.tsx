@@ -98,22 +98,17 @@ export default function DocumentInspector({
           <Badge tone={verified ? "document" : "neutral"}>
             {studyExcerpt
               ? "Study set excerpt"
-              : (evidence.verificationStatus?.replaceAll("_", " ") ??
-                "Unverified sample excerpt")}
+              : (evidence.origin === "server" ? "Source passage" : "Sample passage")}
           </Badge>
           <h3 className="evidence-title">{evidence.title}</h3>
           <blockquote>
             <mark>{evidence.quote}</mark>
           </blockquote>
-          {evidence.matchScore !== undefined && (
-            <p className="small">
-              Match score: {Math.round(evidence.matchScore * 100)}%
-            </p>
-          )}
+
         </>
       )}
       <details className="nb-source-technical">
-        <summary>Document details and verification</summary>
+        <summary>Document details</summary>
         <dl className="document-metadata">
           <dt>Version</dt>
           <dd>{evidence?.docVersion ?? source?.versionId ?? "Unavailable"}</dd>
@@ -132,7 +127,7 @@ export default function DocumentInspector({
           </dd>
           {evidence?.verifiedAt && (
             <>
-              <dt>Verified at</dt>
+              <dt>Citation checked at</dt>
               <dd>{new Date(evidence.verifiedAt).toLocaleString()}</dd>
             </>
           )}

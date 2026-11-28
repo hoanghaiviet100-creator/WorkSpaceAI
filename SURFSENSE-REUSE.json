@@ -1,0 +1,325 @@
+{
+  "repository": "https://github.com/MODSetter/SurfSense",
+  "tag": "v2.3.1",
+  "commit": "b764f2838969974fd1b0e8c386326039a0f3ad3a",
+  "license": "Apache-2.0",
+  "applicable_notice": "No upstream NOTICE at pinned commit",
+  "files": [
+    {
+      "source_path": "surfsense_local/backend/modules/chat/prompt.py",
+      "destination_path": "backend/vendor/surfsense/prompt.py",
+      "original_sha256": "95c01bb03ee2c871deeda8c01ab7cae08b4c754881731fd9332cce14923518e5",
+      "modified_sha256": "00ef7bbf5944796cb6f6faf0670aa6a58359cce525185097e4d865d426a9ca71",
+      "original_worktree_sha256": "88660a014c88cd6669e65ce97daa9aa8d851807803d3b850cbad090a290c4822",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modifications": "Local adapters and source-location mapping; omit the source modification notice from runtime prompt text.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local dataclass adapters; no SurfSense runtime dependencies."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/chat/history.py",
+      "destination_path": "backend/vendor/surfsense/history.py",
+      "original_sha256": "f0d3b6ac432b1ee53b81dd425261017aeca3b8624b4c8276f0a0369871a718ac",
+      "modified_sha256": "e6442f822788ff4bfcd2eda04aa241eb0e290ca9ce22b94df2661241a9757a8f",
+      "original_worktree_sha256": "5445b08285fe75bb95ef29fd665b5af729cb8e234c0ef81cbb5149cfcfc4cdb1",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local dataclass adapters; no SurfSense runtime dependencies."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/chat/budget.py",
+      "destination_path": "backend/vendor/surfsense/budget.py",
+      "original_sha256": "4013feb0ae7c6ddfae5f2923988a83af797955e41fbaa0a08372c6230e2f4ad5",
+      "modified_sha256": "4013feb0ae7c6ddfae5f2923988a83af797955e41fbaa0a08372c6230e2f4ad5",
+      "original_worktree_sha256": "bf421382cb5c5fa46067c60d9f7918c6d1a4e4e82b820a23a11e5a779c7c4d42"
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/chat/prompts/capable.md",
+      "destination_path": "backend/vendor/surfsense/grounded.md",
+      "original_sha256": "93852f34a893efe3f8178fe27e4864e21fa0ba01a216fc922265dfecd15e203e",
+      "modified_sha256": "be7d246fde0b47ee3afb14cc3beff96156a4a30144ba1eec7b043d3d618bc7a1",
+      "modifications": "Single-call structured grounding with atomic per-property summary coverage, minimum sufficient source assignment, bilingual evidence equivalence and abstention.",
+      "original_worktree_sha256": "24c54a0f81d4a1474fa7cbc4f10e1a5f474576c62047a3f3b69b893bde97d408",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "<!-- Modified: structured document grounding and atomic citation rules. -->"
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/chat/runs/stream.py",
+      "destination_path": "backend/vendor/surfsense/stream.py",
+      "original_sha256": "20d99dfa161eb6d78b957acf210d9752d93cab6b1ed3038bceb92705949eee17",
+      "modified_sha256": "20d99dfa161eb6d78b957acf210d9752d93cab6b1ed3038bceb92705949eee17",
+      "original_worktree_sha256": "74db0476082675775b44e728ceea09a6f85db16340e92ec4f9ebff51427578ef"
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/prompt_cache.py",
+      "destination_path": "backend/vendor/surfsense/prompt_cache.py",
+      "original_sha256": "e9a683a09fbf4222a437ca2485e6005f833d755b2b62934135f64724583ee604",
+      "modified_sha256": "c4fe795db1058837c001b30f4db7c82f5dfd21c909a742991c7aea3e214bdbd6",
+      "original_worktree_sha256": "eba2bc3ac442d012a832caabe1e8675069b0f7a5804da54f2ede447b13f95e3d",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified: local HardwareBudget adapter."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/frontend/src/features/chat/citation-markdown.ts",
+      "destination_path": "frontend/src/surfsense-citation-markdown.ts",
+      "original_sha256": "10c88e8c718763a597bd83672d455600a5094a784caa6d2fe2073289ad15c209",
+      "modified_sha256": "a022493b3dd50162847aab6607e9ede0ec0b778f2038b483590e1d518527f4d7",
+      "original_worktree_sha256": "a65d016ac4a33111425527bf7cda78c1b2ce5b20f033316d143a7f2a1441178e",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "// Modified: structural local Citation type."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/budget.py",
+      "destination_path": "backend/vendor/surfsense/fit/budget.py",
+      "original_sha256": "a47e75cc707385f13085d3dea583ba9e64e4bec1f8481ede8af51b8197f49476",
+      "modified_sha256": "a47e75cc707385f13085d3dea583ba9e64e4bec1f8481ede8af51b8197f49476",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/cache_types.py",
+      "destination_path": "backend/vendor/surfsense/fit/cache_types.py",
+      "original_sha256": "ae678aaa058c9df913facdde667031bad410282fdf89943c0d8aa16bd546b8f7",
+      "modified_sha256": "d335d44ed2d3805ce3c0cda9d35ebbf505956a216dfcaf18f898747222e3e526",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/compute_buffers.py",
+      "destination_path": "backend/vendor/surfsense/fit/compute_buffers.py",
+      "original_sha256": "8940c6ba165a6091f28a5d68de5d2902bd250a238af019d76b9940eb9f7b1e50",
+      "modified_sha256": "95c8503d287af9504ae448d3a65bc932eaa4b745b97431050197eeb5a2ff8877",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/estimate.py",
+      "destination_path": "backend/vendor/surfsense/fit/estimate.py",
+      "original_sha256": "5d896a919ef019f29842bf300e9d1473b40df8fadc3616c8669133f62ad1b651",
+      "modified_sha256": "2923bfb6758abed2ee10af5abc2c7a7d8b657f480d50683f15f07cde578eb0d6",
+      "modifications": "Use rungs 2048, 4096, 8192, 16384 and 32768.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/itemisation.py",
+      "destination_path": "backend/vendor/surfsense/fit/itemisation.py",
+      "original_sha256": "8bd70899df1d3d241eedbbccaec6bc9719a3ceae846706ad19452543429a706a",
+      "modified_sha256": "d262ec63276c1e63b791ef7d3b7bbebe7b13991031f8b323d3d969f51cc2e1b8",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/kv_cache.py",
+      "destination_path": "backend/vendor/surfsense/fit/kv_cache.py",
+      "original_sha256": "29e40db0427314787af1e2dba191bedb07933eb9ecf2a09abc2d48b64b41b2c5",
+      "modified_sha256": "91e301d6a9ba45bc0bb5374172c523da628a7716c214b2bf7c52505bdc72d163",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/kv_cells.py",
+      "destination_path": "backend/vendor/surfsense/fit/kv_cells.py",
+      "original_sha256": "1615d097416b215b42ed25a9aa561d06c1e92462b72745b8080aa2cc4134be55",
+      "modified_sha256": "1615d097416b215b42ed25a9aa561d06c1e92462b72745b8080aa2cc4134be55",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/mla_cache.py",
+      "destination_path": "backend/vendor/surfsense/fit/mla_cache.py",
+      "original_sha256": "6a2b9fd97266e37f07b1a2c26c64e0e3b63cf73d64fa5ab06608d24c336a167d",
+      "modified_sha256": "ce1e0dfa978b23c518dc7d449d12a3cbb71d6df749c0a6f5275057a49e171e24",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/offload.py",
+      "destination_path": "backend/vendor/surfsense/fit/offload.py",
+      "original_sha256": "d0924d9beb1223339f752d1740824cd36d6d7d83d983627a31fded0d407f1e9e",
+      "modified_sha256": "dd0134366529d79856ea376b25c0150dfb3e79314691efd07c53b6fcba6f5883",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/plan_load.py",
+      "destination_path": "backend/vendor/surfsense/fit/plan_load.py",
+      "original_sha256": "5a5d008330af676e1802e57b1ec9f5bade7ef1eff97ca4bfbab36c8d1a58ee15",
+      "modified_sha256": "cf29ee6a39014870ba2194ff1ef0eefbce0f7b0ef89f61529fcd42095fb1beba",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/precision.py",
+      "destination_path": "backend/vendor/surfsense/fit/precision.py",
+      "original_sha256": "7dfd4ed3f755736333d4b812cb15e2314feee409db994edaa1baf390b09b24d0",
+      "modified_sha256": "83e37bbbff7642a793ae37564d64edf910c6baeea0a20e60e74880dd43ec3a32",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/sliding_window.py",
+      "destination_path": "backend/vendor/surfsense/fit/sliding_window.py",
+      "original_sha256": "1b75b4a279da33eb1908ac7cb4263206970b512137a6a20c1c4fceff6ff2d7f0",
+      "modified_sha256": "1745e73726b1abf002f2e50956b95b424d2e484d55044b9816a4dc65d377acad",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/states.py",
+      "destination_path": "backend/vendor/surfsense/fit/states.py",
+      "original_sha256": "c75482a071e6be267cf3043a003da6b0743f7568453faf5be5513836ddbca46a",
+      "modified_sha256": "c75482a071e6be267cf3043a003da6b0743f7568453faf5be5513836ddbca46a",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/fit/types.py",
+      "destination_path": "backend/vendor/surfsense/fit/types.py",
+      "original_sha256": "db601ad41b71dd68e87083b80675ce3a41f68327a062739dcbd8a5bdca8e18a6",
+      "modified_sha256": "2194864401aa42b602f5689d5a63ba032c1b558e747fe9fedeaaef0c4cf38d56",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/hardware/budget.py",
+      "destination_path": "backend/vendor/surfsense/hardware/budget.py",
+      "original_sha256": "ea4d4de713b9244507146207c8bad47ca7977d1cf0d78ac2ddfdcf4f0f800c58",
+      "modified_sha256": "610e65e541e666ea51c255563b8cc30c3ffc8d3af9c7abd8d008e66debf05908",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/hardware/devices.py",
+      "destination_path": "backend/vendor/surfsense/hardware/devices.py",
+      "original_sha256": "0ff9a1a08daa7b9b41d63539c9fccd909112cfa283530372e59ab941a117400b",
+      "modified_sha256": "0ff9a1a08daa7b9b41d63539c9fccd909112cfa283530372e59ab941a117400b",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/hardware/selection.py",
+      "destination_path": "backend/vendor/surfsense/hardware/selection.py",
+      "original_sha256": "0f9d9d2157753e7582b950c0e422e31c28b3c08105a6e1803346149db614ce03",
+      "modified_sha256": "680b541f9a16da67c1ce1d021586871734821be63ccb76d974a88496a83d1296",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/hardware/system_memory.py",
+      "destination_path": "backend/vendor/surfsense/hardware/system_memory.py",
+      "original_sha256": "aef7d345b8a01cde49c1667b5e166adb992d668286688a8c7d472fc9c0ceda00",
+      "modified_sha256": "aef7d345b8a01cde49c1667b5e166adb992d668286688a8c7d472fc9c0ceda00",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/hardware/unified_pool.py",
+      "destination_path": "backend/vendor/surfsense/hardware/unified_pool.py",
+      "original_sha256": "d40a09535e519f5e6c5cf23abdf1c7e20c5c7780478742671de9920aea672041",
+      "modified_sha256": "d40a09535e519f5e6c5cf23abdf1c7e20c5c7780478742671de9920aea672041",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/admission/cost.py",
+      "destination_path": "backend/vendor/surfsense/admission/cost.py",
+      "original_sha256": "b05d2bc80f71eb1a0eda86360cad747f0da531f6d6821b85329a58595ab9882a",
+      "modified_sha256": "d844baab326543ff848648d2f5bbd4f5d919e658bf8d6255bdc02f648de978c3",
+      "modifications": "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/gguf/shape.py",
+      "destination_path": "backend/vendor/surfsense/model_shape.py",
+      "original_sha256": "3729359646a657a79d5a5659ddb3f9ede699b87a703085282b79f8ebf64eaf86",
+      "modified_sha256": "15e22dcce6de8ff01636aae617011c445c284b31b65571214c466b2a8dbd47d3",
+      "modifications": "Retain to_shape and field algorithms, replace gguf Keys import with a local metadata-key adapter, consume Ollama metadata, omit unused binary parser.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+        "# Modified: consume Ollama /api/show metadata; GGUF parser dependency omitted."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/llm/residency.py",
+      "destination_path": "backend/vendor/surfsense/residency.py",
+      "original_sha256": "71017ae9863a1e3dc61b9cf3a640fdafc40f2d79a9c02d79efe62de61ace4f70",
+      "modified_sha256": "dbe326d40d08055c23bb3cf2ed7e45d4a9c4135bc9d72e143e4cd552a6fee977",
+      "modifications": "Keep warm_selected behavior, adapt only selected-model type and local transport.",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified for WorkspaceAI: local imports; bounded 2048/4096/8192 contexts, one slot and existing q8_0 cache.",
+        "# Modified: local SelectedModel and Ollama RouterClient adapter."
+      ]
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/embedding/spec.py",
+      "destination_path": "backend/vendor/surfsense/embedding_spec.py",
+      "original_sha256": "dc9e92ecb6885ce23c96116fb098c5523b8044a37d655142274827c1f7da4b80",
+      "modified_sha256": "dc9e92ecb6885ce23c96116fb098c5523b8044a37d655142274827c1f7da4b80"
+    },
+    {
+      "source_path": "surfsense_local/backend/modules/embedding/pooling.py",
+      "destination_path": "backend/vendor/surfsense/embedding_pooling.py",
+      "original_sha256": "034a5194f20bb73ea9790669bc1cc610fb0bbc8f118abdd4fb752cfd84b86208",
+      "modified_sha256": "a439baaf37b0b2d08c36b7e626c4fe478512637ac0d4d3ba55a39dcd8b56f6c9",
+      "modification_notice": "One concise prominent source-file notice; wording consolidated without removing applicable original notices.",
+      "modification_records_from_prior_notices": [
+        "# Modified: local spec import."
+      ]
+    }
+  ],
+  "modifications": "See THIRD_PARTY_NOTICES.md and modified-file headers",
+  "excluded": [
+    "backend/plugins/proprietary",
+    "www",
+    "llama.cpp runtime",
+    "connectors",
+    "agents",
+    "hosted APIs"
+  ]
+}

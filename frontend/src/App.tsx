@@ -1,3 +1,4 @@
+import ModelPreparation from "./ModelPreparation";
 import { useEffect, useState } from "react";
 import { Check, LogIn, X } from "lucide-react";
 import {
@@ -383,6 +384,7 @@ export default function App() {
   return (
     <>
       <ThemeRuntime />
+      {!contentRoute.workspace && !route.auth && <ModelPreparation />}
       {route.auth && (
         <Auth
           mode={route.auth}

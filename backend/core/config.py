@@ -12,7 +12,22 @@ class Settings:
     llm_provider: str = os.getenv("LLM_PROVIDER", "mock")
     ollama_base_url: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     ollama_model: str = os.getenv("OLLAMA_MODEL", "qwen2.5:3b")
-    ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+    # F1 generation is isolated from the legacy/F3 Ollama model.
+    f1_generation_model: str = os.getenv("F1_GENERATION_MODEL", "qwen3.5:9b-q4_K_M")
+    # Invalid values remain distinguishable from the explicit OFF mode.
+    f1_generation_think: bool | None = {"true": True, "false": False}.get(
+        os.getenv("F1_GENERATION_THINK", "true").strip().lower()
+    )
+    # F1-only generation window and total Thinking + final token budget.
+    f1_generation_num_ctx: int = int(os.getenv("F1_GENERATION_NUM_CTX", "8192"))
+    f1_generation_num_predict: int = int(os.getenv("F1_GENERATION_NUM_PREDICT", "4096"))
+    ollama_embed_model: str = os.getenv("OLLAMA_EMBED_MODEL", "qwen3-embedding:0.6b")
+    ollama_embed_timeout: float = float(os.getenv("OLLAMA_EMBED_TIMEOUT", "60"))
+    ollama_embed_batch_size: int = int(os.getenv("OLLAMA_EMBED_BATCH_SIZE", "32"))
+    ollama_embed_query_instruction: str = os.getenv(
+        "OLLAMA_EMBED_QUERY_INSTRUCTION",
+        "Given a search query, retrieve relevant passages that answer the query",
+    )
     gemini_api_key: str = os.getenv("GEMINI_API_KEY", "")
     gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
     

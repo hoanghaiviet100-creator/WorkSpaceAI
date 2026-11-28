@@ -19,6 +19,12 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
 
+# Optional, qualified F1 CPU verifier; shared requirements stay unchanged.
+ARG F1_NLI_ENABLED=0
+COPY deploy/f1/requirements-nli.txt /app/deploy/f1/requirements-nli.txt
+RUN if [ "$F1_NLI_ENABLED" = "1" ]; then \
+    pip install --no-cache-dir -r /app/deploy/f1/requirements-nli.txt; fi
+
 # Copy application source code and configurations (excluding test files for production security)
 COPY backend /app/backend
 COPY frontend /app/frontend

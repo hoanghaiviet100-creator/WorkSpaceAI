@@ -117,6 +117,10 @@ export type Draft = {
   };
 };
 export type Message = {
+  citationChecked?: boolean;
+  citationKeys?: Record<string, string>;
+  sourceCoverage?: string;
+  responseLatencyMs?: number;
   id: string;
   request: string;
   mode: Mode;

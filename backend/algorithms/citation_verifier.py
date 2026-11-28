@@ -22,6 +22,7 @@ Validation Pipeline:
 """
 from dataclasses import dataclass, field
 import re
+import unicodedata
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 
@@ -145,10 +146,185 @@ def _to_claim_dataclass(item: Any) -> CitationClaim:
     )
 
 
+def build_f1_citation_lookup(chunks: Sequence[Any]) -> Dict[Any, Any]:
+    """Build trusted physical line maps without repository aliases or external I/O."""
+    lookup: Dict[Any, Any] = {}
+    provenance: Dict[str, set] = {}
+    conflicts = set()
+    for chunk in chunks:
+        doc = chunk.doc_id
+        metadata = (chunk.doc_version, chunk.doc_hash)
+        provenance.setdefault(doc, set()).add(metadata)
+        key = (doc, chunk.page_number)
+        entry = lookup.setdefault(key, {
+            "doc_names": set(), "line_map": {},
+            "doc_version": chunk.doc_version, "doc_hash": chunk.doc_hash,
+        })
+        entry["doc_names"].add(chunk.doc_name)
+        lines = chunk.text.splitlines()
+        if chunk.start_line < 1 or chunk.end_line < chunk.start_line or len(lines) != chunk.end_line - chunk.start_line + 1:
+            conflicts.add(doc)
+        for offset, line in enumerate(lines):
+            number = chunk.start_line + offset
+            if number in entry["line_map"] and entry["line_map"][number] != line:
+                conflicts.add(doc)
+            entry["line_map"][number] = line
+    for (doc, _), entry in lookup.items():
+        entry["conflicting_provenance"] = doc in conflicts or len(provenance[doc]) != 1
+    return lookup
+
+
+def _f1_lexical_character(char: str) -> bool:
+    """Unicode letters, marks, numbers and connectors belong to lexical tokens."""
+    category = unicodedata.category(char)
+    return category[0] in "LMN" or category == "Pc"
+
+
+def _f1_quote_matches(line_map: Dict[int, str], quote: str) -> List[Tuple[int, int, str]]:
+    """Locate whitespace-equivalent text in contiguous physical lines, preserving symbols/case."""
+    if not quote.strip():
+        return []
+    pattern = re.compile("(?=(" + r"\s+".join(re.escape(t) for t in quote.split()) + "))")
+    groups: List[List[int]] = []
+    for number in sorted(line_map):
+        if not groups or number != groups[-1][-1] + 1:
+            groups.append([])
+        groups[-1].append(number)
+    matches = []
+    for numbers in groups:
+        text = "\n".join(line_map[n] for n in numbers)
+        # Protect complete numerical tokens, including Unicode signs/numerals,
+        # spaced signs, common grouping/decimal forms, exponents and percentages.
+        sign = r"[+\-−﹣－‒–⁻₋﹢＋±]"
+        digit = r"[\d" + re.escape("".join(sorted({c for c in text if unicodedata.category(c)[0] == "N"}))) + "]"
+        number = (
+            rf"(?:{sign}\s*)?[.,٫．，]?{digit}+"
+            rf"(?:(?:[.,٫٬．，'’]{digit}+)|(?:[ \u00a0\u202f]{digit}{{3}}(?!{digit})))*"
+            rf"(?:[eE](?:{sign}\s*)?{digit}+|[⁺⁻₊₋][⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]+)?"
+            r"(?:\s*[%٪％‰‱])?"
+        )
+        protected = [m.span() for m in re.finditer(number + r"|[<>=!]=|->|=>|&&|\|\|", text)]
+        for match in pattern.finditer(text):
+            start, end = match.span(1)
+            # Never start/end inside a Unicode lexical token or combining glyph.
+            if start and ((_f1_lexical_character(text[start - 1]) and _f1_lexical_character(text[start]))
+                          or unicodedata.category(text[start])[0] == "M"):
+                continue
+            if end < len(text) and ((_f1_lexical_character(text[end - 1]) and _f1_lexical_character(text[end]))
+                                    or unicodedata.category(text[end])[0] == "M"):
+                continue
+            if any(a < end and start < b and (start > a or end < b) for a, b in protected):
+                continue
+            start_line = numbers[text[:start].count("\n")]
+            end_line = numbers[text[:end - 1].count("\n")]
+            matches.append((start_line, end_line, match.group(1)))
+    return matches
+
+
+def _verify_f1_citations(
+    claims: Sequence[Any], chunk_lookup: Dict[Any, Any], allow_locator_correction: bool,
+) -> CitationVerificationResult:
+    """Strict F1 quote/provenance checks. This does not evaluate claim entailment."""
+    documents: Dict[str, List[Tuple[int, Dict[str, Any]]]] = {}
+    for key, entry in chunk_lookup.items():
+        if isinstance(key, tuple) and len(key) == 2 and isinstance(entry, dict):
+            documents.setdefault(key[0], []).append((key[1], entry))
+    validated, flagged = [], []
+    for raw in claims:
+        c = _to_claim_dataclass(raw)
+        c.match_score, c.matched_span, c.verification_status = 0.0, None, "UNVERIFIED"
+
+        def reject(reason: str) -> None:
+            c.verification_status = reason
+            flagged.append(c)
+
+        # An exact canonical ID takes precedence over document-name aliases.
+        if c.cited_doc_id in documents:
+            candidates = [c.cited_doc_id]
+        else:
+            supplied = c.cited_doc_id.casefold()
+            candidates = []
+            for doc, pages in documents.items():
+                names = {doc}
+                for _, entry in pages:
+                    names.update(entry.get("doc_names", []))
+                aliases = {n.casefold() for n in names}
+                if "." not in c.cited_doc_id:
+                    aliases.update(n.rsplit(".", 1)[0].casefold() for n in names if "." in n)
+                if supplied in aliases:
+                    candidates.append(doc)
+        if len(candidates) != 1:
+            reject("AMBIGUOUS_DOC_ID" if candidates else "INVALID_DOC_ID")
+            continue
+        doc = candidates[0]
+        pages = documents[doc]
+        metadata = {(e.get("doc_version"), e.get("doc_hash")) for _, e in pages}
+        if len(metadata) != 1 or any(e.get("conflicting_provenance") for _, e in pages):
+            reject("CONFLICTING_PROVENANCE")
+            continue
+        version, digest = next(iter(metadata))
+        if not version or not digest:
+            reject("MISSING_PROVENANCE")
+            continue
+        if c.doc_version is not None and c.doc_version != version:
+            reject("VERSION_MISMATCH")
+            continue
+        if c.doc_hash is not None and c.doc_hash != digest:
+            reject("HASH_MISMATCH")
+            continue
+        if not c.evidence_quote.strip():
+            reject("UNGROUNDED_QUOTE")
+            continue
+
+        all_matches = []
+        intended = []
+        valid_range = False
+        page_exists = False
+        range_ordered = (type(c.cited_start_line) is int and type(c.cited_end_line) is int
+                         and 0 < c.cited_start_line <= c.cited_end_line)
+        for page, entry in pages:
+            line_map = entry.get("line_map", {})
+            matches = _f1_quote_matches(line_map, c.evidence_quote)
+            all_matches.extend((page, start, end, span) for start, end, span in matches)
+            if page == c.cited_page:
+                page_exists = True
+                valid_range = range_ordered and all(n in line_map for n in range(c.cited_start_line, c.cited_end_line + 1))
+                if valid_range:
+                    # Retain full-page boundary context (a spaced sign may be on
+                    # the previous line), while requiring the match inside this span.
+                    intended = [(page, start, end, span) for start, end, span in matches
+                                if c.cited_start_line <= start and end <= c.cited_end_line]
+        if intended:
+            chosen = intended[0]
+        elif allow_locator_correction and len(all_matches) == 1:
+            chosen = all_matches[0]
+            c.cited_page, c.cited_start_line, c.cited_end_line = chosen[:3]
+        else:
+            if allow_locator_correction and len(all_matches) > 1:
+                reason = "AMBIGUOUS_LOCATOR"
+            elif not page_exists:
+                reason = "INVALID_SOURCE_PAGE"
+            elif not range_ordered:
+                reason = "INVALID_LINE_RANGE"
+            elif not valid_range:
+                reason = "LINE_OUT_OF_RANGE"
+            else:
+                reason = "UNGROUNDED_QUOTE"
+            reject(reason)
+            continue
+        c.cited_doc_id, c.doc_version, c.doc_hash = doc, version, digest
+        c.verification_status, c.match_score, c.matched_span = "VERIFIED_EXACT", 1.0, chosen[3]
+        validated.append(c)
+    return CitationVerificationResult(validated, flagged, round(len(validated) / max(1, len(claims)), 4))
+
+
 def verify_citations(
     claims: Sequence[Union[CitationClaim, Any]],
     chunk_lookup: Dict[Any, Any],
     theta_match: float = 0.75,
+    *,
+    strict: bool = False,
+    allow_locator_correction: bool = False,
 ) -> CitationVerificationResult:
     """
     R2 Deterministic Capability #2:
@@ -159,11 +335,17 @@ def verify_citations(
     - chunk_lookup: Mapping from (doc_id, page_number) to:
         * str: Page text content (standard format).
         * dict: Rich provenance dict with keys 'text', 'total_lines', 'doc_version', 'doc_hash'.
-    - theta_match: Minimum threshold for Token-LCS / fuzzy overlap (default 0.75).
+    - theta_match: Minimum threshold for legacy Token-LCS / fuzzy overlap.
+    - strict: F1 exact whitespace-equivalent quote and trusted line/provenance checks.
+    - allow_locator_correction: In strict mode, recover only a unique same-document span.
 
     Returns:
     - CitationVerificationResult containing validated_claims, hallucination_flags, and grounding_score.
     """
+    # F1 opts in; preserve legacy fuzzy matching for existing direct callers.
+    if strict:
+        return _verify_f1_citations(claims, chunk_lookup, allow_locator_correction)
+
     validated: List[CitationClaim] = []
     flagged: List[CitationClaim] = []
     verified_count = 0

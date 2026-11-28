@@ -14,6 +14,7 @@ import io
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 from datetime import date
 from typing import List
 
@@ -33,6 +34,14 @@ from backend.algorithms.citation_verifier import (
 class TestFeature1GroundedQA(unittest.TestCase):
     def setUp(self):
         settings.llm_provider = "mock"
+        # These citation/routing/API unit tests explicitly use BM25. Semantic HTTP
+        # behavior is covered with controlled transports in test_embedding_provider.py.
+        self._embedding_patch = patch.object(workspace_repository, "_embed_fn", None)
+        self._dense_patch = patch.object(workspace_repository, "dense_available", False)
+        self._embedding_patch.start()
+        self._dense_patch.start()
+        self.addCleanup(self._embedding_patch.stop)
+        self.addCleanup(self._dense_patch.stop)
         workspace_repository.seed_demo_workspace()
         self.client = TestClient(app)
 
@@ -328,20 +337,15 @@ class TestFeature1GroundedQA(unittest.TestCase):
         self.assertIn("Line 3:", html)
         self.assertEqual(html.count('<mark class="cite-mark">'), html.count("</mark>"))
 
-    def test_11_notebooklm_comprehensive_document_summary(self):
-        """Verifies NotebookLM-level comprehensive briefing with multi-page citations."""
+    def test_11_unverified_multisource_summary_abstains_without_phantom_citations(self):
+        """M2: unbound briefing prose cannot acquire page-based verified labels."""
         res = qa_service.summarize_document("Project_Brief.pdf")
-        self.assertEqual(res["status"], "SUMMARY_GENERATED")
-        summary = res["summary"]
-        self.assertTrue("Tổng quan" in summary or "Executive Briefing" in summary)
-        self.assertTrue("Yêu cầu" in summary or "Themes" in summary)
-        self.assertTrue("Hạn chót" in summary or "Deadlines" in summary or "Mốc Thời hạn" in summary)
-        self.assertTrue("Khuyến nghị" in summary or "Lưu ý" in summary or "Takeaways" in summary)
-        # Verified citations provided across pages
-        self.assertGreaterEqual(len(res["validated_claims"]), 2)
-        pages_cited = {c.cited_page for c in res["validated_claims"]}
-        self.assertIn(3, pages_cited)
-        self.assertIn(6, pages_cited)
+        self.assertEqual(res["status"], "ABSTAINED_INSUFFICIENT_EVIDENCE")
+        self.assertEqual(res["summary"], "")
+        self.assertEqual(res["validated_claims"], [])
+        self.assertEqual(res["grounding_score"], 0.0)
+        self.assertTrue(res["hallucination_flags"])
+        self.assertTrue(all(not c.claim_text and not c.evidence_quote for c in res["hallucination_flags"]))
 
     def test_12_flexible_doc_id_matching(self):
         """Verifies citation verifier tolerates case differences and missing .pdf extension."""

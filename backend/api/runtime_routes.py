@@ -26,3 +26,10 @@ def configure_gemini(req: GeminiConfigRequest) -> Dict[str, Any]:
         return runtime_service.configure_gemini(req.api_key)
     except PermissionError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get('/generation-ready')
+def generation_readiness(language: str = 'en'):
+    from backend.services.generation_readiness import readiness, enabled
+    if not enabled(): return dict(ready=True,preparing=False,message='')
+    return readiness.public(language=='vi')
